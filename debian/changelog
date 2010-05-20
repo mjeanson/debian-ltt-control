@@ -1,0 +1,5 @@
+ltt-control (0.86-19052010-1) unstable; urgency=low
+
+  * Initial release (Closes: #570042)
+
+ -- Jon Bernard <jbernard@debian.org>  Thu, 20 May 2010 19:20:24 -0400

@@ -1,0 +1,81 @@
+Source: ltt-control
+Section: libs
+Priority: extra
+Maintainer: Jon Bernard <jbernard@debian.org>
+Build-Depends: debhelper (>= 7), autotools-dev
+Standards-Version: 3.8.4
+Vcs-Git: git://git.debian.org/git/collab-maint/ltt-control.git
+Vcs-Browser: http://git.debian.org/?p=collab-maint/ltt-control.git;a=summary
+Homepage: http://lttng.org/
+
+Package: ltt-bin
+Section: utils
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Tools to control kernel tracing with LTTng
+ The LTTng project aims at providing highly efficient tracing tools for Linux.
+ Its tracers help tracking down performance issues and debugging problems
+ involving multiple concurrent processes and threads. Tracing across multiple
+ systems is also possible.
+ .
+ ltt-control is the part of the LTTng that allows a machine to be traced.
+ .
+ This package contains the daemon with which the kernel will communicate and
+ the application that starts and terminates tracing.
+
+Package: liblttd0
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: A library to communicate with the LTTng daemon
+ The LTTng project aims at providing highly efficient tracing tools for Linux.
+ Its tracers help tracking down performance issues and debugging problems
+ involving multiple concurrent processes and threads. Tracing across multiple
+ systems is also possible.
+ .
+ ltt-control is the part of the LTTng that allows a machine to be traced.
+ .
+ This library allows applications to communicate with the kernel tracer daemon.
+
+Package: liblttd-dev
+Section: libdevel
+Architecture: any
+Depends: ${misc:Depends}, liblttd0 (= ${binary:Version})
+Description: A library to communicate with the LTTng daemon - development files
+ The LTTng project aims at providing highly efficient tracing tools for Linux.
+ Its tracers help tracking down performance issues and debugging problems
+ involving multiple concurrent processes and threads. Tracing across multiple
+ systems is also possible.
+ .
+ ltt-control is the part of the LTTng that allows a machine to be traced.
+ .
+ This package provides the header files necessary to develop applications using
+ liblttd.
+
+Package: liblttctl0
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: A library to communicate with the LTTng control module
+ The LTTng project aims at providing highly efficient tracing tools for Linux.
+ Its tracers help tracking down performance issues and debugging problems
+ involving multiple concurrent processes and threads. Tracing across multiple
+ systems is also possible.
+ .
+ ltt-control is the part of the LTTng that allows a machine to be traced.
+ .
+ This library allows applications to communicate with the kernel tracer control
+ module.
+
+Package: liblttctl-dev
+Section: libdevel
+Architecture: any
+Depends: ${misc:Depends}, liblttctl0 (= ${binary:Version})
+Description: A library to communicate with the LTTng control module - development files
+ The LTTng project aims at providing highly efficient tracing tools for Linux.
+ Its tracers help tracking down performance issues and debugging problems
+ involving multiple concurrent processes and threads. Tracing across multiple
+ systems is also possible.
+ .
+ ltt-control is the part of the LTTng that allows a machine to be traced.
+ .
+ This package provides the header files necessary to develop applications using
+ liblttctl.

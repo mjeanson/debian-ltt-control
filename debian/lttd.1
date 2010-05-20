@@ -1,0 +1,61 @@
+.\" generated with Ronn/v0.5
+.\" http://github.com/rtomayko/ronn/
+.
+.TH "LTTD" "1" "May 2010" "" ""
+.
+.SH "NAME"
+\fBlttd\fR \-\- linux trace toolkit daemon
+.
+.SH "SYNOPSIS"
+\fBlttd\fR [\fIoptions\fR]...
+.
+.SH "DESCRIPTION"
+\fBlttd\fR is a simple daemon that reads a few LTTng debugfs channels and saves
+them in a trace on the virtual file system.
+.
+.P
+CPU hot\-plugging is supported using inotify.
+.
+.SH "OPTIONS"
+.
+.TP
+\fB\-t\fR directory
+Directory name of the trace to write to. It will be created.
+.
+.TP
+\fB\-c\fR directory
+Root directory of the debugfs trace channels.
+.
+.TP
+\fB\-d\fR
+Run in background (daemon).
+.
+.TP
+\fB\-a\fR
+Append to an possibly existing trace.
+.
+.TP
+\fB\-N\fR
+Number of threads to start.
+.
+.TP
+\fB\-f\fR
+Dump only flight recorder channels.
+.
+.TP
+\fB\-n\fR
+Dump only normal channels.
+.
+.TP
+\fB\-v\fR
+Verbose mode.
+.
+.SH "AUTHOR"
+\fBlttd\fR was written by Mathieu Desnoyers
+<mathieu.desnoyers@efficios.com>, Michael Sills\-Lavoie
+<michael.sills\-lavoie@polymtl.ca>, and Oumarou Dicko
+<oumarou.dicko@polymtl.ca>.
+.
+.P
+This manual page was written by Jon Bernard <jbernard@debian.org>, for
+the Debian project (and may be used by others).

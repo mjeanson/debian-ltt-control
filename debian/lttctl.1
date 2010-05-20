@@ -1,0 +1,94 @@
+.\" generated with Ronn/v0.5
+.\" http://github.com/rtomayko/ronn/
+.
+.TH "LTTCTL" "1" "May 2010" "" ""
+.
+.SH "NAME"
+\fBlttctl\fR \-\- linux trace toolkit control
+.
+.SH "SYNOPSIS"
+\fBlttctl\fR [\fIoptions\fR]... [\fItracename\fR]
+.
+.SH "DESCRIPTION"
+\fBlttctl\fR is a small program that controls LTTng through liblttctl.
+.
+.SH "OPTIONS"
+.
+.IP "\(bu" 4
+\fB\-h\fR, \fB\-\-help\fR:
+Show summary of options.
+.
+.IP "\(bu" 4
+\fB\-c\fR, \fB\-\-create\fR:
+Create a trace.
+.
+.IP "\(bu" 4
+\fB\-d\fR, \fB\-\-destroy\fR:
+Destroy a trace.
+.
+.IP "\(bu" 4
+\fB\-s\fR, \fB\-\-start\fR:
+Start a trace.
+.
+.IP "\(bu" 4
+\fB\-p\fR, \fB\-\-pause\fR:
+Pause a trace.
+.
+.IP "\(bu" 4
+\fB\-\-transport TRANSPORT\fR:
+Set trace's transport. (ex. relay\-locked or relay)
+.
+.IP "\(bu" 4
+\fB\-o\fR, \fB\-\-option OPTION\fR
+Set options, following operations are supported:
+.
+.IP "" 4
+.
+.nf
+
+channel.<channelname>.enable=
+channel.<channelname>.overwrite=
+channel.<channelname>.bufnum=
+channel.<channelname>.bufsize= (in bytes, rounded to next power of 2)
+<channelname> can be set to all for all channels
+channel.<channelname>.switch_timer= (timer interval in ms)
+.
+.fi
+.
+.IP "" 0
+
+.
+.IP "\(bu" 4
+\fB\-C\fR, \fB\-\-create_start\fR:
+Create and start a trace.
+.
+.IP "\(bu" 4
+\fB\-D\fR, \fB\-\-pause_destroy\fR:
+Pause and destroy a trace.
+.
+.IP "\(bu" 4
+\fB\-w\fR, \fB\-\-write PATH\fR:
+Path for write trace datas. For \-c, \-C, \-d, \-D options.
+.
+.IP "\(bu" 4
+\fB\-a\fR, \fB\-\-append\fR:
+Append to trace, For \-w option.
+.
+.IP "\(bu" 4
+\fB\-n\fR, \fB\-\-dump_threads NUMBER\fR:
+Number of lttd threads, For \-w option.
+.
+.IP "\(bu" 4
+\fB\-\-channel_root PATH\fR:
+Set channels root path, For \-w option. (ex. /mnt/debugfs/ltt)
+.
+.IP "" 0
+.
+.SH "AUTHOR"
+\fBlttctl\fR was written by Zhao Lei <zhaolei@cn.fujitsu.com>, Gui Jianfeng
+<guijianfeng@cn.fujitsu.com>, and Mathieu Desnoyers
+<mathieu.desnoyers@efficios.com>.
+.
+.P
+This manual page was written by Jon Bernard <jbernard@debian.org>, for
+the Debian project (and may be used by others).
