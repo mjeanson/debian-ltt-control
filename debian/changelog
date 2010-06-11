@@ -1,3 +1,9 @@
+ltt-control (0.87-09062010-1) unstable; urgency=low
+
+  * [caaaca] Imported Upstream version 0.87-09062010
+
+ -- Jon Bernard <jbernard@debian.org>  Fri, 11 Jun 2010 09:35:25 -0400
+
 ltt-control (0.86-19052010-1) unstable; urgency=low
 
   * Initial release (Closes: #570042)
