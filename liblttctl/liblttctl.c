@@ -731,7 +731,7 @@ int lttctl_set_channel_switch_timer(const char *name, const char *channel,
 		goto arg_error;
 
 	if (strcmp(channel, "all")) {
-		ret = __lttctl_set_channel_subbuf_size(name, channel,
+		ret = __lttctl_set_channel_switch_timer(name, channel,
 			switch_timer);
 		if (ret)
 			goto op_err;
