@@ -2826,7 +2826,7 @@ fi
 
 # Define the identity of the package.
  PACKAGE=ltt-control
- VERSION=0.87-09062010
+ VERSION=0.88-09242010
 
 
 cat >>confdefs.h <<_ACEOF

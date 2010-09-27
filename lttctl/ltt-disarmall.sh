@@ -17,6 +17,8 @@
 
 DEBUGFSROOT=$(awk '{if ($3 == "debugfs") print $2}' /proc/mounts | head -n 1)
 MARKERSROOT=${DEBUGFSROOT}/ltt/markers
+DEFAULTMODULES="ltt-trace-control ltt-marker-control ltt-kprobes ltt-userspace-event ltt-statedump ipc-trace kernel-trace mm-trace net-trace fs-trace jbd2-trace syscall-trace trap-trace block-trace rcu-trace ltt-relay ltt-tracer"
+EXTRAMODULES="lockdep-trace net-extended-trace"
 
 usage () {
 	echo "Usage: $0 [OPTION]..." > /dev/stderr
@@ -27,6 +29,11 @@ usage () {
 	printf "\t-h           Print this help\n" > /dev/stderr
 	echo "" > /dev/stderr
 }
+
+if [ "$(id -u)" != "0" ]; then
+	echo "Error: This script needs to be run as root." > /dev/stderr
+	exit 1;
+fi
 
 if [ ! "${DEBUGFSROOT}" ]; then
 	echo "Error: debugfs not mounted" > /dev/stderr
@@ -59,3 +66,12 @@ shift $((${OPTIND} - 1))
 	fi
 	echo 0 > ${marker}
 done
+
+#Unload the kernel modules
+for i in ${EXTRAMODULES}; do
+	rmmod $i 2> /dev/null
+done
+for i in ${DEFAULTMODULES}; do
+	rmmod $i
+done
+
