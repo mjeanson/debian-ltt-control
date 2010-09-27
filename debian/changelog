@@ -1,3 +1,10 @@
+ltt-control (0.88-09242010-1) unstable; urgency=low
+
+  * [cff0f9] Imported Upstream version 0.88-09242010
+  * [ab4374] Bump standards version to 3.9.1, no changes necessary
+
+ -- Jon Bernard <jbernard@debian.org>  Sun, 26 Sep 2010 21:48:13 -0400
+
 ltt-control (0.87-09062010-1) unstable; urgency=low
 
   * [caaaca] Imported Upstream version 0.87-09062010
