@@ -17,6 +17,7 @@
 
 DEBUGFSROOT=$(awk '{if ($3 == "debugfs") print $2}' /proc/mounts | head -n 1)
 MARKERSROOT=${DEBUGFSROOT}/ltt/markers
+DEFAULTMODULES="ltt-trace-control ltt-marker-control ltt-tracer ltt-relay ltt-kprobes ltt-userspace-event ltt-statedump ipc-trace kernel-trace mm-trace net-trace fs-trace jbd2-trace syscall-trace trap-trace block-trace rcu-trace"
 
 usage () {
 	echo "Usage: $0 [OPTION]..." > /dev/stderr
@@ -32,14 +33,25 @@ usage () {
 	echo "" > /dev/stderr
 }
 
+if [ "$(id -u)" != "0" ]; then
+	echo "Error: This script needs to be run as root." > /dev/stderr
+	exit 1;
+fi
+
 if [ ! "${DEBUGFSROOT}" ]; then
 	echo "Error: debugfs not mounted" > /dev/stderr
 	exit 1;
 fi
 
 if [ ! -d "${MARKERSROOT}" ]; then
-	echo "Error: LTT trace controller not found (did you compile and load LTTng?)" > /dev/stderr
-	exit 1;
+	#Try loading the kernel modules first
+	for i in ${DEFAULTMODULES}; do
+		modprobe $i
+	done
+	if [ ! -d "${MARKERSROOT}" ]; then
+		echo "Error: LTT trace controller not found (did you compile and load LTTng?)" > /dev/stderr
+		exit 1;
+	fi
 fi
 
 while getopts "lnqh" options; do
@@ -59,10 +71,14 @@ shift $((${OPTIND} - 1))
 
 if [ ! ${LOCKING} ]; then
 	TESTS="${TESTS} -name lockdep -prune -o -name locking -prune -o"
+else
+	modprobe lockdep-trace
 fi
 
 if [ ! ${NETWORK} ]; then
 	TESTS="${TESTS} -path '*/net/*_extended' -prune -o"
+else
+	modprobe net-extended-trace
 fi
 
 if [ ! ${INPUT} ]; then
