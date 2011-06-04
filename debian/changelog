@@ -1,3 +1,10 @@
+ltt-control (0.88-09242010-2) unstable; urgency=low
+
+  * [39296c6] Update watchfile url
+  * [9962282] Remove unneeded .la files (Closes: #622462)
+
+ -- Jon Bernard <jbernard@debian.org>  Sat, 04 Jun 2011 16:10:46 -0400
+
 ltt-control (0.88-09242010-1) unstable; urgency=low
 
   * [cff0f9] Imported Upstream version 0.88-09242010
