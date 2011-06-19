@@ -26,7 +26,7 @@ Description: Tools to control kernel tracing with LTTng
 Package: liblttd0
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: A library to communicate with the LTTng daemon
+Description: Library to communicate with the LTTng daemon
  The LTTng project aims at providing highly efficient tracing tools for Linux.
  Its tracers help tracking down performance issues and debugging problems
  involving multiple concurrent processes and threads. Tracing across multiple
@@ -40,7 +40,7 @@ Package: liblttd-dev
 Section: libdevel
 Architecture: any
 Depends: ${misc:Depends}, liblttd0 (= ${binary:Version})
-Description: A library to communicate with the LTTng daemon - development files
+Description: Library to communicate with the LTTng daemon - development files
  The LTTng project aims at providing highly efficient tracing tools for Linux.
  Its tracers help tracking down performance issues and debugging problems
  involving multiple concurrent processes and threads. Tracing across multiple
@@ -54,7 +54,7 @@ Description: A library to communicate with the LTTng daemon - development files
 Package: liblttctl0
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: A library to communicate with the LTTng control module
+Description: Library to communicate with the LTTng control module
  The LTTng project aims at providing highly efficient tracing tools for Linux.
  Its tracers help tracking down performance issues and debugging problems
  involving multiple concurrent processes and threads. Tracing across multiple
@@ -69,7 +69,7 @@ Package: liblttctl-dev
 Section: libdevel
 Architecture: any
 Depends: ${misc:Depends}, liblttctl0 (= ${binary:Version})
-Description: A library to communicate with the LTTng control module - development files
+Description: Library to communicate with the LTTng control module - development files
  The LTTng project aims at providing highly efficient tracing tools for Linux.
  Its tracers help tracking down performance issues and debugging problems
  involving multiple concurrent processes and threads. Tracing across multiple
