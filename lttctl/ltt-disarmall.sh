@@ -21,27 +21,27 @@ DEFAULTMODULES="ltt-trace-control ltt-marker-control ltt-kprobes ltt-userspace-e
 EXTRAMODULES="lockdep-trace net-extended-trace"
 
 usage () {
-	echo "Usage: $0 [OPTION]..." > /dev/stderr
-	echo "Disconnect lttng markers" > /dev/stderr
-	echo "" > /dev/stderr
-	echo "Options:" > /dev/stderr
-	printf "\t-q           Quiet mode, suppress output\n" > /dev/stderr
-	printf "\t-h           Print this help\n" > /dev/stderr
-	echo "" > /dev/stderr
+	echo "Usage: $0 [OPTION]..." 1>&2
+	echo "Disconnect lttng markers" 1>&2
+	echo "" 1>&2
+	echo "Options:" 1>&2
+	printf "\t-q           Quiet mode, suppress output\n" 1>&2
+	printf "\t-h           Print this help\n" 1>&2
+	echo "" 1>&2
 }
 
 if [ "$(id -u)" != "0" ]; then
-	echo "Error: This script needs to be run as root." > /dev/stderr
+	echo "Error: This script needs to be run as root." 1>&2
 	exit 1;
 fi
 
 if [ ! "${DEBUGFSROOT}" ]; then
-	echo "Error: debugfs not mounted" > /dev/stderr
+	echo "Error: debugfs not mounted" 1>&2
 	exit 1;
 fi
 
 if [ ! -d "${MARKERSROOT}" ]; then
-	echo "Error: LTT trace controller not found (did you compile and load LTTng?)" > /dev/stderr
+	echo "Error: LTT trace controller not found (did you compile and load LTTng?)" 1>&2
 	exit 1;
 fi
 

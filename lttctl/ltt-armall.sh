@@ -20,26 +20,26 @@ MARKERSROOT=${DEBUGFSROOT}/ltt/markers
 DEFAULTMODULES="ltt-trace-control ltt-marker-control ltt-tracer ltt-relay ltt-kprobes ltt-userspace-event ltt-statedump ipc-trace kernel-trace mm-trace net-trace fs-trace jbd2-trace syscall-trace trap-trace block-trace rcu-trace"
 
 usage () {
-	echo "Usage: $0 [OPTION]..." > /dev/stderr
-	echo "Connect lttng markers" > /dev/stderr
-	echo "" > /dev/stderr
-	echo "Options:" > /dev/stderr
-	printf "\t-l           Also activate locking markers (high traffic)\n" > /dev/stderr
-	printf "\t-n           Also activate detailed network markers (large size)\n" > /dev/stderr
-	printf "\t-i           Also activate input subsystem events (security implication: records keyboard inputs)\n" > /dev/stderr
-	echo "" > /dev/stderr
-	printf "\t-q           Quiet mode, suppress output\n" > /dev/stderr
-	printf "\t-h           Print this help\n" > /dev/stderr
-	echo "" > /dev/stderr
+	echo "Usage: $0 [OPTION]..." 1>&2
+	echo "Connect lttng markers" 1>&2
+	echo "" 1>&2
+	echo "Options:" 1>&2
+	printf "\t-l           Also activate locking markers (high traffic)\n" 1>&2
+	printf "\t-n           Also activate detailed network markers (large size)\n" 1>&2
+	printf "\t-i           Also activate input subsystem events (security implication: records keyboard inputs)\n" 1>&2
+	echo "" 1>&2
+	printf "\t-q           Quiet mode, suppress output\n" 1>&2
+	printf "\t-h           Print this help\n" 1>&2
+	echo "" 1>&2
 }
 
 if [ "$(id -u)" != "0" ]; then
-	echo "Error: This script needs to be run as root." > /dev/stderr
+	echo "Error: This script needs to be run as root." 1>&2
 	exit 1;
 fi
 
 if [ ! "${DEBUGFSROOT}" ]; then
-	echo "Error: debugfs not mounted" > /dev/stderr
+	echo "Error: debugfs not mounted" 1>&2
 	exit 1;
 fi
 
@@ -49,7 +49,7 @@ if [ ! -d "${MARKERSROOT}" ]; then
 		modprobe $i
 	done
 	if [ ! -d "${MARKERSROOT}" ]; then
-		echo "Error: LTT trace controller not found (did you compile and load LTTng?)" > /dev/stderr
+		echo "Error: LTT trace controller not found (did you compile and load LTTng?)" 1>&2
 		exit 1;
 	fi
 fi
