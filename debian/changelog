@@ -1,3 +1,11 @@
+ltt-control (0.89-05122011-1) unstable; urgency=low
+
+  * [35237d1] New upstream version 0.89-05122011
+  * [14b682b] Bump standards version to 3.9.2, no changes necessary
+  * [c569a54] Remove article from start of description synopses
+
+ -- Jon Bernard <jbernard@debian.org>  Sun, 19 Jun 2011 09:29:46 -0400
+
 ltt-control (0.88-09242010-2) unstable; urgency=low
 
   * [39296c6] Update watchfile url
