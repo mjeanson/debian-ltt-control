@@ -3,7 +3,7 @@ Section: libs
 Priority: extra
 Maintainer: Jon Bernard <jbernard@debian.org>
 Build-Depends: debhelper (>= 7), autotools-dev
-Standards-Version: 3.9.1
+Standards-Version: 3.9.2
 Vcs-Git: git://git.debian.org/git/collab-maint/ltt-control.git
 Vcs-Browser: http://git.debian.org/?p=collab-maint/ltt-control.git;a=summary
 Homepage: http://lttng.org/
