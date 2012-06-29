@@ -1,0 +1,283 @@
+2012-06-22 lttng-tools 2.0.3
+	* Fix: enable event loglevel match function
+	* Fix: unchecked pointer from getenv() for lttng create
+	* Ship license text file with the release archive
+
+2012-06-14 lttng-tools 2.0.2
+	* Fix: enable event with different loglevel error
+	* Fix: move memset in channel_set_attr after NULL check
+	* Fix: close all file descriptors when executed as daemon
+	* Fix: clang llvm warnings
+	* Add CodingStyle to tarball
+	* Add coding style document
+
+2012-04-19 lttng-tools 2.0.1
+	* Fix: test script for kernel module validation
+	* Fix: report error to client on consumerd error
+	* Fix: add missing ht_destroy at consumer teardown
+	* Fix: consumer fd recv thread should write into non-blocking pipe
+	* Fix: work-around glibc __nptl_setxid vs clone hang
+	* Fix: consumer fd recv poll should be sensitive to POLLPRI too
+	* Fix consumer lttng_consumer_poll_socket poll revents check bug
+	* Fix: increase consumer open files limit
+	* Update README: document dep on modprobe for kernel tracing
+	* Fix: wait for sessiond to stop in tests
+	* Fix: remove unused return variable
+	* Don't report back error on syscalls fail for -a -k
+	* Fix: destroy context hash table being NULL
+	* Fix: make lttng expand path for trace output opt
+	* Fix: return value signedness
+	* Fix: man page environment variable name error
+	* Fix: check return value on getenv USER
+
+2012-03-20 lttng-tools 2.0.0
+	* Fist STABLE version
+	* Add version name: Annedd'ale
+
+2012-03-20 lttng-tools 2.0.0-rc4
+	* Fix: add small detail to enable-channel man page
+	* Fix: warned of arbitrary time for ust-nprocesses test
+	* Fix. add limitation to man page
+	* Fix: minor changes to lttng.1
+	* Fix: add exit values to lttng.1 man page
+	* Fix: add delay before validating apps in test nproc
+	* Fix: error handling in lttng enable-event
+	* Fix: document structure init. to 0 in lttng.h
+	* Fix: uninitialized variable
+	* Keep track of FD used for UST applications (v2)
+	* Fix: lttng view, error message and exit code
+	* Small fixes to lttng man pages (v2)
+	* Fix: handle EINTR for sendmsg syscall
+	* Fix: lttng UI exit value and error message
+	* Fix: session lock use after free
+	* Fix kernel_list_events memleaks
+	* Fix debug message use uninitialized variable
+	* Fix: trace_ust_destroy_metadata should check for NULL pointer
+	* Fix: various memleaks
+	* Fix: hash table allocation out of order on error
+	* fix: lttng_ht_destroy memleak
+
+2012-03-16 lttng-tools 2.0.0-rc3
+	* Fix: missing headers for make dist
+	* Fix: install lttng-consumerd in lib/lttng/libexec/
+	* Fix: Redefine MAP_STACK to 0 if not defined by the architecture
+	* Fix: consumer CPU hotplug support
+	* Fix: double PID registration race
+	* Make libcompat independent not to confuse automake
+	* Clarify the license of lttng-ust-abi.h
+	* Fix: License header
+	* Fix: wrong return value on consumer socket creation
+	* Fix: test for UST invalid channel parameters at channel creation
+	* Fix: recvmsg should handle EINTR
+	* Fix: error.h non-static variables for liblttng-ctl
+	* Fix: missing _GNU_SOURCE define
+	* Fix: improve need root for kernel tracing error message
+	* Fix: start/stop lttng message error
+
+2012-03-02 lttng-tools 2.0.0-rc2
+	* Fix: meaningful error message
+	* Fix: UST consumer need to iterate on streams, just change their key
+	* Fix: add missing rcu read lock across RCU HT iteration
+	* Fix: kernel session closes fd 0 after create
+	* Fix: sendmsg EPIPE should be quiet by default (expected)
+	* Fix: thread_registration_apps should set its local sock to -1 when passing it
+	* Fix: clock -> sock typo
+	* Fix: consumer race: should allow reuse of FD key
+	* Fix: Use PERROR all across lttng-tools, never make it quiet
+	* Fix: test all close return values in sessiond
+	* Fix: All perror turned into PERROR to show file and line number
+	* Fix: large audit of close() use in sessiond main.c
+	* Fix: main.c client/apps sockets and kernel_trace_fd close(0)
+	* Fix: incorrect close of fd 0 for syscall kernel event destroy
+	* Fix: sessiond has incorrect missing 0 value in FD check
+	* Fix: sessiond app listening: use posix-compliant poll flags
+	* Fix: consumer printf type should match ssize_t (%zd)
+	* Fix: make ust consumer posix compliant for poll flags
+	* Fix security permission on lttng run directory
+	* Fix: Display right loglevel_type in error message
+	* Fix documentation in lttng.h
+	* Fix: lttng UST and kernel consumer: fix ret vs errno mixup
+	* Fix: restart consumerd and sessiond when interrupted in poll()
+	* Fix: handling bad channel when sending to consumer
+	* Fix useless variable
+	* Fix add-context returned error
+	* fix: add missing break in command handling
+	* fix: command handling: do not check domain for commands not requiring domain
+	* fix: if tracing group does not exist, do not report a client error
+	* Fix: run_as error handling
+	* Fix usage note on -a
+	* Revert FreeBSD compatibility layer
+	* Fix: documented number of subbuffers is incorrect
+	* Document that num-subbuf and subbuf-size need to be power of 2
+	* Merge branch 'master' of git://git.lttng.org/lttng-tools
+
+2012-02-20 lttng-tools 2.0.0-rc1
+	* Fix lttcomm_close_unix_sock to actually close the socket
+	* lttng-sessiond: Set group permissions explicitly
+
+2012-02-16 lttng-tools 2.0-pre23
+	* configure.ac: Fix consumerd64-libdir typo
+	* Fix existing session daemon check
+	* Fix missing session locks
+	* Fix return value on ust app session create
+	* Fix double start/stop trace
+	* Fix ust app session started state on start trace
+	* modprobe statedump, signal and timer lttng module
+	* Fix hyphens in man pages
+
+2012-02-14 lttng-tools 2.0-pre22
+	* Add the bash-completion file to the dist tarball
+	* Add the LICENSE file too
+	* Package used for the Ubuntu LTS (feature freeze)
+
+2012-02-13 lttng-tools 2.0-pre21
+	* Fix licensing for hashtable/utils.c
+	* Print loglevel value in list -u
+	* Remove "<all> from MSG() when no loglevel is selected
+	* Initial import of man lttng.1 and lttng-sessiond.8
+	* Fix memory leak  master
+
+2012-02-09 lttng-tools 2.0-pre20
+	* New lttng view command
+	* Multiple loglevel fixes
+	* Fix list command
+	* Fix session syscall listing
+	* Multiple fixes across the code base
+
+2012-02-02 lttng-tools 2.0-pre19
+	* Update lttng ust ABI/API copy
+	* Implement UST calibrate and change default
+	* Add MSG_WAITALL to recvmsg of sessiond-comm
+	* Check kernel version for tests
+	* Add a '--list-options' option to each command.
+	* First import of extras/ with lttng bash completion
+	* Remove default defines from lttng.h
+	* Fix lttng sessiond spawn wait race
+	* Add CMD_WARNING error code
+	* Fix context mapping for UST and kernel
+	* Add kernel work-around for boot_id
+	* Rewrites lttng-ctl's set_session_daemon_path
+	* Fix memory lean in all lttng cli commands
+	* Update loglevel ABI
+	* Add padding to all ABIs for future development.
+	* Improve error handling of lttng cli
+	* Multiple fixes across the code base (nothing critical)
+
+2012-01-23 lttng-tools 2.0-pre18
+	* Complete change of the source directory tree
+	* Move compat to common and create an internal lib
+	* Rename lttngerr.h to error.h
+	* Add kernel module version validation
+	* Add UST version validation
+	* Change SIGCHLD to SIGUSR1 when lttng waiting on sessiond
+	* Fix off-by-one and double list size instead of steady increment
+
+2012-01-19 lttng-tools 2.0-pre17
+	* Add and support the new hash table library
+	* Add lttng hash table support to liblttng-consumer
+	* RCU support for consumer's hash tables
+	* UST consumer close shm fd after mapping it
+	* Remove CLONE_VM flag for runas making gdb debugging impossible
+	* Make MSG() print on stdout instead of stderr
+	* Don't init kernel tracer if not root (UID=0)
+	* Multiple fixes found when reaching max. number of open files
+	* Add some UST tests
+	* Multiple segfaults and assert error fixed
+
+2011-12-23 lttng-tools 2.0-pre16
+	* Per-user lttng-sessiond now fully functionnal
+	* Fix nested double usage of hashtable iterators
+	* Support creds passing between lttng and sessiond
+	* Rename sessiond internal "uid" fields to "id"
+	* Create all trace directories and files with client user credentials
+	* Create output directory at session creation command
+	* Only allow the user or group owning the session (or root) to control a session
+	* Add disable kernel tracing option to sessiond
+
+2011-12-13 lttng-tools 2.0-pre15
+	* (MAJOR) User-space tracing support for global domain (lttng-ust 2.0)
+	* UST consumer 32/64 bit support
+	* Multiple bug fixes
+	* Multiple segfault, race and double lock fixes
+	* API change for lttng_list_domains, lttng_start/stop and lttng_destroy
+	* UST loglevel support
+	* ABIs now support 256 char event names
+	* Dependency on libpopt >= 1.13
+	* Dependency on URCU >= 0.6.7
+	* Rename kernel-ctl.c/.h to kernel.c/.h
+	* Change malloc to zmalloc in lttng-sessiond code
+	* RCU hashtable support for all UST data structure
+	* New libconsumer for UST, kernel and one generic
+	* Change "--all" option from lttng command line
+	* Remove function entry option to discourage its use
+
+2011-09-30 lttng-tools 2.0-pre14
+	* Syscall tracing support
+	* Multiple bug fixes (nothing critical)
+	* Add userspace RCU hash table to tree for dev
+	* Update UST ABI
+	* Fix epoll that did not handle EINTR
+	* Liburcu >= 0.6.5 is needed from this release
+	* Enabling all events also enable syscall tracing
+	* Debug messages are now on stderr
+	* Add basic data structure for UST support but not ready yet.
+
+2011-08-25 lttng-tools 2.0-pre13
+	* Memory leaks fixes and double lock list
+	* Add UST registration with sychronisation
+	* Use poll/epoll compatibility layer for the sessiond
+	* Major code cleanup of ltt-sessiond/main.c
+	* Increase listen() connexion limit
+	* Fix bad enable-channel command
+	* Rename trace.c/.h to trace-kernel
+	* Multiple fixes on the poll management with the new epoll API
+
+2011-08-25 lttng-tools 2.0-pre12
+	* Multiple fixes
+	* Fix kconsumerd handling custom channel output
+	* Add lttng_register_consumer to register a custom consumer
+	* Add multiples tests of the session daemon
+	* Default kernel channel size/number changed
+	* Support for UST application registration
+	* Import LTTng UST 2.0 ABI
+	* Send data to kconsumerd before tracing start
+	* Export API of lib kernel consumer (liblttngkconsumerd)
+
+2011-08-12 lttng-tools 2.0-pre11
+	* New lttng API using the lttng_handle
+	* Multiple fixes of kernel consumer
+	* Register the consuming function and add a library context
+	* Kernel consumer fix mmap/munmap
+	* lttng-sessiond-comm header has been privatize
+	* Kernel traces are written in the kernel/ directory
+	* Add underscore to enable-channel command options
+
+2011-07-29 lttng-tools 2.0-pre6
+	* Fix enable multiple events
+	* Add function entry feature
+
+2011-07-28 lttng-tools 2.0-pre5
+	* Fix Add context command
+	* Fix auto session path creation
+	* Fix bad strncmp at channel creation
+
+2011-07-23 lttng-tools 2.0-pre4
+	* Fix kprobe attributes
+	* Fix channel creation when not found at event enable
+	* Add safe list iteration
+	* Add two tests into the git tree
+	* Kernel consumer can be put in debug mode with -vv
+	* Trace path is now created on the client side
+
+2011-07-23 lttng-tools 2.0-pre3
+	* Fix perf hw cache counter config values
+
+2011-07-22 lttng-tools 2.0-pre2
+	* Multiple fixes
+	* New add-context options for perf counter and context
+	* Using the install bin path from autotool for execl() call
+	* Update quickstart guide
+
+2011-07-20 lttng-tools 2.0-pre1
+	* First prerelease of lttng-tools.
+	* Working with the LTTng v2.0-pre1 modules and Babeltrace v0.1
