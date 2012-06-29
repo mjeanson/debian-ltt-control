@@ -1,0 +1,3 @@
+usr/include
+usr/lib/*/liblttng-ctl.a
+usr/lib/*/liblttng-ctl.so

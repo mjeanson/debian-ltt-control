@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+. /usr/share/debconf/confmodule
+
+case "$1" in
+    configure)
+        if which addgroup; then
+            addgroup --system --quiet tracing > /dev/null || true
+        fi
+    ;;
+esac
+
+#DEBHELPER#
+exit 0

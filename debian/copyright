@@ -1,75 +1,90 @@
-This work was packaged for Debian by:
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0
+Upstream-Name: lttng-tools
+Source: http://lttng.org/files/lttng-tools/
 
-    Jon Bernard <jbernard@debian.org> on Sun, 28 Mar 2010 11:42:19 -0400
+Files: *
+Copyright: 2011, David Goulet <david.goulet@polymtl.ca>
+           2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2011, Julien Desfossez <julien.desfossez@polymtl.ca>
+License: GPL-2
+ This package is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; under version 2 of the License.
+ .
+ This package is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>
+ .
+ On Debian systems, the complete text of the GNU General
+ Public License version 2 can be found in "/usr/share/common-licenses/GPL-2".
 
-It was downloaded from:
+Files: include/lttng/lttng.h
+       src/lib/lttng-ctl/lttng-ctl.c
+Copyright: 2011, David Goulet <david.goulet@polymtl.ca>
+License: LGPL-2.1
+ This library is free software; you can redistribute it and/or
+ modify it under the terms of the GNU Lesser General Public
+ License as published by the Free Software Foundation; under
+ version 2.1 of the License.
+ .
+ This library is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ Lesser General Public License for more details.
+ .
+ You should have received a copy of the GNU Lesser General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>
+ .
+ On Debian systems, the complete text of the GNU Lesser General Public
+ License version 2.1 can be found in "/usr/share/common-licenses/LGPL-2.1".
 
-    http://lttng.org/files/lttng/
+Files: src/common/hashtable/rculfhash.c
+       src/common/hashtable/rculfhash.h
+       src/common/hashtable/rculfhash-internal.h
+       src/common/hashtable/rculfhash-mm-chunk.c
+       src/common/hashtable/rculfhash-mm-mmap.c
+       src/common/hashtable/rculfhash-mm-order.c
+       src/common/hashtable/urcu-flavor.h
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2011, Lai Jiangshan <laijs@cn.fujitsu.com>
+License: LGPL-2.1
+ This library is free software; you can redistribute it and/or
+ modify it under the terms of the GNU Lesser General Public
+ License as published by the Free Software Foundation; under
+ version 2.1 of the License.
+ .
+ This library is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ Lesser General Public License for more details.
+ .
+ You should have received a copy of the GNU Lesser General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>
+ .
+ On Debian systems, the complete text of the GNU Lesser General Public
+ License version 2.1 can be found in "/usr/share/common-licenses/LGPL-2.1".
 
-Upstream Authors:
-
-    Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
-    Michael Sills-Lavoie <michael.sills-lavoie@polymtl.ca>
-    Oumarou Dicko <oumarou.dicko@polymtl.ca>
-    Benjamin Poirier
-
-Copyright:
-
-    Copyright (C) 2005-2010 Mathieu Desnoyers
-    Copyright (C) 2010 Michael Sills-Lavoie
-    Copyright (C) 2010 Oumarou Dicko
-    Copyright (C) 2008 FUJITSU
-    Copyright (C) 2009 Benjamin Poirier
-
-Unless explicitly stated below, all source files are licensed under the
-terms of the GNU General Public License:
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This package is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program. If not, see <http://www.gnu.org/licenses/>.
-
-On Debian systems, the complete text of the GNU General
-Public License version 3 can be found in "/usr/share/common-licenses/GPL-3".
-
-The following files are licensed under the terms of the GNU Lesser General
-Public License:
-
-    `liblttd/liblttdvfs.c'
-    `liblttd/liblttd.c'
-    `liblttd/liblttd.h'
-    `liblttd/liblttdvfs.h'
-    `liblttctl/liblttctl.c'
-    `liblttctl/lttctl.h'
-
-License:
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Lesser General Public
-    License as published by the Free Software Foundation; either
-    version 2.1 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Lesser General Public License for more details.
-
-    You should have received a copy of the GNU Lesser General Public License
-    along with this program. If not, see <http://www.gnu.org/licenses/>.
-
-On Debian systems, the complete text of the GNU Lesser General
-Public License can be found in "/usr/share/common-licenses/LGPL-2".
-
-The Debian packaging is:
-
-    Copyright (C) 2010 Jon Bernard <jbernard@debian.org>
-
-and is licensed under the GPL version 3, see above.
+Files: debian/*
+Copyright: 2011-2012, Alexandre Montplaisir <alexandre.montplaisir@gmail.com>
+           2011, Michael Jeanson <mjeanson@rlnx.com>
+           2012, Jon Bernard <jbernard@debian.org>
+License: GPL-2+
+ This package is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 2 of the License, or
+ (at your option) any later version.
+ .
+ This package is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>
+ .
+ On Debian systems, the complete text of the GNU General
+ Public License version 2 can be found in "/usr/share/common-licenses/GPL-2".

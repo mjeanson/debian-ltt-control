@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+. /usr/share/debconf/confmodule
+
+case "$1" in
+    purge)
+        if which delgroup; then
+            delgroup --quiet tracing > /dev/null || true
+        fi
+    ;;
+esac
+
+#DEBHELPER#
+exit 0

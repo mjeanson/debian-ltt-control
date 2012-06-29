@@ -1,3 +1,19 @@
 #!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS := hardening=+all
+
 %:
 	dh $@
+
+override_dh_auto_install:
+	# rename the bash completion file before installation
+	mkdir $(CURDIR)/debian/bash_completion
+	cp $(CURDIR)/extras/lttng-bash_completion $(CURDIR)/debian/bash_completion/lttng
+	dh_auto_install
+
+override_dh_installinit:
+	dh_installinit --name=lttng-sessiond
+
+override_dh_clean:
+	dh_clean
+	rm -Rf $(CURDIR)/debian/bash_completion
