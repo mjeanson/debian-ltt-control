@@ -1,60 +1,111 @@
-ltt-control package README
---------------------------
-Mathieu Desnoyers 
-Last update: 2007/05/14
+LTTng Trace Control
+----------------
 
+Please visit http://lttng.org for more information.
 
-This package contains the lttd, lttctl and liblttctl programs which are
-necessary to obtain a trace. It also contains the facilities directory, where
-sits the trace metainformation.
+Latest development can be found at:
 
-* Compiling
+    * Gitweb :  http://git.lttng.org/lttng-tools.git/
+    * Git :     git://git.lttng.org/lttng-tools.git
 
-gcc 3.2 or better
-glib 2.4 or better development libraries
-  (Debian : libglib2.0-0, libglib2.0-dev)
-  (Fedora : glib2, glib2-devel)
-libc6 development librairies 
-  (Debian : libc6, libc6-dev)
-  (Fedora : glibc, glibc)
+REQUIREMENTS:
 
+	- Linux kernel >= 2.6.27
+	  pipe2(), epoll_create1() and SOCK_CLOEXEC are needed to run the session
+	  daemon. There were introduce in the Linux 2.6.27
 
-To compile the source tree from a tarball, simply follow these steps :
+    - liburcu
+      Userspace RCU library, by Mathieu Desnoyers and Paul E. McKenney
 
-- ./configure
-- make
-- make install
+      -> Tested with liburcu >= v0.6.6
 
-After running ./configure, you can also go in specific subdirectories and
-use make, make install.
+      * Debian/Ubuntu package: liburcu-dev
+      * Git : git://git.lttng.org/userspace-rcu.git
+      * Website:  http://lttng.org/urcu
 
+    - libpopt >= 1.13
+      Library for parsing command line parameters
 
-* Quick Start
+      * Debian/Ubuntu package: libpopt-dev
 
-See the LTTV package QUICKSTART file.
+    - For kernel tracing: modprobe
 
-
-* Source Tree Structure
-
-Here is the tree structure of the ltt-control package.
-
-ltt/		New trace format reading library.
-liblttctl/	Library to communicate with the kernel tracer control module.
-lttctl/		Command line program to use the liblttctl library.
-lttd/		Linux Trace Toolkit daemon.
-README		This file.
-
-
-* For Developers
+For developers using the git tree:
 
 This source tree is based on the autotools suite from GNU to simplify
 portability. Here are some things you should have on your system in order to
-compile the subversion repository tree :
+compile the git repository tree :
 
-- GNU autotools (automake >=1.7, autoconf >=2.50, autoheader >=2.50)
+- GNU autotools (automake >=1.10, autoconf >=2.50, autoheader >=2.50)
   (make sure your system wide "automake" points to a recent version!)
-- GNU Libtool
+- GNU Libtool >=2.2
   (for more information, go to http://www.gnu.org/software/autoconf/)
+- GNU Gold >= 2.22
+  (Before this version we hit a known bug documented at:
+  http://sourceware.org/bugzilla/show_bug.cgi?id=11317)
 
-If you get the tree from the repository, you will need to use the autogen.sh
-script. It calls all the GNU tools needed to prepare the tree configuration.
+If you get the tree from the repository, you will need to use the "bootstrap"
+script in the root of the tree. It calls all the GNU tools needed to prepare the
+tree configuration.
+
+INSTALLATION INSTRUCTIONS:
+
+  - Download, compile and install the prerequisites.
+  Then:
+  $ ./configure
+  $ make
+  $ sudo make install
+  $ sudo ldconfig
+
+  If compiling from the git repository, run ./bootstrap before running
+  the configure script, to generate it.
+
+USAGE:
+
+Please see doc/quickstart.txt to help you start tracing. You can also use the
+-h/--help command on 'lttng' and all other commands offered in this tool (Ex:
+lttng enable-event -h).
+
+PACKAGE CONTENTS:
+
+    This package contains the following elements:
+
+    - liblttngctl
+      The LTTng tracing control library.
+
+    - libsessiond-comm (internal)
+	  The lttng-sessiond communication library. In order to talk with
+	  lttng-sessiond, this library must be used.
+
+    - libkernel-ctl (internal)
+      Kernel tracer control and ioctl definitions.
+
+    - libconsumer (internal)
+      Library for Kernel and (optionally) UST trace consumer.
+
+	- libkernel-consumer (internal)
+	  Library for Kernel consumer control
+
+	- libust-consumer (internal)
+	  Library for UST consumer control
+
+	- libhashtable (internal)
+	  Library wrapper over URCU hashtables.
+
+    - lttng-consumerd
+      The consumer daemon which uses libconsumer.
+
+    - lttng-sessiond
+      The LTTng session daemon binary.
+
+    - lttng
+      The LTTng tracer command line control tool.
+
+    - include (lttng.h --> installed in $(includedir)/lttng/lttng.h)
+      The liblttngctl API header file.
+
+    - tests
+      Various test programs.
+
+	- doc
+	  Various documentations and quickstart guide.
