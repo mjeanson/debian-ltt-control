@@ -8,6 +8,6 @@ SUBDIRS = src \
 dist_doc_DATA = LICENSE \
                 ChangeLog
 
-dist_noinst_DATA = CodingStyle gpl-2.0.txt lgpl-2.1.txt
+dist_noinst_DATA = CodingStyle
 
 EXTRA_DIST = extras/lttng-bash_completion

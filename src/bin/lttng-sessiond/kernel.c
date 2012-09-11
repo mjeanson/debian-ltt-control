@@ -22,11 +22,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <common/common.h>
 #include <common/kernel-ctl/kernel-ctl.h>
 #include <common/sessiond-comm/sessiond-comm.h>
 
+#include "consumer.h"
 #include "kernel.h"
 #include "kern-modules.h"
 
@@ -150,6 +152,12 @@ int kernel_create_channel(struct ltt_kernel_session *session,
 		goto error;
 	}
 
+	DBG3("Kernel create channel %s in %s with attr: %d, %" PRIu64 ", %" PRIu64 ", %u, %u, %d",
+			chan->name, path, lkc->channel->attr.overwrite,
+			lkc->channel->attr.subbuf_size, lkc->channel->attr.num_subbuf,
+			lkc->channel->attr.switch_timer_interval, lkc->channel->attr.read_timer_interval,
+			lkc->channel->attr.output);
+
 	/* Kernel tracer channel creation */
 	ret = kernctl_create_channel(session->fd, &lkc->channel->attr);
 	if (ret < 0) {
@@ -169,8 +177,7 @@ int kernel_create_channel(struct ltt_kernel_session *session,
 	cds_list_add(&lkc->list, &session->channel_list.head);
 	session->channel_count++;
 
-	DBG("Kernel channel %s created (fd: %d and path: %s)",
-			lkc->channel->name, lkc->fd, lkc->pathname);
+	DBG("Kernel channel %s created (fd: %d)", lkc->channel->name, lkc->fd);
 
 	return 0;
 
@@ -351,13 +358,13 @@ error:
  * Create kernel metadata, open from the kernel tracer and add it to the
  * kernel session.
  */
-int kernel_open_metadata(struct ltt_kernel_session *session, char *path)
+int kernel_open_metadata(struct ltt_kernel_session *session)
 {
 	int ret;
 	struct ltt_kernel_metadata *lkm;
 
 	/* Allocate kernel metadata */
-	lkm = trace_kernel_create_metadata(path);
+	lkm = trace_kernel_create_metadata();
 	if (lkm == NULL) {
 		goto error;
 	}
@@ -377,7 +384,7 @@ int kernel_open_metadata(struct ltt_kernel_session *session, char *path)
 
 	session->metadata = lkm;
 
-	DBG("Kernel metadata opened (fd: %d and path: %s)", lkm->fd, lkm->pathname);
+	DBG("Kernel metadata opened (fd: %d)", lkm->fd);
 
 	return 0;
 
@@ -448,7 +455,7 @@ int kernel_metadata_flush_buffer(int fd)
 
 	ret = kernctl_buffer_flush(fd);
 	if (ret < 0) {
-		ERR("Fail to flush metadata buffers %d (ret: %d", fd, ret);
+		ERR("Fail to flush metadata buffers %d (ret: %d)", fd, ret);
 	}
 
 	return 0;
@@ -505,11 +512,11 @@ error:
  */
 int kernel_open_channel_stream(struct ltt_kernel_channel *channel)
 {
-	int ret;
+	int ret, count = 0;
 	struct ltt_kernel_stream *lks;
 
 	while ((ret = kernctl_create_stream(channel->fd)) >= 0) {
-		lks = trace_kernel_create_stream();
+		lks = trace_kernel_create_stream(channel->channel->name, count);
 		if (lks == NULL) {
 			ret = close(ret);
 			if (ret) {
@@ -525,19 +532,15 @@ int kernel_open_channel_stream(struct ltt_kernel_channel *channel)
 			PERROR("fcntl session fd");
 		}
 
-		ret = asprintf(&lks->pathname, "%s/%s_%d",
-				channel->pathname, channel->channel->name, channel->stream_count);
-		if (ret < 0) {
-			PERROR("asprintf kernel create stream");
-			goto error;
-		}
-
 		/* Add stream to channe stream list */
 		cds_list_add(&lks->list, &channel->stream_list.head);
 		channel->stream_count++;
 
-		DBG("Kernel stream %d created (fd: %d, state: %d, path: %s)",
-				channel->stream_count, lks->fd, lks->state, lks->pathname);
+		/* Increment counter which represent CPU number. */
+		count++;
+
+		DBG("Kernel stream %s created (fd: %d, state: %d)", lks->name, lks->fd,
+				lks->state);
 	}
 
 	return channel->stream_count;
@@ -715,4 +718,22 @@ int init_kernel_workarounds(void)
 	}
 end_boot_id:
 	return 0;
+}
+
+/*
+ * Complete teardown of a kernel session.
+ */
+void kernel_destroy_session(struct ltt_kernel_session *ksess)
+{
+	if (ksess == NULL) {
+		DBG3("No kernel session when tearing down session");
+		return;
+	}
+
+	DBG("Tearing down kernel session");
+
+	/* Close any relayd session */
+	consumer_output_send_destroy_relayd(ksess->consumer);
+
+	trace_kernel_destroy_session(ksess);
 }

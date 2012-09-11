@@ -37,6 +37,8 @@ int ustctl_create_event(int sock, struct lttng_ust_event *ev,
 int ustctl_add_context(int sock, struct lttng_ust_context *ctx,
 		struct lttng_ust_object_data *obj_data,
 		struct lttng_ust_object_data **context_data);
+int ustctl_set_filter(int sock, struct lttng_ust_filter_bytecode *bytecode,
+		struct lttng_ust_object_data *obj_data);
 
 int ustctl_enable(int sock, struct lttng_ust_object_data *object);
 int ustctl_disable(int sock, struct lttng_ust_object_data *object);
@@ -54,6 +56,19 @@ int ustctl_tracepoint_list(int sock);
  */
 int ustctl_tracepoint_list_get(int sock, int tp_list_handle,
 		struct lttng_ust_tracepoint_iter *iter);
+
+/*
+ * ustctl_tracepoint_field_list returns a tracepoint field list handle,
+ * or negative error value.
+ */
+int ustctl_tracepoint_field_list(int sock);
+
+/*
+ * ustctl_tracepoint_field_list_get is used to iterate on the tp field
+ * list handle. End is iteration is reached when -ENOENT is returned.
+ */
+int ustctl_tracepoint_field_list_get(int sock, int tp_field_list_handle,
+		struct lttng_ust_field_iter *iter);
 
 int ustctl_tracer_version(int sock, struct lttng_ust_tracer_version *v);
 int ustctl_wait_quiescent(int sock);

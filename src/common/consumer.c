@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2011 - Julien Desfossez <julien.desfossez@polymtl.ca>
  *                      Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+ *               2012 - David Goulet <dgoulet@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -26,11 +27,14 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <common/common.h>
 #include <common/kernel-ctl/kernel-ctl.h>
+#include <common/sessiond-comm/relayd.h>
 #include <common/sessiond-comm/sessiond-comm.h>
 #include <common/kernel-consumer/kernel-consumer.h>
+#include <common/relayd/relayd.h>
 #include <common/ust-consumer/ust-consumer.h>
 
 #include "consumer.h"
@@ -152,6 +156,71 @@ void consumer_free_stream(struct rcu_head *head)
 }
 
 /*
+ * RCU protected relayd socket pair free.
+ */
+static void consumer_rcu_free_relayd(struct rcu_head *head)
+{
+	struct lttng_ht_node_ulong *node =
+		caa_container_of(head, struct lttng_ht_node_ulong, head);
+	struct consumer_relayd_sock_pair *relayd =
+		caa_container_of(node, struct consumer_relayd_sock_pair, node);
+
+	free(relayd);
+}
+
+/*
+ * Destroy and free relayd socket pair object.
+ *
+ * This function MUST be called with the consumer_data lock acquired.
+ */
+void consumer_destroy_relayd(struct consumer_relayd_sock_pair *relayd)
+{
+	int ret;
+	struct lttng_ht_iter iter;
+
+	if (relayd == NULL) {
+		return;
+	}
+
+	DBG("Consumer destroy and close relayd socket pair");
+
+	iter.iter.node = &relayd->node.node;
+	ret = lttng_ht_del(consumer_data.relayd_ht, &iter);
+	if (ret != 0) {
+		/* We assume the relayd was already destroyed */
+		return;
+	}
+
+	/* Close all sockets */
+	pthread_mutex_lock(&relayd->ctrl_sock_mutex);
+	(void) relayd_close(&relayd->control_sock);
+	pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
+	(void) relayd_close(&relayd->data_sock);
+
+	/* RCU free() call */
+	call_rcu(&relayd->node.head, consumer_rcu_free_relayd);
+}
+
+/*
+ * Flag a relayd socket pair for destruction. Destroy it if the refcount
+ * reaches zero.
+ *
+ * RCU read side lock MUST be aquired before calling this function.
+ */
+void consumer_flag_relayd_for_destroy(struct consumer_relayd_sock_pair *relayd)
+{
+	assert(relayd);
+
+	/* Set destroy flag for this object */
+	uatomic_set(&relayd->destroy_flag, 1);
+
+	/* Destroy the relayd if refcount is 0 */
+	if (uatomic_read(&relayd->refcount) == 0) {
+		consumer_destroy_relayd(relayd);
+	}
+}
+
+/*
  * Remove a stream from the global list protected by a mutex. This
  * function is also responsible for freeing its data structures.
  */
@@ -160,6 +229,9 @@ void consumer_del_stream(struct lttng_consumer_stream *stream)
 	int ret;
 	struct lttng_ht_iter iter;
 	struct lttng_consumer_channel *free_chan = NULL;
+	struct consumer_relayd_sock_pair *relayd;
+
+	assert(stream);
 
 	pthread_mutex_lock(&consumer_data.lock);
 
@@ -214,8 +286,41 @@ void consumer_del_stream(struct lttng_consumer_stream *stream)
 			PERROR("close");
 		}
 	}
-	if (!--stream->chan->refcount)
+
+	/* Check and cleanup relayd */
+	rcu_read_lock();
+	relayd = consumer_find_relayd(stream->net_seq_idx);
+	if (relayd != NULL) {
+		uatomic_dec(&relayd->refcount);
+		assert(uatomic_read(&relayd->refcount) >= 0);
+
+		/* Closing streams requires to lock the control socket. */
+		pthread_mutex_lock(&relayd->ctrl_sock_mutex);
+		ret = relayd_send_close_stream(&relayd->control_sock,
+				stream->relayd_stream_id,
+				stream->next_net_seq_num - 1);
+		pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
+		if (ret < 0) {
+			DBG("Unable to close stream on the relayd. Continuing");
+			/*
+			 * Continue here. There is nothing we can do for the relayd.
+			 * Chances are that the relayd has closed the socket so we just
+			 * continue cleaning up.
+			 */
+		}
+
+		/* Both conditions are met, we destroy the relayd. */
+		if (uatomic_read(&relayd->refcount) == 0 &&
+				uatomic_read(&relayd->destroy_flag)) {
+			consumer_destroy_relayd(relayd);
+		}
+	}
+	rcu_read_unlock();
+
+	if (!--stream->chan->refcount) {
 		free_chan = stream->chan;
+	}
+
 
 	call_rcu(&stream->node.head, consumer_free_stream);
 end:
@@ -234,7 +339,9 @@ struct lttng_consumer_stream *consumer_allocate_stream(
 		enum lttng_event_output output,
 		const char *path_name,
 		uid_t uid,
-		gid_t gid)
+		gid_t gid,
+		int net_index,
+		int metadata_flag)
 {
 	struct lttng_consumer_stream *stream;
 	int ret;
@@ -261,9 +368,12 @@ struct lttng_consumer_stream *consumer_allocate_stream(
 	stream->output = output;
 	stream->uid = uid;
 	stream->gid = gid;
-	strncpy(stream->path_name, path_name, PATH_MAX - 1);
-	stream->path_name[PATH_MAX - 1] = '\0';
+	stream->net_seq_idx = net_index;
+	stream->metadata_flag = metadata_flag;
+	strncpy(stream->path_name, path_name, sizeof(stream->path_name));
+	stream->path_name[sizeof(stream->path_name) - 1] = '\0';
 	lttng_ht_node_init_ulong(&stream->node, stream->key);
+	lttng_ht_node_init_ulong(&stream->waitfd_node, stream->wait_fd);
 
 	switch (consumer_data.type) {
 	case LTTNG_CONSUMER_KERNEL:
@@ -282,12 +392,13 @@ struct lttng_consumer_stream *consumer_allocate_stream(
 		assert(0);
 		goto end;
 	}
-	DBG("Allocated stream %s (key %d, shm_fd %d, wait_fd %d, mmap_len %llu, out_fd %d)",
+	DBG("Allocated stream %s (key %d, shm_fd %d, wait_fd %d, mmap_len %llu, out_fd %d, net_seq_idx %d)",
 			stream->path_name, stream->key,
 			stream->shm_fd,
 			stream->wait_fd,
 			(unsigned long long) stream->mmap_len,
-			stream->out_fd);
+			stream->out_fd,
+			stream->net_seq_idx);
 end:
 	return stream;
 }
@@ -300,12 +411,13 @@ int consumer_add_stream(struct lttng_consumer_stream *stream)
 	int ret = 0;
 	struct lttng_ht_node_ulong *node;
 	struct lttng_ht_iter iter;
+	struct consumer_relayd_sock_pair *relayd;
 
 	pthread_mutex_lock(&consumer_data.lock);
 	/* Steal stream identifier, for UST */
 	consumer_steal_stream_key(stream->key);
-	rcu_read_lock();
 
+	rcu_read_lock();
 	lttng_ht_lookup(consumer_data.stream_ht,
 			(void *)((unsigned long) stream->key), &iter);
 	node = lttng_ht_iter_get_node_ulong(&iter);
@@ -316,7 +428,15 @@ int consumer_add_stream(struct lttng_consumer_stream *stream)
 	}
 
 	lttng_ht_add_unique_ulong(consumer_data.stream_ht, &stream->node);
+
+	/* Check and cleanup relayd */
+	relayd = consumer_find_relayd(stream->net_seq_idx);
+	if (relayd != NULL) {
+		uatomic_inc(&relayd->refcount);
+	}
 	rcu_read_unlock();
+
+	/* Update consumer data */
 	consumer_data.stream_count++;
 	consumer_data.need_update = 1;
 
@@ -338,6 +458,142 @@ end:
 	pthread_mutex_unlock(&consumer_data.lock);
 
 	return ret;
+}
+
+/*
+ * Add relayd socket to global consumer data hashtable. RCU read side lock MUST
+ * be acquired before calling this.
+ */
+
+int consumer_add_relayd(struct consumer_relayd_sock_pair *relayd)
+{
+	int ret = 0;
+	struct lttng_ht_node_ulong *node;
+	struct lttng_ht_iter iter;
+
+	if (relayd == NULL) {
+		ret = -1;
+		goto end;
+	}
+
+	lttng_ht_lookup(consumer_data.relayd_ht,
+			(void *)((unsigned long) relayd->net_seq_idx), &iter);
+	node = lttng_ht_iter_get_node_ulong(&iter);
+	if (node != NULL) {
+		/* Relayd already exist. Ignore the insertion */
+		goto end;
+	}
+	lttng_ht_add_unique_ulong(consumer_data.relayd_ht, &relayd->node);
+
+end:
+	return ret;
+}
+
+/*
+ * Allocate and return a consumer relayd socket.
+ */
+struct consumer_relayd_sock_pair *consumer_allocate_relayd_sock_pair(
+		int net_seq_idx)
+{
+	struct consumer_relayd_sock_pair *obj = NULL;
+
+	/* Negative net sequence index is a failure */
+	if (net_seq_idx < 0) {
+		goto error;
+	}
+
+	obj = zmalloc(sizeof(struct consumer_relayd_sock_pair));
+	if (obj == NULL) {
+		PERROR("zmalloc relayd sock");
+		goto error;
+	}
+
+	obj->net_seq_idx = net_seq_idx;
+	obj->refcount = 0;
+	obj->destroy_flag = 0;
+	lttng_ht_node_init_ulong(&obj->node, obj->net_seq_idx);
+	pthread_mutex_init(&obj->ctrl_sock_mutex, NULL);
+
+error:
+	return obj;
+}
+
+/*
+ * Find a relayd socket pair in the global consumer data.
+ *
+ * Return the object if found else NULL.
+ * RCU read-side lock must be held across this call and while using the
+ * returned object.
+ */
+struct consumer_relayd_sock_pair *consumer_find_relayd(int key)
+{
+	struct lttng_ht_iter iter;
+	struct lttng_ht_node_ulong *node;
+	struct consumer_relayd_sock_pair *relayd = NULL;
+
+	/* Negative keys are lookup failures */
+	if (key < 0) {
+		goto error;
+	}
+
+	lttng_ht_lookup(consumer_data.relayd_ht, (void *)((unsigned long) key),
+			&iter);
+	node = lttng_ht_iter_get_node_ulong(&iter);
+	if (node != NULL) {
+		relayd = caa_container_of(node, struct consumer_relayd_sock_pair, node);
+	}
+
+error:
+	return relayd;
+}
+
+/*
+ * Handle stream for relayd transmission if the stream applies for network
+ * streaming where the net sequence index is set.
+ *
+ * Return destination file descriptor or negative value on error.
+ */
+static int write_relayd_stream_header(struct lttng_consumer_stream *stream,
+		size_t data_size, struct consumer_relayd_sock_pair *relayd)
+{
+	int outfd = -1, ret;
+	struct lttcomm_relayd_data_hdr data_hdr;
+
+	/* Safety net */
+	assert(stream);
+	assert(relayd);
+
+	/* Reset data header */
+	memset(&data_hdr, 0, sizeof(data_hdr));
+
+	if (stream->metadata_flag) {
+		/* Caller MUST acquire the relayd control socket lock */
+		ret = relayd_send_metadata(&relayd->control_sock, data_size);
+		if (ret < 0) {
+			goto error;
+		}
+
+		/* Metadata are always sent on the control socket. */
+		outfd = relayd->control_sock.fd;
+	} else {
+		/* Set header with stream information */
+		data_hdr.stream_id = htobe64(stream->relayd_stream_id);
+		data_hdr.data_size = htobe32(data_size);
+		data_hdr.net_seq_num = htobe64(stream->next_net_seq_num++);
+		/* Other fields are zeroed previously */
+
+		ret = relayd_send_data_hdr(&relayd->data_sock, &data_hdr,
+				sizeof(data_hdr));
+		if (ret < 0) {
+			goto error;
+		}
+
+		/* Set to go on data socket */
+		outfd = relayd->data_sock.fd;
+	}
+
+error:
+	return outfd;
 }
 
 /*
@@ -464,9 +720,7 @@ struct lttng_consumer_channel *consumer_allocate_channel(
 		goto end;
 	}
 	DBG("Allocated channel (key %d, shm_fd %d, wait_fd %d, mmap_len %llu, max_sb_size %llu)",
-			channel->key,
-			channel->shm_fd,
-			channel->wait_fd,
+			channel->key, channel->shm_fd, channel->wait_fd,
 			(unsigned long long) channel->mmap_len,
 			(unsigned long long) channel->max_sb_size);
 end:
@@ -512,7 +766,8 @@ end:
  */
 int consumer_update_poll_array(
 		struct lttng_consumer_local_data *ctx, struct pollfd **pollfd,
-		struct lttng_consumer_stream **local_stream)
+		struct lttng_consumer_stream **local_stream,
+		struct lttng_ht *metadata_ht)
 {
 	int i = 0;
 	struct lttng_ht_iter iter;
@@ -528,6 +783,10 @@ int consumer_update_poll_array(
 		DBG("Active FD %d", stream->wait_fd);
 		(*pollfd)[i].fd = stream->wait_fd;
 		(*pollfd)[i].events = POLLIN | POLLPRI;
+		if (stream->metadata_flag && metadata_ht) {
+			lttng_ht_add_unique_ulong(metadata_ht, &stream->waitfd_node);
+			DBG("Active FD added to metadata hash table");
+		}
 		local_stream[i] = stream;
 		i++;
 	}
@@ -584,7 +843,6 @@ void lttng_consumer_set_error_sock(
 /*
  * Set the command socket path.
  */
-
 void lttng_consumer_set_command_sock_path(
 		struct lttng_consumer_local_data *ctx, char *sock)
 {
@@ -648,14 +906,16 @@ void lttng_consumer_should_exit(struct lttng_consumer_local_data *ctx)
 {
 	int ret;
 	consumer_quit = 1;
-	ret = write(ctx->consumer_should_quit[1], "4", 1);
+	do {
+		ret = write(ctx->consumer_should_quit[1], "4", 1);
+	} while (ret < 0 && errno == EINTR);
 	if (ret < 0) {
 		perror("write consumer quit");
 	}
 }
 
-void lttng_consumer_sync_trace_file(
-		struct lttng_consumer_stream *stream, off_t orig_offset)
+void lttng_consumer_sync_trace_file(struct lttng_consumer_stream *stream,
+		off_t orig_offset)
 {
 	int outfd = stream->out_fd;
 
@@ -833,7 +1093,37 @@ void lttng_consumer_destroy(struct lttng_consumer_local_data *ctx)
 }
 
 /*
- * Mmap the ring buffer, read it and write the data to the tracefile.
+ * Write the metadata stream id on the specified file descriptor.
+ */
+static int write_relayd_metadata_id(int fd,
+		struct lttng_consumer_stream *stream,
+		struct consumer_relayd_sock_pair *relayd)
+{
+	int ret;
+	uint64_t metadata_id;
+
+	metadata_id = htobe64(stream->relayd_stream_id);
+	do {
+		ret = write(fd, (void *) &metadata_id,
+				sizeof(stream->relayd_stream_id));
+	} while (ret < 0 && errno == EINTR);
+	if (ret < 0) {
+		PERROR("write metadata stream id");
+		goto end;
+	}
+	DBG("Metadata stream id %" PRIu64 " written before data",
+			stream->relayd_stream_id);
+
+end:
+	return ret;
+}
+
+/*
+ * Mmap the ring buffer, read it and write the data to the tracefile. This is a
+ * core function for writing trace buffers to either the local filesystem or
+ * the network.
+ *
+ * Careful review MUST be put if any changes occur!
  *
  * Returns the number of bytes written
  */
@@ -841,18 +1131,115 @@ ssize_t lttng_consumer_on_read_subbuffer_mmap(
 		struct lttng_consumer_local_data *ctx,
 		struct lttng_consumer_stream *stream, unsigned long len)
 {
+	unsigned long mmap_offset;
+	ssize_t ret = 0, written = 0;
+	off_t orig_offset = stream->out_fd_offset;
+	/* Default is on the disk */
+	int outfd = stream->out_fd;
+	struct consumer_relayd_sock_pair *relayd = NULL;
+
+	/* RCU lock for the relayd pointer */
+	rcu_read_lock();
+
+	/* Flag that the current stream if set for network streaming. */
+	if (stream->net_seq_idx != -1) {
+		relayd = consumer_find_relayd(stream->net_seq_idx);
+		if (relayd == NULL) {
+			goto end;
+		}
+	}
+
+	/* get the offset inside the fd to mmap */
 	switch (consumer_data.type) {
 	case LTTNG_CONSUMER_KERNEL:
-		return lttng_kconsumer_on_read_subbuffer_mmap(ctx, stream, len);
+		ret = kernctl_get_mmap_read_offset(stream->wait_fd, &mmap_offset);
+		break;
 	case LTTNG_CONSUMER32_UST:
 	case LTTNG_CONSUMER64_UST:
-		return lttng_ustconsumer_on_read_subbuffer_mmap(ctx, stream, len);
+		ret = lttng_ustctl_get_mmap_read_offset(stream->chan->handle,
+				stream->buf, &mmap_offset);
+		break;
 	default:
 		ERR("Unknown consumer_data type");
 		assert(0);
 	}
+	if (ret != 0) {
+		errno = -ret;
+		PERROR("tracer ctl get_mmap_read_offset");
+		written = ret;
+		goto end;
+	}
 
-	return 0;
+	/* Handle stream on the relayd if the output is on the network */
+	if (relayd) {
+		unsigned long netlen = len;
+
+		/*
+		 * Lock the control socket for the complete duration of the function
+		 * since from this point on we will use the socket.
+		 */
+		if (stream->metadata_flag) {
+			/* Metadata requires the control socket. */
+			pthread_mutex_lock(&relayd->ctrl_sock_mutex);
+			netlen += sizeof(stream->relayd_stream_id);
+		}
+
+		ret = write_relayd_stream_header(stream, netlen, relayd);
+		if (ret >= 0) {
+			/* Use the returned socket. */
+			outfd = ret;
+
+			/* Write metadata stream id before payload */
+			if (stream->metadata_flag) {
+				ret = write_relayd_metadata_id(outfd, stream, relayd);
+				if (ret < 0) {
+					written = ret;
+					goto end;
+				}
+			}
+		}
+		/* Else, use the default set before which is the filesystem. */
+	}
+
+	while (len > 0) {
+		do {
+			ret = write(outfd, stream->mmap_base + mmap_offset, len);
+		} while (ret < 0 && errno == EINTR);
+		if (ret < 0) {
+			PERROR("Error in file write");
+			if (written == 0) {
+				written = ret;
+			}
+			goto end;
+		} else if (ret > len) {
+			PERROR("Error in file write (ret %zd > len %lu)", ret, len);
+			written += ret;
+			goto end;
+		} else {
+			len -= ret;
+			mmap_offset += ret;
+		}
+		DBG("Consumer mmap write() ret %zd (len %lu)", ret, len);
+
+		/* This call is useless on a socket so better save a syscall. */
+		if (!relayd) {
+			/* This won't block, but will start writeout asynchronously */
+			lttng_sync_file_range(outfd, stream->out_fd_offset, ret,
+					SYNC_FILE_RANGE_WRITE);
+			stream->out_fd_offset += ret;
+		}
+		written += ret;
+	}
+	lttng_consumer_sync_trace_file(stream, orig_offset);
+
+end:
+	/* Unlock only if ctrl socket used */
+	if (relayd && stream->metadata_flag) {
+		pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
+	}
+
+	rcu_read_unlock();
+	return written;
 }
 
 /*
@@ -864,18 +1251,151 @@ ssize_t lttng_consumer_on_read_subbuffer_splice(
 		struct lttng_consumer_local_data *ctx,
 		struct lttng_consumer_stream *stream, unsigned long len)
 {
+	ssize_t ret = 0, written = 0, ret_splice = 0;
+	loff_t offset = 0;
+	off_t orig_offset = stream->out_fd_offset;
+	int fd = stream->wait_fd;
+	/* Default is on the disk */
+	int outfd = stream->out_fd;
+	struct consumer_relayd_sock_pair *relayd = NULL;
+
 	switch (consumer_data.type) {
 	case LTTNG_CONSUMER_KERNEL:
-		return lttng_kconsumer_on_read_subbuffer_splice(ctx, stream, len);
+		break;
 	case LTTNG_CONSUMER32_UST:
 	case LTTNG_CONSUMER64_UST:
+		/* Not supported for user space tracing */
 		return -ENOSYS;
 	default:
 		ERR("Unknown consumer_data type");
 		assert(0);
-		return -ENOSYS;
 	}
 
+	/* RCU lock for the relayd pointer */
+	rcu_read_lock();
+
+	/* Flag that the current stream if set for network streaming. */
+	if (stream->net_seq_idx != -1) {
+		relayd = consumer_find_relayd(stream->net_seq_idx);
+		if (relayd == NULL) {
+			goto end;
+		}
+	}
+
+	/* Write metadata stream id before payload */
+	if (stream->metadata_flag && relayd) {
+		/*
+		 * Lock the control socket for the complete duration of the function
+		 * since from this point on we will use the socket.
+		 */
+		pthread_mutex_lock(&relayd->ctrl_sock_mutex);
+
+		ret = write_relayd_metadata_id(ctx->consumer_thread_pipe[1],
+				stream, relayd);
+		if (ret < 0) {
+			written = ret;
+			goto end;
+		}
+	}
+
+	while (len > 0) {
+		DBG("splice chan to pipe offset %lu of len %lu (fd : %d)",
+				(unsigned long)offset, len, fd);
+		ret_splice = splice(fd, &offset, ctx->consumer_thread_pipe[1], NULL, len,
+				SPLICE_F_MOVE | SPLICE_F_MORE);
+		DBG("splice chan to pipe, ret %zd", ret_splice);
+		if (ret_splice < 0) {
+			PERROR("Error in relay splice");
+			if (written == 0) {
+				written = ret_splice;
+			}
+			ret = errno;
+			goto splice_error;
+		}
+
+		/* Handle stream on the relayd if the output is on the network */
+		if (relayd) {
+			if (stream->metadata_flag) {
+				/* Update counter to fit the spliced data */
+				ret_splice += sizeof(stream->relayd_stream_id);
+				len += sizeof(stream->relayd_stream_id);
+				/*
+				 * We do this so the return value can match the len passed as
+				 * argument to this function.
+				 */
+				written -= sizeof(stream->relayd_stream_id);
+			}
+
+			ret = write_relayd_stream_header(stream, ret_splice, relayd);
+			if (ret >= 0) {
+				/* Use the returned socket. */
+				outfd = ret;
+			} else {
+				ERR("Remote relayd disconnected. Stopping");
+				goto end;
+			}
+		}
+
+		/* Splice data out */
+		ret_splice = splice(ctx->consumer_thread_pipe[0], NULL, outfd, NULL,
+				ret_splice, SPLICE_F_MOVE | SPLICE_F_MORE);
+		DBG("Kernel consumer splice pipe to file, ret %zd", ret_splice);
+		if (ret_splice < 0) {
+			PERROR("Error in file splice");
+			if (written == 0) {
+				written = ret_splice;
+			}
+			ret = errno;
+			goto splice_error;
+		} else if (ret_splice > len) {
+			errno = EINVAL;
+			PERROR("Wrote more data than requested %zd (len: %lu)",
+					ret_splice, len);
+			written += ret_splice;
+			ret = errno;
+			goto splice_error;
+		}
+		len -= ret_splice;
+
+		/* This call is useless on a socket so better save a syscall. */
+		if (!relayd) {
+			/* This won't block, but will start writeout asynchronously */
+			lttng_sync_file_range(outfd, stream->out_fd_offset, ret_splice,
+					SYNC_FILE_RANGE_WRITE);
+			stream->out_fd_offset += ret_splice;
+		}
+		written += ret_splice;
+	}
+	lttng_consumer_sync_trace_file(stream, orig_offset);
+
+	ret = ret_splice;
+
+	goto end;
+
+splice_error:
+	/* send the appropriate error description to sessiond */
+	switch (ret) {
+	case EBADF:
+		lttng_consumer_send_error(ctx, CONSUMERD_SPLICE_EBADF);
+		break;
+	case EINVAL:
+		lttng_consumer_send_error(ctx, CONSUMERD_SPLICE_EINVAL);
+		break;
+	case ENOMEM:
+		lttng_consumer_send_error(ctx, CONSUMERD_SPLICE_ENOMEM);
+		break;
+	case ESPIPE:
+		lttng_consumer_send_error(ctx, CONSUMERD_SPLICE_ESPIPE);
+		break;
+	}
+
+end:
+	if (relayd && stream->metadata_flag) {
+		pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
+	}
+
+	rcu_read_unlock();
+	return written;
 }
 
 /*
@@ -952,6 +1472,13 @@ void *lttng_consumer_thread_poll_fds(void *data)
 	/* local view of consumer_data.fds_count */
 	int nb_fd = 0;
 	struct lttng_consumer_local_data *ctx = data;
+	struct lttng_ht *metadata_ht;
+	struct lttng_ht_iter iter;
+	struct lttng_ht_node_ulong *node;
+	struct lttng_consumer_stream *metadata_stream;
+	ssize_t len;
+
+	metadata_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
 
 	rcu_register_thread();
 
@@ -992,7 +1519,8 @@ void *lttng_consumer_thread_poll_fds(void *data)
 				pthread_mutex_unlock(&consumer_data.lock);
 				goto end;
 			}
-			ret = consumer_update_poll_array(ctx, &pollfd, local_stream);
+			ret = consumer_update_poll_array(ctx, &pollfd, local_stream,
+					metadata_ht);
 			if (ret < 0) {
 				ERR("Error in allocating pollfd or local_outfds");
 				lttng_consumer_send_error(ctx, CONSUMERD_POLL_ERROR);
@@ -1029,10 +1557,9 @@ void *lttng_consumer_thread_poll_fds(void *data)
 		}
 
 		/*
-		 * If the consumer_poll_pipe triggered poll go
-		 * directly to the beginning of the loop to update the
-		 * array. We want to prioritize array update over
-		 * low-priority reads.
+		 * If the consumer_poll_pipe triggered poll go directly to the
+		 * beginning of the loop to update the array. We want to prioritize
+		 * array update over low-priority reads.
 		 */
 		if (pollfd[nb_fd].revents & (POLLIN | POLLPRI)) {
 			size_t pipe_readlen;
@@ -1048,9 +1575,24 @@ void *lttng_consumer_thread_poll_fds(void *data)
 
 		/* Take care of high priority channels first. */
 		for (i = 0; i < nb_fd; i++) {
-			if (pollfd[i].revents & POLLPRI) {
-				ssize_t len;
-
+			/* Lookup for metadata which is the highest priority */
+			lttng_ht_lookup(metadata_ht,
+					(void *)((unsigned long) pollfd[i].fd), &iter);
+			node = lttng_ht_iter_get_node_ulong(&iter);
+			if (node != NULL &&
+					(pollfd[i].revents & (POLLIN | POLLPRI))) {
+				DBG("Urgent metadata read on fd %d", pollfd[i].fd);
+				metadata_stream = caa_container_of(node,
+						struct lttng_consumer_stream, waitfd_node);
+				high_prio = 1;
+				len = ctx->on_buffer_ready(metadata_stream, ctx);
+				/* it's ok to have an unavailable sub-buffer */
+				if (len < 0 && len != -EAGAIN) {
+					goto end;
+				} else if (len > 0) {
+					metadata_stream->data_read = 1;
+				}
+			} else if (pollfd[i].revents & POLLPRI) {
 				DBG("Urgent read on fd %d", pollfd[i].fd);
 				high_prio = 1;
 				len = ctx->on_buffer_ready(local_stream[i], ctx);
@@ -1075,8 +1617,6 @@ void *lttng_consumer_thread_poll_fds(void *data)
 		for (i = 0; i < nb_fd; i++) {
 			if ((pollfd[i].revents & POLLIN) ||
 					local_stream[i]->hangup_flush_done) {
-				ssize_t len;
-
 				DBG("Normal read on fd %d", pollfd[i].fd);
 				len = ctx->on_buffer_ready(local_stream[i], ctx);
 				/* it's ok to have an unavailable sub-buffer */
@@ -1108,18 +1648,33 @@ void *lttng_consumer_thread_poll_fds(void *data)
 			if ((pollfd[i].revents & POLLHUP)) {
 				DBG("Polling fd %d tells it has hung up.", pollfd[i].fd);
 				if (!local_stream[i]->data_read) {
+					if (local_stream[i]->metadata_flag) {
+						iter.iter.node = &local_stream[i]->waitfd_node.node;
+						ret = lttng_ht_del(metadata_ht, &iter);
+						assert(!ret);
+					}
 					consumer_del_stream(local_stream[i]);
 					num_hup++;
 				}
 			} else if (pollfd[i].revents & POLLERR) {
 				ERR("Error returned in polling fd %d.", pollfd[i].fd);
 				if (!local_stream[i]->data_read) {
+					if (local_stream[i]->metadata_flag) {
+						iter.iter.node = &local_stream[i]->waitfd_node.node;
+						ret = lttng_ht_del(metadata_ht, &iter);
+						assert(!ret);
+					}
 					consumer_del_stream(local_stream[i]);
 					num_hup++;
 				}
 			} else if (pollfd[i].revents & POLLNVAL) {
 				ERR("Polling fd %d tells fd is not open.", pollfd[i].fd);
 				if (!local_stream[i]->data_read) {
+					if (local_stream[i]->metadata_flag) {
+						iter.iter.node = &local_stream[i]->waitfd_node.node;
+						ret = lttng_ht_del(metadata_ht, &iter);
+						assert(!ret);
+					}
 					consumer_del_stream(local_stream[i]);
 					num_hup++;
 				}
@@ -1260,7 +1815,7 @@ end:
 	 */
 	do {
 		ret = write(ctx->consumer_poll_pipe[1], "", 1);
-	} while (ret == -1UL && errno == EINTR);
+	} while (ret < 0 && errno == EINTR);
 	rcu_unregister_thread();
 	return NULL;
 }
@@ -1303,5 +1858,97 @@ void lttng_consumer_init(void)
 {
 	consumer_data.stream_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
 	consumer_data.channel_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
+	consumer_data.relayd_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
 }
 
+/*
+ * Process the ADD_RELAYD command receive by a consumer.
+ *
+ * This will create a relayd socket pair and add it to the relayd hash table.
+ * The caller MUST acquire a RCU read side lock before calling it.
+ */
+int consumer_add_relayd_socket(int net_seq_idx, int sock_type,
+		struct lttng_consumer_local_data *ctx, int sock,
+		struct pollfd *consumer_sockpoll, struct lttcomm_sock *relayd_sock)
+{
+	int fd, ret = -1;
+	struct consumer_relayd_sock_pair *relayd;
+
+	DBG("Consumer adding relayd socket (idx: %d)", net_seq_idx);
+
+	/* Get relayd reference if exists. */
+	relayd = consumer_find_relayd(net_seq_idx);
+	if (relayd == NULL) {
+		/* Not found. Allocate one. */
+		relayd = consumer_allocate_relayd_sock_pair(net_seq_idx);
+		if (relayd == NULL) {
+			lttng_consumer_send_error(ctx, CONSUMERD_OUTFD_ERROR);
+			goto error;
+		}
+	}
+
+	/* Poll on consumer socket. */
+	if (lttng_consumer_poll_socket(consumer_sockpoll) < 0) {
+		ret = -EINTR;
+		goto error;
+	}
+
+	/* Get relayd socket from session daemon */
+	ret = lttcomm_recv_fds_unix_sock(sock, &fd, 1);
+	if (ret != sizeof(fd)) {
+		lttng_consumer_send_error(ctx, CONSUMERD_ERROR_RECV_FD);
+		ret = -1;
+		goto error;
+	}
+
+	/* Copy socket information and received FD */
+	switch (sock_type) {
+	case LTTNG_STREAM_CONTROL:
+		/* Copy received lttcomm socket */
+		lttcomm_copy_sock(&relayd->control_sock, relayd_sock);
+		ret = lttcomm_create_sock(&relayd->control_sock);
+		if (ret < 0) {
+			goto error;
+		}
+
+		/* Close the created socket fd which is useless */
+		close(relayd->control_sock.fd);
+
+		/* Assign new file descriptor */
+		relayd->control_sock.fd = fd;
+		break;
+	case LTTNG_STREAM_DATA:
+		/* Copy received lttcomm socket */
+		lttcomm_copy_sock(&relayd->data_sock, relayd_sock);
+		ret = lttcomm_create_sock(&relayd->data_sock);
+		if (ret < 0) {
+			goto error;
+		}
+
+		/* Close the created socket fd which is useless */
+		close(relayd->data_sock.fd);
+
+		/* Assign new file descriptor */
+		relayd->data_sock.fd = fd;
+		break;
+	default:
+		ERR("Unknown relayd socket type (%d)", sock_type);
+		goto error;
+	}
+
+	DBG("Consumer %s socket created successfully with net idx %d (fd: %d)",
+			sock_type == LTTNG_STREAM_CONTROL ? "control" : "data",
+			relayd->net_seq_idx, fd);
+
+	/*
+	 * Add relayd socket pair to consumer data hashtable. If object already
+	 * exists or on error, the function gracefully returns.
+	 */
+	consumer_add_relayd(relayd);
+
+	/* All good! */
+	ret = 0;
+
+error:
+	return ret;
+}

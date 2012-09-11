@@ -24,9 +24,12 @@
 
 /* lttng-ust supported version. */
 #define LTTNG_UST_COMM_MAJOR          2	/* comm protocol major version */
-#define UST_APP_MAJOR_VERSION         2 /* UST version supported */
+#define UST_APP_MAJOR_VERSION         3 /* Internal UST version supported */
 
 #define UST_APP_EVENT_LIST_SIZE 32
+
+struct lttng_filter_bytecode;
+struct lttng_ust_filter_bytecode;
 
 extern int ust_consumerd64_fd, ust_consumerd32_fd;
 
@@ -71,6 +74,7 @@ struct ust_app_event {
 	char name[LTTNG_UST_SYM_NAME_LEN];
 	struct lttng_ht *ctx;
 	struct lttng_ht_node_str node;
+	struct lttng_ust_filter_bytecode *filter;
 };
 
 struct ust_app_channel {
@@ -140,6 +144,7 @@ int ust_app_stop_trace_all(struct ltt_ust_session *usess);
 int ust_app_destroy_trace(struct ltt_ust_session *usess, struct ust_app *app);
 int ust_app_destroy_trace_all(struct ltt_ust_session *usess);
 int ust_app_list_events(struct lttng_event **events);
+int ust_app_list_event_fields(struct lttng_event_field **fields);
 int ust_app_create_channel_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan);
 int ust_app_create_event_glb(struct ltt_ust_session *usess,
@@ -167,6 +172,9 @@ int ust_app_add_ctx_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_context *uctx);
 int ust_app_add_ctx_channel_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_context *uctx);
+int ust_app_set_filter_event_glb(struct ltt_ust_session *usess,
+                struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent,
+		struct lttng_filter_bytecode *bytecode);
 void ust_app_global_update(struct ltt_ust_session *usess, int sock);
 
 void ust_app_clean_list(void);
@@ -201,7 +209,12 @@ int ust_app_stop_trace_all(struct ltt_ust_session *usess)
 static inline
 int ust_app_list_events(struct lttng_event **events)
 {
-	return 0;
+	return -ENOSYS;
+}
+static inline
+int ust_app_list_event_fields(struct lttng_event_field **fields)
+{
+	return -ENOSYS;
 }
 static inline
 int ust_app_register(struct ust_register_msg *msg, int sock)
@@ -337,6 +350,13 @@ int ust_app_validate_version(int sock)
 }
 static inline
 int ust_app_calibrate_glb(struct lttng_ust_calibrate *calibrate)
+{
+	return 0;
+}
+static inline
+int ust_app_set_filter_event_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent,
+		struct lttng_filter_bytecode *bytecode)
 {
 	return 0;
 }

@@ -25,86 +25,149 @@
 #include <common/common.h>
 #include <common/consumer.h>
 #include <common/defaults.h>
-#include <common/sessiond-comm/sessiond-comm.h>
 
+#include "consumer.h"
 #include "ust-consumer.h"
+
+/*
+ * Send a single channel to the consumer using command ADD_CHANNEL.
+ */
+static int send_channel(int sock, struct ust_app_channel *uchan)
+{
+	int ret, fd;
+	struct lttcomm_consumer_msg msg;
+
+	/* Safety net */
+	assert(uchan);
+
+	if (sock < 0) {
+		ret = -EINVAL;
+		goto error;
+	}
+
+	DBG2("Sending channel %s to UST consumer", uchan->name);
+
+	consumer_init_channel_comm_msg(&msg,
+			LTTNG_CONSUMER_ADD_CHANNEL,
+			uchan->obj->shm_fd,
+			uchan->attr.subbuf_size,
+			uchan->obj->memory_map_size,
+			uchan->name);
+
+	ret = consumer_send_channel(sock, &msg);
+	if (ret < 0) {
+		goto error;
+	}
+
+	fd = uchan->obj->shm_fd;
+	ret = consumer_send_fds(sock, &fd, 1);
+	if (ret < 0) {
+		goto error;
+	}
+
+error:
+	return ret;
+}
+
+/*
+ * Send a single stream to the consumer using ADD_STREAM command.
+ */
+static int send_channel_stream(int sock, struct ust_app_channel *uchan,
+		struct ust_app_session *usess, struct ltt_ust_stream *stream,
+		struct consumer_output *consumer, const char *pathname)
+{
+	int ret, fds[2];
+	struct lttcomm_consumer_msg msg;
+
+	/* Safety net */
+	assert(uchan);
+	assert(usess);
+	assert(stream);
+	assert(consumer);
+
+	DBG2("Sending stream %d of channel %s to kernel consumer",
+			stream->obj->shm_fd, uchan->name);
+
+	consumer_init_stream_comm_msg(&msg,
+			LTTNG_CONSUMER_ADD_STREAM,
+			uchan->obj->shm_fd,
+			stream->obj->shm_fd,
+			LTTNG_CONSUMER_ACTIVE_STREAM,
+			DEFAULT_UST_CHANNEL_OUTPUT,
+			stream->obj->memory_map_size,
+			usess->uid,
+			usess->gid,
+			consumer->net_seq_index,
+			0, /* Metadata flag unset */
+			stream->name,
+			pathname);
+
+	/* Send stream and file descriptor */
+	fds[0] = stream->obj->shm_fd;
+	fds[1] = stream->obj->wait_fd;
+	ret = consumer_send_stream(sock, consumer, &msg, fds, 2);
+	if (ret < 0) {
+		goto error;
+	}
+
+error:
+	return ret;
+}
 
 /*
  * Send all stream fds of UST channel to the consumer.
  */
 static int send_channel_streams(int sock,
-		struct ust_app_channel *uchan,
-		uid_t uid, gid_t gid)
+		struct ust_app_channel *uchan, struct ust_app_session *usess,
+		struct consumer_output *consumer)
 {
-	int ret, fd;
-	struct lttcomm_consumer_msg lum;
+	int ret;
+	char tmp_path[PATH_MAX];
+	const char *pathname;
 	struct ltt_ust_stream *stream, *tmp;
 
 	DBG("Sending streams of channel %s to UST consumer", uchan->name);
 
-	/* Send channel */
-	lum.cmd_type = LTTNG_CONSUMER_ADD_CHANNEL;
-
-	/*
-	 * We need to keep shm_fd open while we transfer the stream file
-	 * descriptors to make sure this key stays unique within the
-	 * session daemon. We can free the channel shm_fd without
-	 * problem after we finished sending stream fds for that
-	 * channel.
-	 */
-	lum.u.channel.channel_key = uchan->obj->shm_fd;
-	lum.u.channel.max_sb_size = uchan->attr.subbuf_size;
-	lum.u.channel.mmap_len = uchan->obj->memory_map_size;
-	DBG("Sending channel %d to consumer", lum.u.channel.channel_key);
-	ret = lttcomm_send_unix_sock(sock, &lum, sizeof(lum));
+	ret = send_channel(sock, uchan);
 	if (ret < 0) {
-		PERROR("send consumer channel");
 		goto error;
 	}
-	fd = uchan->obj->shm_fd;
-	ret = lttcomm_send_fds_unix_sock(sock, &fd, 1);
-	if (ret < 0) {
-		PERROR("send consumer channel ancillary data");
-		goto error;
+
+	/* Get the right path name destination */
+	if (consumer->type == CONSUMER_DST_LOCAL) {
+		/* Set application path to the destination path */
+		ret = snprintf(tmp_path, sizeof(tmp_path), "%s/%s/%s",
+				consumer->dst.trace_path, consumer->subdir, usess->path);
+		if (ret < 0) {
+			PERROR("snprintf stream path");
+			goto error;
+		}
+		pathname = tmp_path;
+		DBG3("UST local consumer tracefile path: %s", pathname);
+	} else {
+		ret = snprintf(tmp_path, sizeof(tmp_path), "%s/%s",
+				consumer->subdir, usess->path);
+		if (ret < 0) {
+			PERROR("snprintf stream path");
+			goto error;
+		}
+		pathname = tmp_path;
+		DBG3("UST network consumer subdir path: %s", pathname);
 	}
 
 	cds_list_for_each_entry_safe(stream, tmp, &uchan->streams.head, list) {
-		int fds[2];
-
 		if (!stream->obj->shm_fd) {
 			continue;
 		}
-		lum.cmd_type = LTTNG_CONSUMER_ADD_STREAM;
-		lum.u.stream.channel_key = uchan->obj->shm_fd;
-		lum.u.stream.stream_key = stream->obj->shm_fd;
-		lum.u.stream.state = LTTNG_CONSUMER_ACTIVE_STREAM;
-		/*
-		 * FIXME Hack alert! we force MMAP for now. Mixup
-		 * between EVENT and UST enums elsewhere.
-		 */
-		lum.u.stream.output = DEFAULT_UST_CHANNEL_OUTPUT;
-		lum.u.stream.mmap_len = stream->obj->memory_map_size;
-		lum.u.stream.uid = uid;
-		lum.u.stream.gid = gid;
-		strncpy(lum.u.stream.path_name, stream->pathname, PATH_MAX - 1);
-		lum.u.stream.path_name[PATH_MAX - 1] = '\0';
-		DBG("Sending stream %d to consumer", lum.u.stream.stream_key);
-		ret = lttcomm_send_unix_sock(sock, &lum, sizeof(lum));
-		if (ret < 0) {
-			PERROR("send consumer stream");
-			goto error;
-		}
 
-		fds[0] = stream->obj->shm_fd;
-		fds[1] = stream->obj->wait_fd;
-		ret = lttcomm_send_fds_unix_sock(sock, fds, 2);
+		ret = send_channel_stream(sock, uchan, usess, stream, consumer,
+				pathname);
 		if (ret < 0) {
-			PERROR("send consumer stream ancillary data");
 			goto error;
 		}
 	}
 
-	DBG("consumer channel streams sent");
+	DBG("UST consumer channel streams sent");
 
 	return 0;
 
@@ -113,69 +176,134 @@ error:
 }
 
 /*
- * Send all stream fds of the UST session to the consumer.
+ * Sending metadata to the consumer with command ADD_CHANNEL and ADD_STREAM.
  */
-int ust_consumer_send_session(int consumer_fd, struct ust_app_session *usess)
+static int send_metadata(int sock, struct ust_app_session *usess,
+		struct consumer_output *consumer)
 {
-	int ret = 0;
-	int sock = consumer_fd;
-	struct lttng_ht_iter iter;
-	struct lttcomm_consumer_msg lum;
-	struct ust_app_channel *ua_chan;
+	int ret, fd, fds[2];
+	char tmp_path[PATH_MAX];
+	const char *pathname;
+	struct lttcomm_consumer_msg msg;
 
-	DBG("Sending metadata stream fd");
+	/* Safety net */
+	assert(usess);
+	assert(consumer);
 
-	if (consumer_fd < 0) {
-		ERR("Consumer has negative file descriptor");
+	if (sock < 0) {
+		ERR("Consumer socket is negative (%d)", sock);
 		return -EINVAL;
 	}
 
-	if (usess->metadata->obj->shm_fd != 0) {
-		int fd;
-		int fds[2];
+	if (usess->metadata->obj->shm_fd == 0) {
+		ERR("Metadata obj shm_fd is 0");
+		ret = -1;
+		goto error;
+	}
 
-		/* Send metadata channel fd */
-		lum.cmd_type = LTTNG_CONSUMER_ADD_CHANNEL;
-		lum.u.channel.channel_key = usess->metadata->obj->shm_fd;
-		lum.u.channel.max_sb_size = usess->metadata->attr.subbuf_size;
-		lum.u.channel.mmap_len = usess->metadata->obj->memory_map_size;
-		DBG("Sending metadata channel %d to consumer", lum.u.channel.channel_key);
-		ret = lttcomm_send_unix_sock(sock, &lum, sizeof(lum));
-		if (ret < 0) {
-			PERROR("send consumer channel");
-			goto error;
-		}
-		fd = usess->metadata->obj->shm_fd;
-		ret = lttcomm_send_fds_unix_sock(sock, &fd, 1);
-		if (ret < 0) {
-			PERROR("send consumer metadata channel");
-			goto error;
-		}
+	DBG("UST consumer sending metadata stream fd");
 
-		/* Send metadata stream fd */
-		lum.cmd_type = LTTNG_CONSUMER_ADD_STREAM;
-		lum.u.stream.channel_key = usess->metadata->obj->shm_fd;
-		lum.u.stream.stream_key = usess->metadata->stream_obj->shm_fd;
-		lum.u.stream.state = LTTNG_CONSUMER_ACTIVE_STREAM;
-		lum.u.stream.output = DEFAULT_UST_CHANNEL_OUTPUT;
-		lum.u.stream.mmap_len = usess->metadata->stream_obj->memory_map_size;
-		lum.u.stream.uid = usess->uid;
-		lum.u.stream.gid = usess->gid;
-		strncpy(lum.u.stream.path_name, usess->metadata->pathname, PATH_MAX - 1);
-		lum.u.stream.path_name[PATH_MAX - 1] = '\0';
-		DBG("Sending metadata stream %d to consumer", lum.u.stream.stream_key);
-		ret = lttcomm_send_unix_sock(sock, &lum, sizeof(lum));
+	consumer_init_channel_comm_msg(&msg,
+			LTTNG_CONSUMER_ADD_CHANNEL,
+			usess->metadata->obj->shm_fd,
+			usess->metadata->attr.subbuf_size,
+			usess->metadata->obj->memory_map_size,
+			"metadata");
+
+	ret = consumer_send_channel(sock, &msg);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Sending metadata shared memory fd */
+	fd = usess->metadata->obj->shm_fd;
+	ret = consumer_send_fds(sock, &fd, 1);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Get correct path name destination */
+	if (consumer->type == CONSUMER_DST_LOCAL) {
+		/* Set application path to the destination path */
+		ret = snprintf(tmp_path, sizeof(tmp_path), "%s/%s/%s",
+				consumer->dst.trace_path, consumer->subdir, usess->path);
 		if (ret < 0) {
-			PERROR("send consumer metadata stream");
+			PERROR("snprintf stream path");
 			goto error;
 		}
-		fds[0] = usess->metadata->stream_obj->shm_fd;
-		fds[1] = usess->metadata->stream_obj->wait_fd;
-		ret = lttcomm_send_fds_unix_sock(sock, fds, 2);
+		pathname = tmp_path;
+
+		/* Create directory */
+		ret = run_as_mkdir_recursive(pathname, S_IRWXU | S_IRWXG,
+				usess->uid, usess->gid);
 		if (ret < 0) {
-			PERROR("send consumer stream");
+			if (ret != -EEXIST) {
+				ERR("Trace directory creation error");
+				goto error;
+			}
+		}
+	} else {
+		ret = snprintf(tmp_path, sizeof(tmp_path), "%s/%s",
+				consumer->subdir, usess->path);
+		if (ret < 0) {
+			PERROR("snprintf metadata path");
 			goto error;
 		}
+		pathname = tmp_path;
+	}
+
+	consumer_init_stream_comm_msg(&msg,
+			LTTNG_CONSUMER_ADD_STREAM,
+			usess->metadata->obj->shm_fd,
+			usess->metadata->stream_obj->shm_fd,
+			LTTNG_CONSUMER_ACTIVE_STREAM,
+			DEFAULT_UST_CHANNEL_OUTPUT,
+			usess->metadata->stream_obj->memory_map_size,
+			usess->uid,
+			usess->gid,
+			consumer->net_seq_index,
+			1, /* Flag metadata set */
+			"metadata",
+			pathname);
+
+	/* Send stream and file descriptor */
+	fds[0] = usess->metadata->stream_obj->shm_fd;
+	fds[1] = usess->metadata->stream_obj->wait_fd;
+	ret = consumer_send_stream(sock, consumer, &msg, fds, 2);
+	if (ret < 0) {
+		goto error;
+	}
+
+error:
+	return ret;
+}
+
+/*
+ * Send all stream fds of the UST session to the consumer.
+ */
+int ust_consumer_send_session(struct ust_app_session *usess,
+		struct consumer_output *consumer, struct consumer_socket *sock)
+{
+	int ret = 0;
+	struct lttng_ht_iter iter;
+	struct ust_app_channel *ua_chan;
+
+	assert(usess);
+
+	if (consumer == NULL || sock == NULL) {
+		/* There is no consumer so just ignoring the command. */
+		DBG("UST consumer does not exist. Not sending streams");
+		return 0;
+	}
+
+	DBG("Sending metadata stream fd to consumer on %d", sock->fd);
+
+	pthread_mutex_lock(sock->lock);
+
+	/* Sending metadata information to the consumer */
+	ret = send_metadata(sock->fd, usess, consumer);
+	if (ret < 0) {
+		goto error;
 	}
 
 	/* Send each channel fd streams of session */
@@ -190,7 +318,7 @@ int ust_consumer_send_session(int consumer_fd, struct ust_app_session *usess)
 			continue;
 		}
 
-		ret = send_channel_streams(sock, ua_chan, usess->uid, usess->gid);
+		ret = send_channel_streams(sock->fd, ua_chan, usess, consumer);
 		if (ret < 0) {
 			rcu_read_unlock();
 			goto error;
@@ -200,8 +328,10 @@ int ust_consumer_send_session(int consumer_fd, struct ust_app_session *usess)
 
 	DBG("consumer fds (metadata and channel streams) sent");
 
-	return 0;
+	/* All good! */
+	ret = 0;
 
 error:
+	pthread_mutex_unlock(sock->lock);
 	return ret;
 }

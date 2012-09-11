@@ -17,11 +17,7 @@
  */
 
 #define _GNU_SOURCE
-#include <errno.h>
-#include <limits.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
 #include <common/error.h>
@@ -35,7 +31,14 @@ int notify_thread_pipe(int wpipe)
 {
 	int ret;
 
-	ret = write(wpipe, "!", 1);
+	/* Ignore if the pipe is invalid. */
+	if (wpipe < 0) {
+		return 0;
+	}
+
+	do {
+		ret = write(wpipe, "!", 1);
+	} while (ret < 0 && errno == EINTR);
 	if (ret < 0) {
 		PERROR("write poll pipe");
 	}

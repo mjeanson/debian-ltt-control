@@ -43,6 +43,8 @@ compile the git repository tree :
 - GNU Gold >= 2.22
   (Before this version we hit a known bug documented at:
   http://sourceware.org/bugzilla/show_bug.cgi?id=11317)
+- flex >= 2.5.35
+- bison >= 2.4
 
 If you get the tree from the repository, you will need to use the "bootstrap"
 script in the root of the tree. It calls all the GNU tools needed to prepare the
@@ -66,11 +68,14 @@ Please see doc/quickstart.txt to help you start tracing. You can also use the
 -h/--help command on 'lttng' and all other commands offered in this tool (Ex:
 lttng enable-event -h).
 
+A network streaming HOWTO can be found in doc/streaming-howto.txt which quickly
+helps you understand how to stream a LTTng 2.0 trace.
+
 PACKAGE CONTENTS:
 
     This package contains the following elements:
 
-    - liblttngctl
+    - liblttng-ctl
       The LTTng tracing control library.
 
     - libsessiond-comm (internal)
@@ -92,6 +97,18 @@ PACKAGE CONTENTS:
 	- libhashtable (internal)
 	  Library wrapper over URCU hashtables.
 
+	- libcommon (internal)
+	  Contains multiple useful function call used by the whole tree.
+
+	- libcompat (internal)
+	  Compatibility library mostly for FreeBSD and Linux.
+	
+	- librelayd (internal)
+	  Library for all relayd interactions over the network.
+
+	- lttng-relayd
+	  The relay daemon used for network streaming
+
     - lttng-consumerd
       The consumer daemon which uses libconsumer.
 
@@ -109,3 +126,6 @@ PACKAGE CONTENTS:
 
 	- doc
 	  Various documentations and quickstart guide.
+
+	- extras
+	  Contains extra data such as bash completion file.

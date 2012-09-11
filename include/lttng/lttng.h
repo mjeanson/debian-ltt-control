@@ -19,8 +19,8 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef _LTTNG_H
-#define _LTTNG_H
+#ifndef LTTNG_H
+#define LTTNG_H
 
 #include <limits.h>
 #include <stdint.h>
@@ -80,21 +80,21 @@ enum lttng_loglevel_type {
  * Available loglevels.
  */
 enum lttng_loglevel {
-        LTTNG_LOGLEVEL_EMERG                  = 0,
-        LTTNG_LOGLEVEL_ALERT                  = 1,
-        LTTNG_LOGLEVEL_CRIT                   = 2,
-        LTTNG_LOGLEVEL_ERR                    = 3,
-        LTTNG_LOGLEVEL_WARNING                = 4,
-        LTTNG_LOGLEVEL_NOTICE                 = 5,
-        LTTNG_LOGLEVEL_INFO                   = 6,
-        LTTNG_LOGLEVEL_DEBUG_SYSTEM           = 7,
-        LTTNG_LOGLEVEL_DEBUG_PROGRAM          = 8,
-        LTTNG_LOGLEVEL_DEBUG_PROCESS          = 9,
-        LTTNG_LOGLEVEL_DEBUG_MODULE           = 10,
-        LTTNG_LOGLEVEL_DEBUG_UNIT             = 11,
-        LTTNG_LOGLEVEL_DEBUG_FUNCTION         = 12,
-        LTTNG_LOGLEVEL_DEBUG_LINE             = 13,
-        LTTNG_LOGLEVEL_DEBUG                  = 14,
+	LTTNG_LOGLEVEL_EMERG                  = 0,
+	LTTNG_LOGLEVEL_ALERT                  = 1,
+	LTTNG_LOGLEVEL_CRIT                   = 2,
+	LTTNG_LOGLEVEL_ERR                    = 3,
+	LTTNG_LOGLEVEL_WARNING                = 4,
+	LTTNG_LOGLEVEL_NOTICE                 = 5,
+	LTTNG_LOGLEVEL_INFO                   = 6,
+	LTTNG_LOGLEVEL_DEBUG_SYSTEM           = 7,
+	LTTNG_LOGLEVEL_DEBUG_PROGRAM          = 8,
+	LTTNG_LOGLEVEL_DEBUG_PROCESS          = 9,
+	LTTNG_LOGLEVEL_DEBUG_MODULE           = 10,
+	LTTNG_LOGLEVEL_DEBUG_UNIT             = 11,
+	LTTNG_LOGLEVEL_DEBUG_FUNCTION         = 12,
+	LTTNG_LOGLEVEL_DEBUG_LINE             = 13,
+	LTTNG_LOGLEVEL_DEBUG                  = 14,
 };
 
 /*
@@ -122,6 +122,16 @@ enum lttng_event_context_type {
 
 enum lttng_calibrate_type {
 	LTTNG_CALIBRATE_FUNCTION              = 0,
+};
+
+/* Health component for the health check function. */
+enum lttng_health_component {
+	LTTNG_HEALTH_CMD,
+	LTTNG_HEALTH_APP_MANAGE,
+	LTTNG_HEALTH_APP_REG,
+	LTTNG_HEALTH_KERNEL,
+	LTTNG_HEALTH_CONSUMER,
+	LTTNG_HEALTH_ALL,
 };
 
 /*
@@ -205,7 +215,7 @@ struct lttng_event_function_attr {
  *
  * The structures should be initialized to zero before use.
  */
-#define LTTNG_EVENT_PADDING1               16
+#define LTTNG_EVENT_PADDING1               15
 #define LTTNG_EVENT_PADDING2               LTTNG_SYMBOL_NAME_LEN + 32
 struct lttng_event {
 	enum lttng_event_type type;
@@ -214,8 +224,9 @@ struct lttng_event {
 	enum lttng_loglevel_type loglevel_type;
 	int loglevel;
 
-	uint32_t enabled;
+	int32_t enabled;	/* Does not apply: -1 */
 	pid_t pid;
+	unsigned char filter;	/* filter enabled ? */
 
 	char padding[LTTNG_EVENT_PADDING1];
 
@@ -226,6 +237,22 @@ struct lttng_event {
 
 		char padding[LTTNG_EVENT_PADDING2];
 	} attr;
+};
+
+enum lttng_event_field_type {
+	LTTNG_EVENT_FIELD_OTHER			= 0,
+	LTTNG_EVENT_FIELD_INTEGER		= 1,
+	LTTNG_EVENT_FIELD_ENUM			= 2,
+	LTTNG_EVENT_FIELD_FLOAT			= 3,
+	LTTNG_EVENT_FIELD_STRING		= 4,
+};
+
+#define LTTNG_EVENT_FIELD_PADDING	LTTNG_SYMBOL_NAME_LEN + 32
+struct lttng_event_field {
+	char field_name[LTTNG_SYMBOL_NAME_LEN];
+	enum lttng_event_field_type type;
+	char padding[LTTNG_EVENT_FIELD_PADDING];
+	struct lttng_event event;
 };
 
 /*
@@ -330,10 +357,11 @@ extern struct lttng_handle *lttng_create_handle(const char *session_name,
 extern void lttng_destroy_handle(struct lttng_handle *handle);
 
 /*
- * Create a tracing session using a name and a path where the trace will be
- * written.
+ * Create a tracing session using a name and an optional URL.
+ *
+ * If _url_ is NULL, no consumer is created for the session.
  */
-extern int lttng_create_session(const char *name, const char *path);
+extern int lttng_create_session(const char *name, const char *url);
 
 /*
  * Destroy a tracing session.
@@ -386,6 +414,15 @@ extern int lttng_list_events(struct lttng_handle *handle,
  */
 extern int lttng_list_tracepoints(struct lttng_handle *handle,
 		struct lttng_event **events);
+
+/*
+ * List the available tracepoints fields of a specific lttng domain.
+ *
+ * Return the size (number of entries) of the "lttng_event_field" array.
+ * Caller must free(3).
+ */
+extern int lttng_list_tracepoint_fields(struct lttng_handle *handle,
+		struct lttng_event_field **fields);
 
 /*
  * Check if a session daemon is alive.
@@ -452,6 +489,17 @@ extern int lttng_enable_event(struct lttng_handle *handle,
 		struct lttng_event *ev, const char *channel_name);
 
 /*
+ * Apply a filter expression to an event.
+ *
+ * If event_name is NULL, the filter is applied to all events of the channel.
+ * If channel_name is NULL, a lookup of the event's channel is done.
+ * If both are NULL, the filter is applied to all events of all channels.
+ */
+extern int lttng_set_event_filter(struct lttng_handle *handle,
+		const char *event_name,
+		const char *channel_name,
+		const char *filter_expression);
+/*
  * Create or enable a channel.
  * The channel name cannot be NULL.
  */
@@ -490,4 +538,38 @@ extern int lttng_calibrate(struct lttng_handle *handle,
 extern void lttng_channel_set_default_attr(struct lttng_domain *domain,
 		struct lttng_channel_attr *attr);
 
-#endif /* _LTTNG_H */
+/*
+ * Set URL for a consumer for a session and domain.
+ *
+ * Both data and control URL must be defined. If both URLs are the same, only
+ * the control URL is used even for network streaming.
+ *
+ * Default port are 5342 and 5343 respectively for control and data which uses
+ * the TCP protocol.
+ */
+extern int lttng_set_consumer_url(struct lttng_handle *handle,
+		const char *control_url, const char *data_url);
+
+/*
+ * Enable the consumer for a session and domain.
+ */
+extern int lttng_enable_consumer(struct lttng_handle *handle);
+
+/*
+ * Disable consumer for a session and domain.
+ */
+extern int lttng_disable_consumer(struct lttng_handle *handle);
+
+/*
+ * Check session daemon health for a specific component.
+ *
+ * Return 0 if health is OK or 1 if BAD. A returned value of -1 indicate that
+ * the control library was not able to connect to the session daemon health
+ * socket.
+ *
+ * Any other positive value is an lttcomm error which can be translate with
+ * lttng_strerror().
+ */
+extern int lttng_health_check(enum lttng_health_component c);
+
+#endif /* LTTNG_H */

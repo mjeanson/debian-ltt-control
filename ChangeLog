@@ -1,15 +1,21 @@
-2012-06-22 lttng-tools 2.0.3
-	* Fix: enable event loglevel match function
-	* Fix: unchecked pointer from getenv() for lttng create
-	* Ship license text file with the release archive
+2012-08-22 lttng-tools 2.1.0-rc2
+	* Fix: put back 2.0 output text for lttng create cmd
+	* Fix: remove set subdir call that uses bad ptr
+	* Filter: Handle the unary bitwise not operator (~) with an unsupported
+	* Fix: missing mutex unlock on register consumer err
+	* Remove underscore from ifndef of lttng.h
+	* Remove unused define in lttng.h
+	* Standardize lttng command line usage text
+	* Merge duplicate code in consumer for destroy relayd
+	* Merge duplicate code in consumer for add relayd
+	* Fix: Possible buffer overflows in strncat() usage
+	* Move code out of main.c and fix some issues
 
-2012-06-14 lttng-tools 2.0.2
-	* Fix: enable event with different loglevel error
-	* Fix: move memset in channel_set_attr after NULL check
-	* Fix: close all file descriptors when executed as daemon
-	* Fix: clang llvm warnings
-	* Add CodingStyle to tarball
-	* Add coding style document
+2012-08-17 lttng-tools 2.1.0-rc1
+	* Feature: Network Streaming
+	* Add the lttng-relayd binary for network streaming
+	* Support user space tracer filtering
+	* Multiple fixes
 
 2012-04-19 lttng-tools 2.0.1
 	* Fix: test script for kernel module validation
