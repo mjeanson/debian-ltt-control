@@ -4591,7 +4591,7 @@ m4_if([$1], [CXX], [
     esac
     ;;
   linux* | k*bsd*-gnu | gnu*)
-    _LT_TAGVAR(link_all_deplibs, $1)=no
+    _LT_TAGVAR(link_all_deplibs, $1)=unknown
     ;;
   *)
     _LT_TAGVAR(export_symbols_cmds, $1)='$NM $libobjs $convenience | $global_symbol_pipe | $SED '\''s/.* //'\'' | sort | uniq > $export_symbols'
@@ -4656,7 +4656,7 @@ dnl Note also adjust exclude_expsyms for C++ above.
     with_gnu_ld=no
     ;;
   linux* | k*bsd*-gnu | gnu*)
-    _LT_TAGVAR(link_all_deplibs, $1)=no
+    _LT_TAGVAR(link_all_deplibs, $1)=unknown
     ;;
   esac
 
@@ -5056,7 +5056,7 @@ _LT_EOF
 	if test "$aix_use_runtimelinking" = yes; then
 	  shared_flag="$shared_flag "'${wl}-G'
 	fi
-	_LT_TAGVAR(link_all_deplibs, $1)=no
+	_LT_TAGVAR(link_all_deplibs, $1)=unknown
       else
 	# not using gcc
 	if test "$host_cpu" = ia64; then

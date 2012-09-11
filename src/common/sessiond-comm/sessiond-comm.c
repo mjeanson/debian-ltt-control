@@ -32,6 +32,18 @@
 
 #include "sessiond-comm.h"
 
+/* For Unix socket */
+#include "unix.h"
+/* For Inet socket */
+#include "inet.h"
+/* For Inet6 socket */
+#include "inet6.h"
+
+struct lttcomm_net_family net_families[] = {
+	{ LTTCOMM_INET, lttcomm_create_inet_sock },
+	{ LTTCOMM_INET6, lttcomm_create_inet6_sock },
+};
+
 /*
  * Human readable error message.
  */
@@ -126,6 +138,15 @@ static const char *lttcomm_readable_code[] = {
 	[ LTTCOMM_ERR_INDEX(LTTCOMM_NO_USTCONSUMERD) ] = "No UST consumer detected",
 	[ LTTCOMM_ERR_INDEX(LTTCOMM_NO_KERNCONSUMERD) ] = "No kernel consumer detected",
 	[ LTTCOMM_ERR_INDEX(LTTCOMM_EVENT_EXIST_LOGLEVEL) ] = "Event already enabled with different loglevel",
+	[ LTTCOMM_ERR_INDEX(LTTCOMM_URL_DATA_MISS) ] = "Missing data path URL",
+	[ LTTCOMM_ERR_INDEX(LTTCOMM_URL_CTRL_MISS) ] = "Missing control data path URL",
+	[ LTTCOMM_ERR_INDEX(LTTCOMM_ENABLE_CONSUMER_FAIL) ] = "Enabling consumer failed",
+	[ LTTCOMM_ERR_INDEX(LTTCOMM_RELAYD_SESSION_FAIL) ] = "Unable to create session on lttng-relayd",
+	[ LTTCOMM_ERR_INDEX(LTTCOMM_RELAYD_VERSION_FAIL) ] = "Relay daemon not compatible",
+	[ LTTCOMM_ERR_INDEX(LTTCOMM_FILTER_INVAL) ] = "Invalid filter bytecode",
+	[ LTTCOMM_ERR_INDEX(LTTCOMM_FILTER_NOMEM) ] = "Not enough memory for filter bytecode",
+	[ LTTCOMM_ERR_INDEX(LTTCOMM_FILTER_EXIST) ] = "Filter already exist",
+	[ LTTCOMM_ERR_INDEX(LTTCOMM_NO_CONSUMER) ] = "Consumer not found for tracing session",
 };
 
 /*
@@ -146,480 +167,225 @@ const char *lttcomm_get_readable_code(enum lttcomm_return_code code)
 }
 
 /*
- * Connect to unix socket using the path name.
+ * Create socket from an already allocated lttcomm socket structure and init
+ * sockaddr in the lttcomm sock.
  */
-int lttcomm_connect_unix_sock(const char *pathname)
+int lttcomm_create_sock(struct lttcomm_sock *sock)
 {
-	struct sockaddr_un sun;
-	int fd, ret, closeret;
+	int ret, _sock_type, _sock_proto, domain;
 
-	fd = socket(PF_UNIX, SOCK_STREAM, 0);
-	if (fd < 0) {
-		PERROR("socket");
-		ret = fd;
+	assert(sock);
+
+	domain = sock->sockaddr.type;
+	if (domain != LTTCOMM_INET && domain != LTTCOMM_INET6) {
+		ERR("Create socket of unknown domain %d", domain);
+		ret = -1;
 		goto error;
 	}
 
-	memset(&sun, 0, sizeof(sun));
-	sun.sun_family = AF_UNIX;
-	strncpy(sun.sun_path, pathname, sizeof(sun.sun_path));
-	sun.sun_path[sizeof(sun.sun_path) - 1] = '\0';
+	switch (sock->proto) {
+	case LTTCOMM_SOCK_UDP:
+		_sock_type = SOCK_DGRAM;
+		_sock_proto = IPPROTO_UDP;
+		break;
+	case LTTCOMM_SOCK_TCP:
+		_sock_type = SOCK_STREAM;
+		_sock_proto = IPPROTO_TCP;
+		break;
+	default:
+		ret = -1;
+		goto error;
+	}
 
-	ret = connect(fd, (struct sockaddr *) &sun, sizeof(sun));
+	ret = net_families[domain].create(sock, _sock_type, _sock_proto);
 	if (ret < 0) {
-		/*
-		 * Don't print message on connect error, because connect is used in
-		 * normal execution to detect if sessiond is alive.
-		 */
-		goto error_connect;
-	}
-
-	return fd;
-
-error_connect:
-	closeret = close(fd);
-	if (closeret) {
-		PERROR("close");
-	}
-error:
-	return ret;
-}
-
-/*
- * Do an accept(2) on the sock and return the new file descriptor. The socket
- * MUST be bind(2) before.
- */
-int lttcomm_accept_unix_sock(int sock)
-{
-	int new_fd;
-	struct sockaddr_un sun;
-	socklen_t len = 0;
-
-	/* Blocking call */
-	new_fd = accept(sock, (struct sockaddr *) &sun, &len);
-	if (new_fd < 0) {
-		PERROR("accept");
-	}
-
-	return new_fd;
-}
-
-/*
- * Creates a AF_UNIX local socket using pathname bind the socket upon creation
- * and return the fd.
- */
-int lttcomm_create_unix_sock(const char *pathname)
-{
-	struct sockaddr_un sun;
-	int fd;
-	int ret = -1;
-
-	/* Create server socket */
-	if ((fd = socket(PF_UNIX, SOCK_STREAM, 0)) < 0) {
-		PERROR("socket");
 		goto error;
 	}
-
-	memset(&sun, 0, sizeof(sun));
-	sun.sun_family = AF_UNIX;
-	strncpy(sun.sun_path, pathname, sizeof(sun.sun_path));
-	sun.sun_path[sizeof(sun.sun_path) - 1] = '\0';
-
-	/* Unlink the old file if present */
-	(void) unlink(pathname);
-	ret = bind(fd, (struct sockaddr *) &sun, sizeof(sun));
-	if (ret < 0) {
-		PERROR("bind");
-		goto error;
-	}
-
-	return fd;
 
 error:
 	return ret;
 }
 
 /*
- * Make the socket listen using LTTNG_SESSIOND_COMM_MAX_LISTEN.
+ * Return allocated lttcomm socket structure.
  */
-int lttcomm_listen_unix_sock(int sock)
+struct lttcomm_sock *lttcomm_alloc_sock(enum lttcomm_sock_proto proto)
+{
+	struct lttcomm_sock *sock;
+
+	sock = zmalloc(sizeof(struct lttcomm_sock));
+	if (sock == NULL) {
+		PERROR("zmalloc create sock");
+		goto end;
+	}
+
+	sock->proto = proto;
+	sock->fd = -1;
+
+end:
+	return sock;
+}
+
+/*
+ * Return an allocated lttcomm socket structure and copy src content into
+ * the newly created socket.
+ *
+ * This is mostly useful when lttcomm_sock are passed between process where the
+ * fd and ops have to be changed within the correct address space.
+ */
+struct lttcomm_sock *lttcomm_alloc_copy_sock(struct lttcomm_sock *src)
+{
+	struct lttcomm_sock *sock;
+
+	/* Safety net */
+	assert(src);
+
+	sock = lttcomm_alloc_sock(src->proto);
+	if (sock == NULL) {
+		goto alloc_error;
+	}
+
+	lttcomm_copy_sock(sock, src);
+
+alloc_error:
+	return sock;
+}
+
+/*
+ * Create and copy socket from an allocated lttcomm socket structure.
+ *
+ * This is mostly useful when lttcomm_sock are passed between process where the
+ * fd and ops have to be changed within the correct address space.
+ */
+void lttcomm_copy_sock(struct lttcomm_sock *dst, struct lttcomm_sock *src)
+{
+	/* Safety net */
+	assert(dst);
+	assert(src);
+
+	dst->proto = src->proto;
+	dst->fd = src->fd;
+	dst->ops = src->ops;
+	/* Copy sockaddr information from original socket */
+	memcpy(&dst->sockaddr, &src->sockaddr, sizeof(dst->sockaddr));
+}
+
+/*
+ * Init IPv4 sockaddr structure.
+ */
+int lttcomm_init_inet_sockaddr(struct lttcomm_sockaddr *sockaddr,
+		const char *ip, unsigned int port)
 {
 	int ret;
 
-	ret = listen(sock, LTTNG_SESSIOND_COMM_MAX_LISTEN);
-	if (ret < 0) {
-		PERROR("listen");
-	}
+	assert(sockaddr);
+	assert(ip);
+	assert(port > 0 && port <= 65535);
 
+	memset(sockaddr, 0, sizeof(struct lttcomm_sockaddr));
+
+	sockaddr->type = LTTCOMM_INET;
+	sockaddr->addr.sin.sin_family = AF_INET;
+	sockaddr->addr.sin.sin_port = htons(port);
+	ret = inet_pton(sockaddr->addr.sin.sin_family, ip,
+			&sockaddr->addr.sin.sin_addr);
+	if (ret < 1) {
+		ret = -1;
+		ERR("%s with port %d: unrecognized IPv4 address", ip, port);
+		goto error;
+	}
+	memset(sockaddr->addr.sin.sin_zero, 0, sizeof(sockaddr->addr.sin.sin_zero));
+
+error:
 	return ret;
 }
 
 /*
- * Receive data of size len in put that data into the buf param. Using recvmsg
- * API.
- *
- * Return the size of received data.
+ * Init IPv6 sockaddr structure.
  */
-ssize_t lttcomm_recv_unix_sock(int sock, void *buf, size_t len)
+int lttcomm_init_inet6_sockaddr(struct lttcomm_sockaddr *sockaddr,
+		const char *ip, unsigned int port)
 {
-	struct msghdr msg;
-	struct iovec iov[1];
-	ssize_t ret = -1;
+	int ret;
 
-	memset(&msg, 0, sizeof(msg));
+	assert(sockaddr);
+	assert(ip);
+	assert(port > 0 && port <= 65535);
 
-	iov[0].iov_base = buf;
-	iov[0].iov_len = len;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
+	memset(sockaddr, 0, sizeof(struct lttcomm_sockaddr));
 
-	do {
-		ret = recvmsg(sock, &msg, MSG_WAITALL);
-	} while (ret < 0 && errno == EINTR);
-	if (ret < 0) {
-		PERROR("recvmsg");
+	sockaddr->type = LTTCOMM_INET6;
+	sockaddr->addr.sin6.sin6_family = AF_INET6;
+	sockaddr->addr.sin6.sin6_port = htons(port);
+	ret = inet_pton(sockaddr->addr.sin6.sin6_family, ip,
+			&sockaddr->addr.sin6.sin6_addr);
+	if (ret < 1) {
+		ret = -1;
+		goto error;
 	}
 
+error:
 	return ret;
 }
 
 /*
- * Send buf data of size len. Using sendmsg API.
- *
- * Return the size of sent data.
+ * Return allocated lttcomm socket structure from lttng URI.
  */
-ssize_t lttcomm_send_unix_sock(int sock, void *buf, size_t len)
+struct lttcomm_sock *lttcomm_alloc_sock_from_uri(struct lttng_uri *uri)
 {
-	struct msghdr msg;
-	struct iovec iov[1];
-	ssize_t ret = -1;
+	int ret;
+	int _sock_proto;
+	struct lttcomm_sock *sock = NULL;
 
-	memset(&msg, 0, sizeof(msg));
+	/* Safety net */
+	assert(uri);
 
-	iov[0].iov_base = buf;
-	iov[0].iov_len = len;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
+	/* Check URI protocol */
+	if (uri->proto == LTTNG_TCP) {
+		_sock_proto = LTTCOMM_SOCK_TCP;
+	} else {
+		ERR("Relayd invalid URI proto: %d", uri->proto);
+		goto alloc_error;
+	}
 
-	ret = sendmsg(sock, &msg, 0);
-	if (ret < 0) {
-		/*
-		 * Only warn about EPIPE when quiet mode is deactivated.
-		 * We consider EPIPE as expected.
-		 */
-		if (errno != EPIPE || !lttng_opt_quiet) {
-			PERROR("sendmsg");
+	sock = lttcomm_alloc_sock(_sock_proto);
+	if (sock == NULL) {
+		goto alloc_error;
+	}
+
+	/* Check destination type */
+	if (uri->dtype == LTTNG_DST_IPV4) {
+		ret = lttcomm_init_inet_sockaddr(&sock->sockaddr, uri->dst.ipv4,
+				uri->port);
+		if (ret < 0) {
+			goto error;
 		}
-	}
-
-	return ret;
-}
-
-/*
- * Shutdown cleanly a unix socket.
- */
-int lttcomm_close_unix_sock(int sock)
-{
-	int ret, closeret;
-
-	/* Shutdown receptions and transmissions */
-	ret = shutdown(sock, SHUT_RDWR);
-	if (ret < 0) {
-		PERROR("shutdown");
-	}
-
-	closeret = close(sock);
-	if (closeret) {
-		PERROR("close");
-	}
-
-	return ret;
-}
-
-/*
- * Send a message accompanied by fd(s) over a unix socket.
- *
- * Returns the size of data sent, or negative error value.
- */
-ssize_t lttcomm_send_fds_unix_sock(int sock, int *fds, size_t nb_fd)
-{
-	struct msghdr msg;
-	struct cmsghdr *cmptr;
-	struct iovec iov[1];
-	ssize_t ret = -1;
-	unsigned int sizeof_fds = nb_fd * sizeof(int);
-	char tmp[CMSG_SPACE(sizeof_fds)];
-	char dummy = 0;
-
-	memset(&msg, 0, sizeof(msg));
-
-	if (nb_fd > LTTCOMM_MAX_SEND_FDS)
-		return -EINVAL;
-
-	msg.msg_control = (caddr_t)tmp;
-	msg.msg_controllen = CMSG_LEN(sizeof_fds);
-
-	cmptr = CMSG_FIRSTHDR(&msg);
-	cmptr->cmsg_level = SOL_SOCKET;
-	cmptr->cmsg_type = SCM_RIGHTS;
-	cmptr->cmsg_len = CMSG_LEN(sizeof_fds);
-	memcpy(CMSG_DATA(cmptr), fds, sizeof_fds);
-	/* Sum of the length of all control messages in the buffer: */
-	msg.msg_controllen = cmptr->cmsg_len;
-
-	iov[0].iov_base = &dummy;
-	iov[0].iov_len = 1;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-
-	do {
-		ret = sendmsg(sock, &msg, 0);
-	} while (ret < 0 && errno == EINTR);
-	if (ret < 0) {
-		/*
-		 * Only warn about EPIPE when quiet mode is deactivated.
-		 * We consider EPIPE as expected.
-		 */
-		if (errno != EPIPE || !lttng_opt_quiet) {
-			PERROR("sendmsg");
+	} else if (uri->dtype == LTTNG_DST_IPV6) {
+		ret = lttcomm_init_inet6_sockaddr(&sock->sockaddr, uri->dst.ipv6,
+				uri->port);
+		if (ret < 0) {
+			goto error;
 		}
+	} else {
+		/* Command URI is invalid */
+		ERR("Relayd invalid URI dst type: %d", uri->dtype);
+		goto error;
 	}
-	return ret;
+
+	return sock;
+
+error:
+	lttcomm_destroy_sock(sock);
+alloc_error:
+	return NULL;
 }
 
 /*
- * Recv a message accompanied by fd(s) from a unix socket.
- *
- * Returns the size of received data, or negative error value.
- *
- * Expect at most "nb_fd" file descriptors. Returns the number of fd
- * actually received in nb_fd.
+ * Destroy and free lttcomm socket.
  */
-ssize_t lttcomm_recv_fds_unix_sock(int sock, int *fds, size_t nb_fd)
+void lttcomm_destroy_sock(struct lttcomm_sock *sock)
 {
-	struct iovec iov[1];
-	ssize_t ret = 0;
-	struct cmsghdr *cmsg;
-	size_t sizeof_fds = nb_fd * sizeof(int);
-	char recv_fd[CMSG_SPACE(sizeof_fds)];
-	struct msghdr msg;
-	char dummy;
-
-	memset(&msg, 0, sizeof(msg));
-
-	/* Prepare to receive the structures */
-	iov[0].iov_base = &dummy;
-	iov[0].iov_len = 1;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-	msg.msg_control = recv_fd;
-	msg.msg_controllen = sizeof(recv_fd);
-
-	do {
-		ret = recvmsg(sock, &msg, 0);
-	} while (ret < 0 && errno == EINTR);
-	if (ret < 0) {
-		PERROR("recvmsg fds");
-		goto end;
+	if (sock != NULL) {
+		free(sock);
 	}
-	if (ret != 1) {
-		fprintf(stderr, "Error: Received %zd bytes, expected %d\n",
-				ret, 1);
-		goto end;
-	}
-	if (msg.msg_flags & MSG_CTRUNC) {
-		fprintf(stderr, "Error: Control message truncated.\n");
-		ret = -1;
-		goto end;
-	}
-	cmsg = CMSG_FIRSTHDR(&msg);
-	if (!cmsg) {
-		fprintf(stderr, "Error: Invalid control message header\n");
-		ret = -1;
-		goto end;
-	}
-	if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) {
-		fprintf(stderr, "Didn't received any fd\n");
-		ret = -1;
-		goto end;
-	}
-	if (cmsg->cmsg_len != CMSG_LEN(sizeof_fds)) {
-		fprintf(stderr, "Error: Received %zu bytes of ancillary data, expected %zu\n",
-				(size_t) cmsg->cmsg_len, (size_t) CMSG_LEN(sizeof_fds));
-		ret = -1;
-		goto end;
-	}
-	memcpy(fds, CMSG_DATA(cmsg), sizeof_fds);
-	ret = sizeof_fds;
-end:
-	return ret;
 }
-
-/*
- * Send a message with credentials over a unix socket.
- *
- * Returns the size of data sent, or negative error value.
- */
-ssize_t lttcomm_send_creds_unix_sock(int sock, void *buf, size_t len)
-{
-	struct msghdr msg;
-	struct iovec iov[1];
-	ssize_t ret = -1;
-#ifdef __linux__
-	struct cmsghdr *cmptr;
-	size_t sizeof_cred = sizeof(lttng_sock_cred);
-	char anc_buf[CMSG_SPACE(sizeof_cred)];
-	lttng_sock_cred *creds;
-#endif /* __linux__ */
-
-	memset(&msg, 0, sizeof(msg));
-
-	iov[0].iov_base = buf;
-	iov[0].iov_len = len;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-
-#ifdef __linux__
-	msg.msg_control = (caddr_t) anc_buf;
-	msg.msg_controllen = CMSG_LEN(sizeof_cred);
-
-	cmptr = CMSG_FIRSTHDR(&msg);
-	cmptr->cmsg_level = SOL_SOCKET;
-	cmptr->cmsg_type = LTTNG_SOCK_CREDS;
-	cmptr->cmsg_len = CMSG_LEN(sizeof_cred);
-
-	creds = (lttng_sock_cred*) CMSG_DATA(cmptr);
-
-	LTTNG_SOCK_SET_UID_CRED(creds, geteuid());
-	LTTNG_SOCK_SET_GID_CRED(creds, getegid());
-	LTTNG_SOCK_SET_PID_CRED(creds, getpid());
-#endif /* __linux__ */
-
-	do {
-		ret = sendmsg(sock, &msg, 0);
-	} while (ret < 0 && errno == EINTR);
-	if (ret < 0) {
-		/*
-		 * Only warn about EPIPE when quiet mode is deactivated.
-		 * We consider EPIPE as expected.
-		 */
-		if (errno != EPIPE || !lttng_opt_quiet) {
-			PERROR("sendmsg");
-		}
-	}
-	return ret;
-}
-
-/*
- * Recv a message accompanied with credentials from a unix socket.
- *
- * Returns the size of received data, or negative error value.
- */
-ssize_t lttcomm_recv_creds_unix_sock(int sock, void *buf, size_t len,
-		lttng_sock_cred *creds)
-{
-	struct msghdr msg;
-	struct iovec iov[1];
-	ssize_t ret;
-#ifdef __linux__
-	struct cmsghdr *cmptr;
-	size_t sizeof_cred = sizeof(lttng_sock_cred);
-	char anc_buf[CMSG_SPACE(sizeof_cred)];
-#endif	/* __linux__ */
-
-	memset(&msg, 0, sizeof(msg));
-
-	/* Not allowed */
-	if (creds == NULL) {
-		ret = -1;
-		goto end;
-	}
-
-	/* Prepare to receive the structures */
-	iov[0].iov_base = buf;
-	iov[0].iov_len = len;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-
-#ifdef __linux__
-	msg.msg_control = anc_buf;
-	msg.msg_controllen = sizeof(anc_buf);
-#endif /* __linux__ */
-
-	do {
-		ret = recvmsg(sock, &msg, 0);
-	} while (ret < 0 && errno == EINTR);
-	if (ret < 0) {
-		PERROR("recvmsg fds");
-		goto end;
-	}
-
-#ifdef __linux__
-	if (msg.msg_flags & MSG_CTRUNC) {
-		fprintf(stderr, "Error: Control message truncated.\n");
-		ret = -1;
-		goto end;
-	}
-
-	cmptr = CMSG_FIRSTHDR(&msg);
-	if (cmptr == NULL) {
-		fprintf(stderr, "Error: Invalid control message header\n");
-		ret = -1;
-		goto end;
-	}
-
-	if (cmptr->cmsg_level != SOL_SOCKET ||
-			cmptr->cmsg_type != LTTNG_SOCK_CREDS) {
-		fprintf(stderr, "Didn't received any credentials\n");
-		ret = -1;
-		goto end;
-	}
-
-	if (cmptr->cmsg_len != CMSG_LEN(sizeof_cred)) {
-		fprintf(stderr, "Error: Received %zu bytes of ancillary data, expected %zu\n",
-				(size_t) cmptr->cmsg_len, (size_t) CMSG_LEN(sizeof_cred));
-		ret = -1;
-		goto end;
-	}
-
-	memcpy(creds, CMSG_DATA(cmptr), sizeof_cred);
-#elif defined(__FreeBSD__)
-	{
-		int peer_ret;
-
-		peer_ret = getpeereid(sock, &creds->uid, &creds->gid);
-		if (peer_ret != 0) {
-			return peer_ret;
-		}
-	}
-#else
-#error "Please implement credential support for your OS."
-#endif	/* __linux__ */
-
-end:
-	return ret;
-}
-
-/*
- * Set socket option to use credentials passing.
- */
-#ifdef __linux__
-int lttcomm_setsockopt_creds_unix_sock(int sock)
-{
-	int ret, on = 1;
-
-	/* Set socket for credentials retrieval */
-	ret = setsockopt(sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof(on));
-	if (ret < 0) {
-		PERROR("setsockopt creds unix sock");
-	}
-	return ret;
-}
-#elif defined(__FreeBSD__)
-int lttcomm_setsockopt_creds_unix_sock(int sock)
-{
-	return 0;
-}
-#else
-#error "Please implement credential support for your OS."
-#endif /* __linux__ */

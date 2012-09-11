@@ -41,6 +41,7 @@ static char *opt_probe;
 static char *opt_function;
 static char *opt_function_entry_symbol;
 static char *opt_channel_name;
+static char *opt_filter;
 #if 0
 /* Not implemented yet */
 static char *opt_cmd_name;
@@ -58,6 +59,7 @@ enum {
 	OPT_LOGLEVEL,
 	OPT_LOGLEVEL_ONLY,
 	OPT_LIST_OPTIONS,
+	OPT_FILTER,
 };
 
 static struct lttng_handle *handle;
@@ -69,13 +71,7 @@ static struct poptOption long_options[] = {
 	{"all",            'a', POPT_ARG_VAL, &opt_enable_all, 1, 0, 0},
 	{"channel",        'c', POPT_ARG_STRING, &opt_channel_name, 0, 0, 0},
 	{"kernel",         'k', POPT_ARG_VAL, &opt_kernel, 1, 0, 0},
-#if 0
-	/* Not implemented yet */
-	{"userspace",      'u', POPT_ARG_STRING | POPT_ARGFLAG_OPTIONAL, &opt_cmd_name, OPT_USERSPACE, 0, 0},
-	{"pid",            'p', POPT_ARG_INT, &opt_pid, 0, 0, 0},
-#else
 	{"userspace",      'u', POPT_ARG_NONE, 0, OPT_USERSPACE, 0, 0},
-#endif
 	{"tracepoint",     0,   POPT_ARG_NONE, 0, OPT_TRACEPOINT, 0, 0},
 	{"probe",          0,   POPT_ARG_STRING, &opt_probe, OPT_PROBE, 0, 0},
 	{"function",       0,   POPT_ARG_STRING, &opt_function, OPT_FUNCTION, 0, 0},
@@ -90,6 +86,7 @@ static struct poptOption long_options[] = {
 	{"loglevel",       0,     POPT_ARG_STRING, 0, OPT_LOGLEVEL, 0, 0},
 	{"loglevel-only",  0,     POPT_ARG_STRING, 0, OPT_LOGLEVEL_ONLY, 0, 0},
 	{"list-options", 0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
+	{"filter",         'f', POPT_ARG_STRING, &opt_filter, OPT_FILTER, 0, 0},
 	{0, 0, 0, 0, 0, 0, 0}
 };
 
@@ -98,22 +95,16 @@ static struct poptOption long_options[] = {
  */
 static void usage(FILE *ofp)
 {
-	fprintf(ofp, "usage: lttng enable-event NAME[,NAME2,...] [options] [event_options]\n");
+	fprintf(ofp, "usage: lttng enable-event NAME[,NAME2,...] [-k|-u] [OPTIONS] \n");
 	fprintf(ofp, "\n");
+	fprintf(ofp, "Options:\n");
 	fprintf(ofp, "  -h, --help               Show this help\n");
 	fprintf(ofp, "      --list-options       Simple listing of options\n");
-	fprintf(ofp, "  -s, --session            Apply to session name\n");
-	fprintf(ofp, "  -c, --channel            Apply to this channel\n");
+	fprintf(ofp, "  -s, --session NAME       Apply to session name\n");
+	fprintf(ofp, "  -c, --channel NAME       Apply to this channel\n");
 	fprintf(ofp, "  -a, --all                Enable all tracepoints and syscalls\n");
 	fprintf(ofp, "  -k, --kernel             Apply for the kernel tracer\n");
-#if 0
-	fprintf(ofp, "  -u, --userspace [CMD]    Apply to the user-space tracer\n");
-	fprintf(ofp, "                           If no CMD, the domain used is UST global\n");
-	fprintf(ofp, "                           or else the domain is UST EXEC_NAME\n");
-	fprintf(ofp, "  -p, --pid PID            If -u, apply to specific PID (domain: UST PID)\n");
-#else
 	fprintf(ofp, "  -u, --userspace          Apply to the user-space tracer\n");
-#endif
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Event options:\n");
 	fprintf(ofp, "    --tracepoint           Tracepoint event (default)\n");
@@ -162,6 +153,29 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "                               TRACE_DEBUG_LINE     = 13\n");
 	fprintf(ofp, "                               TRACE_DEBUG          = 14\n");
 	fprintf(ofp, "                               (shortcuts such as \"system\" are allowed)\n");
+	fprintf(ofp, "    --filter \'expression\'\n");
+	fprintf(ofp, "                           Filter expression on event fields,\n");
+	fprintf(ofp, "                           event recording depends on evaluation.\n");
+	fprintf(ofp, "                           Only specify on first activation of\n");
+	fprintf(ofp, "                           a given event within a session.\n");
+	fprintf(ofp, "                           Filter only allowed when enabling\n");
+	fprintf(ofp, "                           events within a session before tracing\n");
+	fprintf(ofp, "                           is started. If the filter fails to link\n");
+	fprintf(ofp, "                           with the event within the traced domain,\n");
+	fprintf(ofp, "                           the event will be discarded. Currently,\n");
+	fprintf(ofp, "                           filter is only implemented for the user-space\n");
+	fprintf(ofp, "                           tracer.\n");
+	fprintf(ofp, "                           Expression examples:.\n");
+	fprintf(ofp, "                           \n");
+	fprintf(ofp, "                           'intfield > 500 && intfield < 503'\n");
+	fprintf(ofp, "                           '(stringfield == \"test\" || intfield != 10) && intfield > 33'\n");
+	fprintf(ofp, "                           'doublefield > 1.1 && intfield < 5.3'\n");
+	fprintf(ofp, "                           \n");
+	fprintf(ofp, "                           Wildcards are allowed at the end of strings:\n");
+	fprintf(ofp, "                           'seqfield1 == \"te*\"'\n");
+	fprintf(ofp, "                           In string literals, the escape character is '\\'.\n");
+	fprintf(ofp, "                           Use '\\*' for the '*' character, and '\\\\' for\n");
+	fprintf(ofp, "                           the '\\' character.\n");
 	fprintf(ofp, "\n");
 }
 
@@ -294,6 +308,14 @@ static int enable_events(char *session_name)
 	memset(&ev, 0, sizeof(ev));
 	memset(&dom, 0, sizeof(dom));
 
+	if (opt_kernel) {
+		if (opt_filter) {
+			ERR("Filter not implement for kernel tracing yet");
+			ret = CMD_ERROR;
+			goto error;
+		}
+	}
+
 	/* Create lttng domain */
 	if (opt_kernel) {
 		dom.type = LTTNG_DOMAIN_KERNEL;
@@ -357,6 +379,15 @@ static int enable_events(char *session_name)
 				break;
 			}
 			goto end;
+		}
+		if (opt_filter) {
+			ret = lttng_set_event_filter(handle, ev.name, channel_name,
+						opt_filter);
+			if (ret < 0) {
+				ERR("Error setting filter");
+				ret = -1;
+				goto error;
+			}
 		}
 
 		switch (opt_event_type) {
@@ -519,6 +550,15 @@ static int enable_events(char *session_name)
 			MSG("%s event %s created in channel %s",
 					opt_kernel ? "kernel": "UST", event_name, channel_name);
 		}
+		if (opt_filter) {
+			ret = lttng_set_event_filter(handle, ev.name,
+				channel_name, opt_filter);
+			if (ret < 0) {
+				ERR("Error setting filter");
+				ret = -1;
+				goto error;
+			}
+		}
 
 		/* Next event */
 		event_name = strtok(NULL, ",");
@@ -586,6 +626,8 @@ int cmd_enable_events(int argc, const char **argv)
 		case OPT_LIST_OPTIONS:
 			list_cmd_options(stdout, long_options);
 			goto end;
+		case OPT_FILTER:
+			break;
 		default:
 			usage(stderr);
 			ret = CMD_UNDEFINED;

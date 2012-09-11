@@ -18,6 +18,7 @@
 
 #define _GNU_SOURCE
 #include <assert.h>
+#include <lttng/ust-ctl.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -26,11 +27,12 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <inttypes.h>
 #include <unistd.h>
-#include <lttng/ust-ctl.h>
 
 #include <common/common.h>
 #include <common/sessiond-comm/sessiond-comm.h>
+#include <common/relayd/relayd.h>
 #include <common/compat/fcntl.h>
 
 #include "ust-consumer.h"
@@ -40,61 +42,14 @@ extern int consumer_poll_timeout;
 extern volatile int consumer_quit;
 
 /*
- * Mmap the ring buffer, read it and write the data to the tracefile.
- *
- * Returns the number of bytes written, else negative value on error.
+ * Wrapper over the mmap() read offset from ust-ctl library. Since this can be
+ * compiled out, we isolate it in this library.
  */
-ssize_t lttng_ustconsumer_on_read_subbuffer_mmap(
-		struct lttng_consumer_local_data *ctx,
-		struct lttng_consumer_stream *stream, unsigned long len)
+int lttng_ustctl_get_mmap_read_offset(struct lttng_ust_shm_handle *handle,
+		struct lttng_ust_lib_ring_buffer *buf, unsigned long *off)
 {
-	unsigned long mmap_offset;
-	long ret = 0;
-	off_t orig_offset = stream->out_fd_offset;
-	int outfd = stream->out_fd;
-
-	/* get the offset inside the fd to mmap */
-	ret = ustctl_get_mmap_read_offset(stream->chan->handle,
-		stream->buf, &mmap_offset);
-	if (ret != 0) {
-		errno = -ret;
-		PERROR("ustctl_get_mmap_read_offset");
-		goto end;
-	}
-	while (len > 0) {
-		ret = write(outfd, stream->mmap_base + mmap_offset, len);
-		if (ret >= len) {
-			len = 0;
-		} else if (ret < 0) {
-			errno = -ret;
-			PERROR("Error in file write");
-			goto end;
-		}
-		/* This won't block, but will start writeout asynchronously */
-		lttng_sync_file_range(outfd, stream->out_fd_offset, ret,
-				SYNC_FILE_RANGE_WRITE);
-		stream->out_fd_offset += ret;
-	}
-
-	lttng_consumer_sync_trace_file(stream, orig_offset);
-
-	goto end;
-
-end:
-	return ret;
-}
-
-/*
- * Splice the data from the ring buffer to the tracefile.
- *
- * Returns the number of bytes spliced.
- */
-ssize_t lttng_ustconsumer_on_read_subbuffer_splice(
-		struct lttng_consumer_local_data *ctx,
-		struct lttng_consumer_stream *stream, unsigned long len)
-{
-	return -ENOSYS;
-}
+	return ustctl_get_mmap_read_offset(handle, buf, off);
+};
 
 /*
  * Take a snapshot for a specific fd
@@ -145,6 +100,8 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 
 	ret = lttcomm_recv_unix_sock(sock, &msg, sizeof(msg));
 	if (ret != sizeof(msg)) {
+		DBG("Consumer received unexpected message size %zd (expects %zu)",
+			ret, sizeof(msg));
 		lttng_consumer_send_error(ctx, CONSUMERD_ERROR_RECV_FD);
 		return ret;
 	}
@@ -152,20 +109,34 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		return -ENOENT;
 	}
 
+	/* relayd needs RCU read-side lock */
+	rcu_read_lock();
+
 	switch (msg.cmd_type) {
+	case LTTNG_CONSUMER_ADD_RELAYD_SOCKET:
+	{
+		ret = consumer_add_relayd_socket(msg.u.relayd_sock.net_index,
+				msg.u.relayd_sock.type, ctx, sock, consumer_sockpoll,
+				&msg.u.relayd_sock.sock);
+		goto end_nosignal;
+	}
 	case LTTNG_CONSUMER_ADD_CHANNEL:
 	{
 		struct lttng_consumer_channel *new_channel;
 		int fds[1];
 		size_t nb_fd = 1;
 
+		DBG("UST Consumer adding channel");
+
 		/* block */
 		if (lttng_consumer_poll_socket(consumer_sockpoll) < 0) {
+			rcu_read_unlock();
 			return -EINTR;
 		}
 		ret = lttcomm_recv_fds_unix_sock(sock, fds, nb_fd);
 		if (ret != sizeof(fds)) {
 			lttng_consumer_send_error(ctx, CONSUMERD_ERROR_RECV_FD);
+			rcu_read_unlock();
 			return ret;
 		}
 
@@ -196,21 +167,28 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		struct lttng_consumer_stream *new_stream;
 		int fds[2];
 		size_t nb_fd = 2;
+		struct consumer_relayd_sock_pair *relayd = NULL;
+
+		DBG("UST Consumer adding stream");
 
 		/* block */
 		if (lttng_consumer_poll_socket(consumer_sockpoll) < 0) {
+			rcu_read_unlock();
 			return -EINTR;
 		}
 		ret = lttcomm_recv_fds_unix_sock(sock, fds, nb_fd);
 		if (ret != sizeof(fds)) {
 			lttng_consumer_send_error(ctx, CONSUMERD_ERROR_RECV_FD);
+			rcu_read_unlock();
 			return ret;
 		}
 
-		DBG("consumer_add_stream %s (%d,%d)", msg.u.stream.path_name,
-			fds[0], fds[1]);
+		DBG("consumer_add_stream chan %d stream %d",
+				msg.u.stream.channel_key,
+				msg.u.stream.stream_key);
+
 		assert(msg.u.stream.output == LTTNG_EVENT_MMAP);
-		new_stream = consumer_allocate_stream(msg.u.channel.channel_key,
+		new_stream = consumer_allocate_stream(msg.u.stream.channel_key,
 				msg.u.stream.stream_key,
 				fds[0], fds[1],
 				msg.u.stream.state,
@@ -218,25 +196,80 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 				msg.u.stream.output,
 				msg.u.stream.path_name,
 				msg.u.stream.uid,
-				msg.u.stream.gid);
+				msg.u.stream.gid,
+				msg.u.stream.net_index,
+				msg.u.stream.metadata_flag);
 		if (new_stream == NULL) {
 			lttng_consumer_send_error(ctx, CONSUMERD_OUTFD_ERROR);
-			goto end;
+			goto end_nosignal;
 		}
+
+		/* The stream is not metadata. Get relayd reference if exists. */
+		relayd = consumer_find_relayd(msg.u.stream.net_index);
+		if (relayd != NULL) {
+			pthread_mutex_lock(&relayd->ctrl_sock_mutex);
+			/* Add stream on the relayd */
+			ret = relayd_add_stream(&relayd->control_sock,
+					msg.u.stream.name, msg.u.stream.path_name,
+					&new_stream->relayd_stream_id);
+			pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
+			if (ret < 0) {
+				goto end_nosignal;
+			}
+		} else if (msg.u.stream.net_index != -1) {
+			ERR("Network sequence index %d unknown. Not adding stream.",
+					msg.u.stream.net_index);
+			free(new_stream);
+			goto end_nosignal;
+		}
+
 		if (ctx->on_recv_stream != NULL) {
 			ret = ctx->on_recv_stream(new_stream);
 			if (ret == 0) {
 				consumer_add_stream(new_stream);
 			} else if (ret < 0) {
-				goto end;
+				goto end_nosignal;
 			}
 		} else {
 			consumer_add_stream(new_stream);
 		}
+
+		DBG("UST consumer_add_stream %s (%d,%d) with relayd id %" PRIu64,
+				msg.u.stream.path_name, fds[0], fds[1],
+				new_stream->relayd_stream_id);
 		break;
+	}
+	case LTTNG_CONSUMER_DESTROY_RELAYD:
+	{
+		uint64_t index = msg.u.destroy_relayd.net_seq_idx;
+		struct consumer_relayd_sock_pair *relayd;
+
+		DBG("UST consumer destroying relayd %" PRIu64, index);
+
+		/* Get relayd reference if exists. */
+		relayd = consumer_find_relayd(index);
+		if (relayd == NULL) {
+			ERR("Unable to find relayd %" PRIu64, index);
+			goto end_nosignal;
+		}
+
+		/*
+		 * Each relayd socket pair has a refcount of stream attached to it
+		 * which tells if the relayd is still active or not depending on the
+		 * refcount value.
+		 *
+		 * This will set the destroy flag of the relayd object and destroy it
+		 * if the refcount reaches zero when called.
+		 *
+		 * The destroy can happen either here or when a stream fd hangs up.
+		 */
+		consumer_flag_relayd_for_destroy(relayd);
+
+		goto end_nosignal;
 	}
 	case LTTNG_CONSUMER_UPDATE_STREAM:
 	{
+		rcu_read_unlock();
 		return -ENOSYS;
 #if 0
 		if (ctx->on_update_stream != NULL) {
@@ -250,28 +283,30 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 			consumer_change_stream_state(msg.u.stream.stream_key,
 				msg.u.stream.state);
 		}
-#endif
 		break;
+#endif
 	}
 	default:
 		break;
 	}
-end:
+
 	/*
-	 * Wake-up the other end by writing a null byte in the pipe
-	 * (non-blocking). Important note: Because writing into the
-	 * pipe is non-blocking (and therefore we allow dropping wakeup
-	 * data, as long as there is wakeup data present in the pipe
-	 * buffer to wake up the other end), the other end should
-	 * perform the following sequence for waiting:
+	 * Wake-up the other end by writing a null byte in the pipe (non-blocking).
+	 * Important note: Because writing into the pipe is non-blocking (and
+	 * therefore we allow dropping wakeup data, as long as there is wakeup data
+	 * present in the pipe buffer to wake up the other end), the other end
+	 * should perform the following sequence for waiting:
+	 *
 	 * 1) empty the pipe (reads).
 	 * 2) perform update operation.
 	 * 3) wait on the pipe (poll).
 	 */
 	do {
 		ret = write(ctx->consumer_poll_pipe[1], "", 1);
-	} while (ret == -1UL && errno == EINTR);
+	} while (ret < 0 && errno == EINTR);
 end_nosignal:
+	/* XXX: At some point we might want to return something else than zero */
+	rcu_read_unlock();
 	return 0;
 }
 
@@ -384,12 +419,12 @@ int lttng_ustconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
 	assert(err == 0);
 	/* write the subbuffer to the tracefile */
 	ret = lttng_consumer_on_read_subbuffer_mmap(ctx, stream, len);
-	if (ret < 0) {
+	if (ret != len) {
 		/*
 		 * display the error but continue processing to try
 		 * to release the subbuffer
 		 */
-		ERR("Error writing to tracefile");
+		ERR("Error writing to tracefile (expected: %ld, got: %ld)", ret, len);
 	}
 	err = ustctl_put_next_subbuf(handle, buf);
 	assert(err == 0);
@@ -402,7 +437,7 @@ int lttng_ustconsumer_on_recv_stream(struct lttng_consumer_stream *stream)
 	int ret;
 
 	/* Opening the tracefile in write mode */
-	if (stream->path_name != NULL) {
+	if (stream->path_name != NULL && stream->net_seq_idx == -1) {
 		ret = run_as_open(stream->path_name,
 				O_WRONLY|O_CREAT|O_TRUNC,
 				S_IRWXU|S_IRWXG|S_IRWXO,

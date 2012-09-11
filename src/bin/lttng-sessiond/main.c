@@ -33,7 +33,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <urcu/futex.h>
 #include <urcu/uatomic.h>
 #include <unistd.h>
 #include <config.h>
@@ -43,39 +42,28 @@
 #include <common/compat/socket.h>
 #include <common/defaults.h>
 #include <common/kernel-consumer/kernel-consumer.h>
-#include <common/ust-consumer/ust-consumer.h>
+#include <common/futex.h>
+#include <common/relayd/relayd.h>
+#include <common/utils.h>
 
 #include "lttng-sessiond.h"
 #include "channel.h"
+#include "cmd.h"
+#include "consumer.h"
 #include "context.h"
 #include "event.h"
-#include "futex.h"
 #include "kernel.h"
+#include "kernel-consumer.h"
 #include "modprobe.h"
 #include "shm.h"
 #include "ust-ctl.h"
+#include "ust-consumer.h"
 #include "utils.h"
 #include "fd-limit.h"
+#include "filter.h"
+#include "health.h"
 
 #define CONSUMERD_FILE	"lttng-consumerd"
-
-struct consumer_data {
-	enum lttng_consumer_type type;
-
-	pthread_t thread;	/* Worker thread interacting with the consumer */
-	sem_t sem;
-
-	/* Mutex to control consumerd pid assignation */
-	pthread_mutex_t pid_mutex;
-	pid_t pid;
-
-	int err_sock;
-	int cmd_sock;
-
-	/* consumer error and command Unix socket path */
-	char err_unix_sock_path[PATH_MAX];
-	char cmd_unix_sock_path[PATH_MAX];
-};
 
 /* Const values */
 const char default_home_dir[] = DEFAULT_HOME_DIR;
@@ -100,6 +88,8 @@ static struct consumer_data kconsumer_data = {
 	.cmd_unix_sock_path = DEFAULT_KCONSUMERD_CMD_SOCK_PATH,
 	.err_sock = -1,
 	.cmd_sock = -1,
+	.pid_mutex = PTHREAD_MUTEX_INITIALIZER,
+	.lock = PTHREAD_MUTEX_INITIALIZER,
 };
 static struct consumer_data ustconsumer64_data = {
 	.type = LTTNG_CONSUMER64_UST,
@@ -107,6 +97,8 @@ static struct consumer_data ustconsumer64_data = {
 	.cmd_unix_sock_path = DEFAULT_USTCONSUMERD64_CMD_SOCK_PATH,
 	.err_sock = -1,
 	.cmd_sock = -1,
+	.pid_mutex = PTHREAD_MUTEX_INITIALIZER,
+	.lock = PTHREAD_MUTEX_INITIALIZER,
 };
 static struct consumer_data ustconsumer32_data = {
 	.type = LTTNG_CONSUMER32_UST,
@@ -114,8 +106,11 @@ static struct consumer_data ustconsumer32_data = {
 	.cmd_unix_sock_path = DEFAULT_USTCONSUMERD32_CMD_SOCK_PATH,
 	.err_sock = -1,
 	.cmd_sock = -1,
+	.pid_mutex = PTHREAD_MUTEX_INITIALIZER,
+	.lock = PTHREAD_MUTEX_INITIALIZER,
 };
 
+/* Shared between threads */
 static int dispatch_thread_exit;
 
 /* Global application Unix socket path */
@@ -124,11 +119,13 @@ static char apps_unix_sock_path[PATH_MAX];
 static char client_unix_sock_path[PATH_MAX];
 /* global wait shm path for UST */
 static char wait_shm_path[PATH_MAX];
+/* Global health check unix path */
+static char health_unix_sock_path[PATH_MAX];
 
 /* Sockets and FDs */
 static int client_sock = -1;
 static int apps_sock = -1;
-static int kernel_tracer_fd = -1;
+int kernel_tracer_fd = -1;
 static int kernel_poll_pipe[2] = { -1, -1 };
 
 /*
@@ -149,7 +146,7 @@ static pthread_t reg_apps_thread;
 static pthread_t client_thread;
 static pthread_t kernel_thread;
 static pthread_t dispatch_thread;
-
+static pthread_t health_thread;
 
 /*
  * UST registration command queue. This queue is tied with a futex and uses a N
@@ -179,6 +176,8 @@ static const char *consumerd32_bin = CONFIG_CONSUMERD32_BIN;
 static const char *consumerd64_bin = CONFIG_CONSUMERD64_BIN;
 static const char *consumerd32_libdir = CONFIG_CONSUMERD32_LIBDIR;
 static const char *consumerd64_libdir = CONFIG_CONSUMERD64_LIBDIR;
+
+static const char *module_proc_lttng = "/proc/lttng";
 
 /*
  * Consumer daemon state which is changed when spawning it, killing it or in
@@ -213,6 +212,12 @@ enum consumerd_state {
  */
 static enum consumerd_state ust_consumerd_state;
 static enum consumerd_state kernel_consumerd_state;
+
+/* Used for the health monitoring of the session daemon. See health.h */
+struct health_state health_thread_cmd;
+struct health_state health_thread_app_manage;
+struct health_state health_thread_app_reg;
+struct health_state health_thread_kernel;
 
 static
 void setup_consumerd_path(void)
@@ -354,54 +359,6 @@ error:
 }
 
 /*
- * Complete teardown of a kernel session. This free all data structure related
- * to a kernel session and update counter.
- */
-static void teardown_kernel_session(struct ltt_session *session)
-{
-	if (!session->kernel_session) {
-		DBG3("No kernel session when tearing down session");
-		return;
-	}
-
-	DBG("Tearing down kernel session");
-
-	/*
-	 * If a custom kernel consumer was registered, close the socket before
-	 * tearing down the complete kernel session structure
-	 */
-	if (kconsumer_data.cmd_sock >= 0 &&
-			session->kernel_session->consumer_fd != kconsumer_data.cmd_sock) {
-		lttcomm_close_unix_sock(session->kernel_session->consumer_fd);
-	}
-
-	trace_kernel_destroy_session(session->kernel_session);
-}
-
-/*
- * Complete teardown of all UST sessions. This will free everything on his path
- * and destroy the core essence of all ust sessions :)
- */
-static void teardown_ust_session(struct ltt_session *session)
-{
-	int ret;
-
-	if (!session->ust_session) {
-		DBG3("No UST session when tearing down session");
-		return;
-	}
-
-	DBG("Tearing down UST session(s)");
-
-	ret = ust_app_destroy_trace_all(session->ust_session);
-	if (ret) {
-		ERR("Error in ust_app_destroy_trace_all");
-	}
-
-	trace_ust_destroy_session(session->ust_session);
-}
-
-/*
  * Stop all threads by closing the thread quit pipe.
  */
 static void stop_threads(void)
@@ -416,7 +373,7 @@ static void stop_threads(void)
 	}
 
 	/* Dispatch thread */
-	dispatch_thread_exit = 1;
+	CMM_STORE_SHARED(dispatch_thread_exit, 1);
 	futex_nto1_wake(&ust_cmd_queue.futex);
 }
 
@@ -425,11 +382,14 @@ static void stop_threads(void)
  */
 static void cleanup(void)
 {
-	int ret, i;
+	int ret;
 	char *cmd;
 	struct ltt_session *sess, *stmp;
 
 	DBG("Cleaning up");
+
+	/* First thing first, stop all threads */
+	utils_close_pipe(thread_quit_pipe);
 
 	DBG("Removing %s directory", rundir);
 	ret = asprintf(&cmd, "rm -rf %s", rundir);
@@ -453,16 +413,12 @@ static void cleanup(void)
 		/* Cleanup ALL session */
 		cds_list_for_each_entry_safe(sess, stmp,
 				&session_list_ptr->head, list) {
-			teardown_kernel_session(sess);
-			teardown_ust_session(sess);
-			free(sess);
+			cmd_destroy_session(sess, kernel_poll_pipe[1]);
 		}
 	}
 
 	DBG("Closing all UST sockets");
 	ust_app_clean_list();
-
-	pthread_mutex_destroy(&kconsumer_data.pid_mutex);
 
 	if (is_root && !opt_no_kernel) {
 		DBG2("Closing kernel fd");
@@ -476,33 +432,8 @@ static void cleanup(void)
 		modprobe_remove_lttng_all();
 	}
 
-	/*
-	 * Closing all pipes used for communication between threads.
-	 */
-	for (i = 0; i < 2; i++) {
-		if (kernel_poll_pipe[i] >= 0) {
-			ret = close(kernel_poll_pipe[i]);
-			if (ret) {
-				PERROR("close");
-			}
-		}
-	}
-	for (i = 0; i < 2; i++) {
-		if (thread_quit_pipe[i] >= 0) {
-			ret = close(thread_quit_pipe[i]);
-			if (ret) {
-				PERROR("close");
-			}
-		}
-	}
-	for (i = 0; i < 2; i++) {
-		if (apps_cmd_pipe[i] >= 0) {
-			ret = close(apps_cmd_pipe[i]);
-			if (ret) {
-				PERROR("close");
-			}
-		}
-	}
+	utils_close_pipe(kernel_poll_pipe);
+	utils_close_pipe(apps_cmd_pipe);
 
 	/* <fun> */
 	DBG("%c[%d;%dm*** assert failed :-) *** ==> %c[%dm%c[%d;%dm"
@@ -542,139 +473,6 @@ static void clean_command_ctx(struct command_ctx **cmd_ctx)
 		free(*cmd_ctx);
 		*cmd_ctx = NULL;
 	}
-}
-
-/*
- * Send all stream fds of kernel channel to the consumer.
- */
-static int send_kconsumer_channel_streams(struct consumer_data *consumer_data,
-		int sock, struct ltt_kernel_channel *channel,
-		uid_t uid, gid_t gid)
-{
-	int ret;
-	struct ltt_kernel_stream *stream;
-	struct lttcomm_consumer_msg lkm;
-
-	DBG("Sending streams of channel %s to kernel consumer",
-			channel->channel->name);
-
-	/* Send channel */
-	lkm.cmd_type = LTTNG_CONSUMER_ADD_CHANNEL;
-	lkm.u.channel.channel_key = channel->fd;
-	lkm.u.channel.max_sb_size = channel->channel->attr.subbuf_size;
-	lkm.u.channel.mmap_len = 0;	/* for kernel */
-	DBG("Sending channel %d to consumer", lkm.u.channel.channel_key);
-	ret = lttcomm_send_unix_sock(sock, &lkm, sizeof(lkm));
-	if (ret < 0) {
-		PERROR("send consumer channel");
-		goto error;
-	}
-
-	/* Send streams */
-	cds_list_for_each_entry(stream, &channel->stream_list.head, list) {
-		if (!stream->fd) {
-			continue;
-		}
-		lkm.cmd_type = LTTNG_CONSUMER_ADD_STREAM;
-		lkm.u.stream.channel_key = channel->fd;
-		lkm.u.stream.stream_key = stream->fd;
-		lkm.u.stream.state = stream->state;
-		lkm.u.stream.output = channel->channel->attr.output;
-		lkm.u.stream.mmap_len = 0;	/* for kernel */
-		lkm.u.stream.uid = uid;
-		lkm.u.stream.gid = gid;
-		strncpy(lkm.u.stream.path_name, stream->pathname, PATH_MAX - 1);
-		lkm.u.stream.path_name[PATH_MAX - 1] = '\0';
-		DBG("Sending stream %d to consumer", lkm.u.stream.stream_key);
-		ret = lttcomm_send_unix_sock(sock, &lkm, sizeof(lkm));
-		if (ret < 0) {
-			PERROR("send consumer stream");
-			goto error;
-		}
-		ret = lttcomm_send_fds_unix_sock(sock, &stream->fd, 1);
-		if (ret < 0) {
-			PERROR("send consumer stream ancillary data");
-			goto error;
-		}
-	}
-
-	DBG("consumer channel streams sent");
-
-	return 0;
-
-error:
-	return ret;
-}
-
-/*
- * Send all stream fds of the kernel session to the consumer.
- */
-static int send_kconsumer_session_streams(struct consumer_data *consumer_data,
-		struct ltt_kernel_session *session)
-{
-	int ret;
-	struct ltt_kernel_channel *chan;
-	struct lttcomm_consumer_msg lkm;
-	int sock = session->consumer_fd;
-
-	DBG("Sending metadata stream fd");
-
-	/* Extra protection. It's NOT supposed to be set to -1 at this point */
-	if (session->consumer_fd < 0) {
-		session->consumer_fd = consumer_data->cmd_sock;
-	}
-
-	if (session->metadata_stream_fd >= 0) {
-		/* Send metadata channel fd */
-		lkm.cmd_type = LTTNG_CONSUMER_ADD_CHANNEL;
-		lkm.u.channel.channel_key = session->metadata->fd;
-		lkm.u.channel.max_sb_size = session->metadata->conf->attr.subbuf_size;
-		lkm.u.channel.mmap_len = 0;	/* for kernel */
-		DBG("Sending metadata channel %d to consumer", lkm.u.channel.channel_key);
-		ret = lttcomm_send_unix_sock(sock, &lkm, sizeof(lkm));
-		if (ret < 0) {
-			PERROR("send consumer channel");
-			goto error;
-		}
-
-		/* Send metadata stream fd */
-		lkm.cmd_type = LTTNG_CONSUMER_ADD_STREAM;
-		lkm.u.stream.channel_key = session->metadata->fd;
-		lkm.u.stream.stream_key = session->metadata_stream_fd;
-		lkm.u.stream.state = LTTNG_CONSUMER_ACTIVE_STREAM;
-		lkm.u.stream.output = DEFAULT_KERNEL_CHANNEL_OUTPUT;
-		lkm.u.stream.mmap_len = 0;	/* for kernel */
-		lkm.u.stream.uid = session->uid;
-		lkm.u.stream.gid = session->gid;
-		strncpy(lkm.u.stream.path_name, session->metadata->pathname, PATH_MAX - 1);
-		lkm.u.stream.path_name[PATH_MAX - 1] = '\0';
-		DBG("Sending metadata stream %d to consumer", lkm.u.stream.stream_key);
-		ret = lttcomm_send_unix_sock(sock, &lkm, sizeof(lkm));
-		if (ret < 0) {
-			PERROR("send consumer stream");
-			goto error;
-		}
-		ret = lttcomm_send_fds_unix_sock(sock, &session->metadata_stream_fd, 1);
-		if (ret < 0) {
-			PERROR("send consumer stream");
-			goto error;
-		}
-	}
-
-	cds_list_for_each_entry(chan, &session->channel_list.head, list) {
-		ret = send_kconsumer_channel_streams(consumer_data, sock, chan,
-				session->uid, session->gid);
-		if (ret < 0) {
-			goto error;
-		}
-	}
-
-	DBG("consumer fds (metadata and channel streams) sent");
-
-	return 0;
-
-error:
-	return ret;
 }
 
 /*
@@ -786,6 +584,7 @@ static int update_kernel_stream(struct consumer_data *consumer_data, int fd)
 {
 	int ret = 0;
 	struct ltt_session *session;
+	struct ltt_kernel_session *ksess;
 	struct ltt_kernel_channel *channel;
 
 	DBG("Updating kernel streams for channel fd %d", fd);
@@ -797,14 +596,9 @@ static int update_kernel_stream(struct consumer_data *consumer_data, int fd)
 			session_unlock(session);
 			continue;
 		}
+		ksess = session->kernel_session;
 
-		/* This is not suppose to be -1 but this is an extra security check */
-		if (session->kernel_session->consumer_fd < 0) {
-			session->kernel_session->consumer_fd = consumer_data->cmd_sock;
-		}
-
-		cds_list_for_each_entry(channel,
-				&session->kernel_session->channel_list.head, list) {
+		cds_list_for_each_entry(channel, &ksess->channel_list.head, list) {
 			if (channel->fd == fd) {
 				DBG("Channel found, updating kernel streams");
 				ret = kernel_open_channel_stream(channel);
@@ -817,12 +611,23 @@ static int update_kernel_stream(struct consumer_data *consumer_data, int fd)
 				 * that tracing is started so it is safe to send our updated
 				 * stream fds.
 				 */
-				if (session->kernel_session->consumer_fds_sent == 1) {
-					ret = send_kconsumer_channel_streams(consumer_data,
-							session->kernel_session->consumer_fd, channel,
-							session->uid, session->gid);
-					if (ret < 0) {
-						goto error;
+				if (ksess->consumer_fds_sent == 1 && ksess->consumer != NULL) {
+					struct lttng_ht_iter iter;
+					struct consumer_socket *socket;
+
+
+					cds_lfht_for_each_entry(ksess->consumer->socks->ht,
+							&iter.iter, socket, node.node) {
+						/* Code flow error */
+						assert(socket->fd >= 0);
+
+						pthread_mutex_lock(socket->lock);
+						ret = kernel_consumer_send_channel_stream(socket->fd,
+								channel, ksess);
+						pthread_mutex_unlock(socket->lock);
+						if (ret < 0) {
+							goto error;
+						}
 					}
 				}
 				goto error;
@@ -868,12 +673,14 @@ static void update_ust_app(int app_sock)
  */
 static void *thread_manage_kernel(void *data)
 {
-	int ret, i, pollfd, update_poll_flag = 1;
+	int ret, i, pollfd, update_poll_flag = 1, err = -1;
 	uint32_t revents, nb_fd;
 	char tmp;
 	struct lttng_poll_event events;
 
 	DBG("Thread manage kernel started");
+
+	health_code_update(&health_thread_kernel);
 
 	ret = create_thread_poll_set(&events, 2);
 	if (ret < 0) {
@@ -886,6 +693,8 @@ static void *thread_manage_kernel(void *data)
 	}
 
 	while (1) {
+		health_code_update(&health_thread_kernel);
+
 		if (update_poll_flag == 1) {
 			/*
 			 * Reset number of fd in the poll set. Always 2 since there is the thread
@@ -909,7 +718,9 @@ static void *thread_manage_kernel(void *data)
 
 		/* Poll infinite value of time */
 	restart:
+		health_poll_update(&health_thread_kernel);
 		ret = lttng_poll_wait(&events, -1);
+		health_poll_update(&health_thread_kernel);
 		if (ret < 0) {
 			/*
 			 * Restart interrupted system call.
@@ -930,10 +741,13 @@ static void *thread_manage_kernel(void *data)
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
+			health_code_update(&health_thread_kernel);
+
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = check_thread_quit_pipe(pollfd, revents);
 			if (ret) {
-				goto error;
+				err = 0;
+				goto exit;
 			}
 
 			/* Check for data on kernel pipe */
@@ -961,9 +775,15 @@ static void *thread_manage_kernel(void *data)
 		}
 	}
 
+exit:
 error:
 	lttng_poll_clean(&events);
 error_poll_create:
+	if (err) {
+		health_error(&health_thread_kernel);
+		ERR("Health error occurred in %s", __func__);
+	}
+	health_exit(&health_thread_kernel);
 	DBG("Kernel thread dying");
 	return NULL;
 }
@@ -973,13 +793,15 @@ error_poll_create:
  */
 static void *thread_manage_consumer(void *data)
 {
-	int sock = -1, i, ret, pollfd;
+	int sock = -1, i, ret, pollfd, err = -1;
 	uint32_t revents, nb_fd;
 	enum lttcomm_return_code code;
 	struct lttng_poll_event events;
 	struct consumer_data *consumer_data = data;
 
 	DBG("[thread] Manage consumer started");
+
+	health_code_update(&consumer_data->health);
 
 	ret = lttcomm_listen_unix_sock(consumer_data->err_sock);
 	if (ret < 0) {
@@ -1002,9 +824,13 @@ static void *thread_manage_consumer(void *data)
 
 	nb_fd = LTTNG_POLL_GETNB(&events);
 
+	health_code_update(&consumer_data->health);
+
 	/* Inifinite blocking call, waiting for transmission */
 restart:
+	health_poll_update(&consumer_data->health);
 	ret = lttng_poll_wait(&events, -1);
+	health_poll_update(&consumer_data->health);
 	if (ret < 0) {
 		/*
 		 * Restart interrupted system call.
@@ -1020,10 +846,13 @@ restart:
 		revents = LTTNG_POLL_GETEV(&events, i);
 		pollfd = LTTNG_POLL_GETFD(&events, i);
 
+		health_code_update(&consumer_data->health);
+
 		/* Thread quit pipe has been closed. Killing thread. */
 		ret = check_thread_quit_pipe(pollfd, revents);
 		if (ret) {
-			goto error;
+			err = 0;
+			goto exit;
 		}
 
 		/* Event on the registration socket */
@@ -1040,6 +869,8 @@ restart:
 		goto error;
 	}
 
+	health_code_update(&consumer_data->health);
+
 	DBG2("Receiving code from consumer err_sock");
 
 	/* Getting status code from kconsumerd */
@@ -1048,6 +879,8 @@ restart:
 	if (ret <= 0) {
 		goto error;
 	}
+
+	health_code_update(&consumer_data->health);
 
 	if (code == CONSUMERD_COMMAND_SOCK_READY) {
 		consumer_data->cmd_sock =
@@ -1077,12 +910,16 @@ restart:
 		goto error;
 	}
 
+	health_code_update(&consumer_data->health);
+
 	/* Update number of fd */
 	nb_fd = LTTNG_POLL_GETNB(&events);
 
 	/* Inifinite blocking call, waiting for transmission */
 restart_poll:
+	health_poll_update(&consumer_data->health);
 	ret = lttng_poll_wait(&events, -1);
+	health_poll_update(&consumer_data->health);
 	if (ret < 0) {
 		/*
 		 * Restart interrupted system call.
@@ -1098,10 +935,13 @@ restart_poll:
 		revents = LTTNG_POLL_GETEV(&events, i);
 		pollfd = LTTNG_POLL_GETFD(&events, i);
 
+		health_code_update(&consumer_data->health);
+
 		/* Thread quit pipe has been closed. Killing thread. */
 		ret = check_thread_quit_pipe(pollfd, revents);
 		if (ret) {
-			goto error;
+			err = 0;
+			goto exit;
 		}
 
 		/* Event on the kconsumerd socket */
@@ -1113,6 +953,8 @@ restart_poll:
 		}
 	}
 
+	health_code_update(&consumer_data->health);
+
 	/* Wait for any kconsumerd error */
 	ret = lttcomm_recv_unix_sock(sock, &code,
 			sizeof(enum lttcomm_return_code));
@@ -1123,6 +965,7 @@ restart_poll:
 
 	ERR("consumer return code : %s", lttcomm_get_readable_code(-code));
 
+exit:
 error:
 	/* Immediately set the consumerd state to stopped */
 	if (consumer_data->type == LTTNG_CONSUMER_KERNEL) {
@@ -1161,6 +1004,11 @@ error:
 	lttng_poll_clean(&events);
 error_poll:
 error_listen:
+	if (err) {
+		health_error(&consumer_data->health);
+		ERR("Health error occurred in %s", __func__);
+	}
+	health_exit(&consumer_data->health);
 	DBG("consumer thread cleanup completed");
 
 	return NULL;
@@ -1171,7 +1019,7 @@ error_listen:
  */
 static void *thread_manage_apps(void *data)
 {
-	int i, ret, pollfd;
+	int i, ret, pollfd, err = -1;
 	uint32_t revents, nb_fd;
 	struct ust_command ust_cmd;
 	struct lttng_poll_event events;
@@ -1180,6 +1028,8 @@ static void *thread_manage_apps(void *data)
 
 	rcu_register_thread();
 	rcu_thread_online();
+
+	health_code_update(&health_thread_app_manage);
 
 	ret = create_thread_poll_set(&events, 2);
 	if (ret < 0) {
@@ -1191,6 +1041,8 @@ static void *thread_manage_apps(void *data)
 		goto error;
 	}
 
+	health_code_update(&health_thread_app_manage);
+
 	while (1) {
 		/* Zeroed the events structure */
 		lttng_poll_reset(&events);
@@ -1201,7 +1053,9 @@ static void *thread_manage_apps(void *data)
 
 		/* Inifinite blocking call, waiting for transmission */
 	restart:
+		health_poll_update(&health_thread_app_manage);
 		ret = lttng_poll_wait(&events, -1);
+		health_poll_update(&health_thread_app_manage);
 		if (ret < 0) {
 			/*
 			 * Restart interrupted system call.
@@ -1217,10 +1071,13 @@ static void *thread_manage_apps(void *data)
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
+			health_code_update(&health_thread_app_manage);
+
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = check_thread_quit_pipe(pollfd, revents);
 			if (ret) {
-				goto error;
+				err = 0;
+				goto exit;
 			}
 
 			/* Inspect the apps cmd pipe */
@@ -1236,6 +1093,8 @@ static void *thread_manage_apps(void *data)
 						goto error;
 					}
 
+					health_code_update(&health_thread_app_manage);
+
 					/* Register applicaton to the session daemon */
 					ret = ust_app_register(&ust_cmd.reg_msg,
 							ust_cmd.sock);
@@ -1244,6 +1103,8 @@ static void *thread_manage_apps(void *data)
 					} else if (ret < 0) {
 						break;
 					}
+
+					health_code_update(&health_thread_app_manage);
 
 					/*
 					 * Validate UST version compatibility.
@@ -1256,6 +1117,8 @@ static void *thread_manage_apps(void *data)
 						 */
 						update_ust_app(ust_cmd.sock);
 					}
+
+					health_code_update(&health_thread_app_manage);
 
 					ret = ust_app_register_done(ust_cmd.sock);
 					if (ret < 0) {
@@ -1280,6 +1143,8 @@ static void *thread_manage_apps(void *data)
 								ust_cmd.sock);
 					}
 
+					health_code_update(&health_thread_app_manage);
+
 					break;
 				}
 			} else {
@@ -1299,12 +1164,20 @@ static void *thread_manage_apps(void *data)
 					break;
 				}
 			}
+
+			health_code_update(&health_thread_app_manage);
 		}
 	}
 
+exit:
 error:
 	lttng_poll_clean(&events);
 error_poll_create:
+	if (err) {
+		health_error(&health_thread_app_manage);
+		ERR("Health error occurred in %s", __func__);
+	}
+	health_exit(&health_thread_app_manage);
 	DBG("Application communication apps thread cleanup complete");
 	rcu_thread_offline();
 	rcu_unregister_thread();
@@ -1323,7 +1196,7 @@ static void *thread_dispatch_ust_registration(void *data)
 
 	DBG("[thread] Dispatch UST command started");
 
-	while (!dispatch_thread_exit) {
+	while (!CMM_LOAD_SHARED(dispatch_thread_exit)) {
 		/* Atomically prepare the queue futex */
 		futex_nto1_prepare(&ust_cmd_queue.futex);
 
@@ -1380,7 +1253,7 @@ error:
  */
 static void *thread_registration_apps(void *data)
 {
-	int sock = -1, i, ret, pollfd;
+	int sock = -1, i, ret, pollfd, err = -1;
 	uint32_t revents, nb_fd;
 	struct lttng_poll_event events;
 	/*
@@ -1426,7 +1299,9 @@ static void *thread_registration_apps(void *data)
 
 		/* Inifinite blocking call, waiting for transmission */
 	restart:
+		health_poll_update(&health_thread_app_reg);
 		ret = lttng_poll_wait(&events, -1);
+		health_poll_update(&health_thread_app_reg);
 		if (ret < 0) {
 			/*
 			 * Restart interrupted system call.
@@ -1438,6 +1313,8 @@ static void *thread_registration_apps(void *data)
 		}
 
 		for (i = 0; i < nb_fd; i++) {
+			health_code_update(&health_thread_app_reg);
+
 			/* Fetch once the poll data */
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
@@ -1445,7 +1322,8 @@ static void *thread_registration_apps(void *data)
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = check_thread_quit_pipe(pollfd, revents);
 			if (ret) {
-				goto error;
+				err = 0;
+				goto exit;
 			}
 
 			/* Event on the registration socket */
@@ -1481,6 +1359,7 @@ static void *thread_registration_apps(void *data)
 						sock = -1;
 						continue;
 					}
+					health_code_update(&health_thread_app_reg);
 					ret = lttcomm_recv_unix_sock(sock, &ust_cmd->reg_msg,
 							sizeof(struct ust_register_msg));
 					if (ret < 0 || ret < sizeof(struct ust_register_msg)) {
@@ -1498,6 +1377,7 @@ static void *thread_registration_apps(void *data)
 						sock = -1;
 						continue;
 					}
+					health_code_update(&health_thread_app_reg);
 
 					ust_cmd->sock = sock;
 					sock = -1;
@@ -1525,7 +1405,14 @@ static void *thread_registration_apps(void *data)
 		}
 	}
 
+exit:
 error:
+	if (err) {
+		health_error(&health_thread_app_reg);
+		ERR("Health error occurred in %s", __func__);
+	}
+	health_exit(&health_thread_app_reg);
+
 	/* Notify that the registration thread is gone */
 	notify_ust_apps(0);
 
@@ -1631,7 +1518,8 @@ static int join_consumer_thread(struct consumer_data *consumer_data)
 	void *status;
 	int ret;
 
-	if (consumer_data->pid != 0) {
+	/* Consumer pid must be a real one. */
+	if (consumer_data->pid > 0) {
 		ret = kill(consumer_data->pid, SIGTERM);
 		if (ret) {
 			ERR("Error killing consumer daemon");
@@ -1845,11 +1733,20 @@ error:
 }
 
 /*
- * Check version of the lttng-modules.
+ * Compute health status of each consumer. If one of them is zero (bad
+ * state), we return 0.
  */
-static int validate_lttng_modules_version(void)
+static int check_consumer_health(void)
 {
-	return kernel_validate_version(kernel_tracer_fd);
+	int ret;
+
+	ret = health_check_state(&kconsumer_data.health) &&
+		health_check_state(&ustconsumer32_data.health) &&
+		health_check_state(&ustconsumer64_data.health);
+
+	DBG3("Health consumer check %d", ret);
+
+	return ret;
 }
 
 /*
@@ -1874,7 +1771,7 @@ static int init_kernel_tracer(void)
 	}
 
 	/* Validate kernel version */
-	ret = validate_lttng_modules_version();
+	ret = kernel_validate_version(kernel_tracer_fd);
 	if (ret < 0) {
 		goto error_version;
 	}
@@ -1915,31 +1812,49 @@ error:
 	}
 }
 
+
 /*
- * Init tracing by creating trace directory and sending fds kernel consumer.
+ * Copy consumer output from the tracing session to the domain session. The
+ * function also applies the right modification on a per domain basis for the
+ * trace files destination directory.
  */
-static int init_kernel_tracing(struct ltt_kernel_session *session)
+static int copy_session_consumer(int domain, struct ltt_session *session)
 {
-	int ret = 0;
+	int ret;
+	const char *dir_name;
+	struct consumer_output *consumer;
 
-	if (session->consumer_fds_sent == 0) {
-		/*
-		 * Assign default kernel consumer socket if no consumer assigned to the
-		 * kernel session. At this point, it's NOT supposed to be -1 but this is
-		 * an extra security check.
-		 */
-		if (session->consumer_fd < 0) {
-			session->consumer_fd = kconsumer_data.cmd_sock;
-		}
+	assert(session);
+	assert(session->consumer);
 
-		ret = send_kconsumer_session_streams(&kconsumer_data, session);
-		if (ret < 0) {
-			ret = LTTCOMM_KERN_CONSUMER_FAIL;
-			goto error;
-		}
-
-		session->consumer_fds_sent = 1;
+	switch (domain) {
+	case LTTNG_DOMAIN_KERNEL:
+		DBG3("Copying tracing session consumer output in kernel session");
+		session->kernel_session->consumer =
+			consumer_copy_output(session->consumer);
+		/* Ease our life a bit for the next part */
+		consumer = session->kernel_session->consumer;
+		dir_name = DEFAULT_KERNEL_TRACE_DIR;
+		break;
+	case LTTNG_DOMAIN_UST:
+		DBG3("Copying tracing session consumer output in UST session");
+		session->ust_session->consumer =
+			consumer_copy_output(session->consumer);
+		/* Ease our life a bit for the next part */
+		consumer = session->ust_session->consumer;
+		dir_name = DEFAULT_UST_TRACE_DIR;
+		break;
+	default:
+		ret = LTTCOMM_UNKNOWN_DOMAIN;
+		goto error;
 	}
+
+	/* Append correct directory to subdir */
+	strncat(consumer->subdir, dir_name,
+			sizeof(consumer->subdir) - strlen(consumer->subdir) - 1);
+	DBG3("Copy session consumer subdir %s", consumer->subdir);
+
+	ret = LTTCOMM_OK;
 
 error:
 	return ret;
@@ -1951,13 +1866,18 @@ error:
 static int create_ust_session(struct ltt_session *session,
 		struct lttng_domain *domain)
 {
-	struct ltt_ust_session *lus = NULL;
 	int ret;
+	struct ltt_ust_session *lus = NULL;
+
+	assert(session);
+	assert(domain);
+	assert(session->consumer);
 
 	switch (domain->type) {
 	case LTTNG_DOMAIN_UST:
 		break;
 	default:
+		ERR("Unknown UST domain on create session %d", domain->type);
 		ret = LTTCOMM_UNKNOWN_DOMAIN;
 		goto error;
 	}
@@ -1970,33 +1890,21 @@ static int create_ust_session(struct ltt_session *session,
 		goto error;
 	}
 
-	ret = run_as_mkdir_recursive(lus->pathname, S_IRWXU | S_IRWXG,
-			session->uid, session->gid);
-	if (ret < 0) {
-		if (ret != -EEXIST) {
-			ERR("Trace directory creation error");
-			ret = LTTCOMM_UST_SESS_FAIL;
-			goto error;
-		}
-	}
-
-	/* The domain type dictate different actions on session creation */
-	switch (domain->type) {
-	case LTTNG_DOMAIN_UST:
-		/* No ustctl for the global UST domain */
-		break;
-	default:
-		ERR("Unknown UST domain on create session %d", domain->type);
-		goto error;
-	}
 	lus->uid = session->uid;
 	lus->gid = session->gid;
 	session->ust_session = lus;
+
+	/* Copy session output to the newly created UST session */
+	ret = copy_session_consumer(domain->type, session);
+	if (ret != LTTCOMM_OK) {
+		goto error;
+	}
 
 	return LTTCOMM_OK;
 
 error:
 	free(lus);
+	session->ust_session = NULL;
 	return ret;
 }
 
@@ -2015,46 +1923,50 @@ static int create_kernel_session(struct ltt_session *session)
 		goto error;
 	}
 
-	/* Set kernel consumer socket fd */
-	if (kconsumer_data.cmd_sock >= 0) {
-		session->kernel_session->consumer_fd = kconsumer_data.cmd_sock;
+	/* Code flow safety */
+	assert(session->kernel_session);
+
+	/* Copy session output to the newly created Kernel session */
+	ret = copy_session_consumer(LTTNG_DOMAIN_KERNEL, session);
+	if (ret != LTTCOMM_OK) {
+		goto error;
 	}
 
-	ret = run_as_mkdir_recursive(session->kernel_session->trace_path,
-			S_IRWXU | S_IRWXG, session->uid, session->gid);
-	if (ret < 0) {
-		if (ret != -EEXIST) {
-			ERR("Trace directory creation error");
-			goto error;
+	/* Create directory(ies) on local filesystem. */
+	if (session->kernel_session->consumer->type == CONSUMER_DST_LOCAL &&
+			strlen(session->kernel_session->consumer->dst.trace_path) > 0) {
+		ret = run_as_mkdir_recursive(
+				session->kernel_session->consumer->dst.trace_path,
+				S_IRWXU | S_IRWXG, session->uid, session->gid);
+		if (ret < 0) {
+			if (ret != -EEXIST) {
+				ERR("Trace directory creation error");
+				goto error;
+			}
 		}
 	}
+
 	session->kernel_session->uid = session->uid;
 	session->kernel_session->gid = session->gid;
 
+	return LTTCOMM_OK;
+
 error:
+	trace_kernel_destroy_session(session->kernel_session);
+	session->kernel_session = NULL;
 	return ret;
 }
 
 /*
- * Check if the UID or GID match the session. Root user has access to all
- * sessions.
+ * Count number of session permitted by uid/gid.
  */
-static int session_access_ok(struct ltt_session *session, uid_t uid, gid_t gid)
-{
-	if (uid != session->uid && gid != session->gid && uid != 0) {
-		return 0;
-	} else {
-		return 1;
-	}
-}
-
 static unsigned int lttng_sessions_count(uid_t uid, gid_t gid)
 {
 	unsigned int i = 0;
 	struct ltt_session *session;
 
 	DBG("Counting number of available session for UID %d GID %d",
-		uid, gid);
+			uid, gid);
 	cds_list_for_each_entry(session, &session_list_ptr->head, list) {
 		/*
 		 * Only list the sessions the user can control.
@@ -2068,1245 +1980,24 @@ static unsigned int lttng_sessions_count(uid_t uid, gid_t gid)
 }
 
 /*
- * Using the session list, filled a lttng_session array to send back to the
- * client for session listing.
- *
- * The session list lock MUST be acquired before calling this function. Use
- * session_lock_list() and session_unlock_list().
- */
-static void list_lttng_sessions(struct lttng_session *sessions, uid_t uid,
-		gid_t gid)
-{
-	unsigned int i = 0;
-	struct ltt_session *session;
-
-	DBG("Getting all available session for UID %d GID %d",
-		uid, gid);
-	/*
-	 * Iterate over session list and append data after the control struct in
-	 * the buffer.
-	 */
-	cds_list_for_each_entry(session, &session_list_ptr->head, list) {
-		/*
-		 * Only list the sessions the user can control.
-		 */
-		if (!session_access_ok(session, uid, gid)) {
-			continue;
-		}
-		strncpy(sessions[i].path, session->path, PATH_MAX);
-		sessions[i].path[PATH_MAX - 1] = '\0';
-		strncpy(sessions[i].name, session->name, NAME_MAX);
-		sessions[i].name[NAME_MAX - 1] = '\0';
-		sessions[i].enabled = session->enabled;
-		i++;
-	}
-}
-
-/*
- * Fill lttng_channel array of all channels.
- */
-static void list_lttng_channels(int domain, struct ltt_session *session,
-		struct lttng_channel *channels)
-{
-	int i = 0;
-	struct ltt_kernel_channel *kchan;
-
-	DBG("Listing channels for session %s", session->name);
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-		/* Kernel channels */
-		if (session->kernel_session != NULL) {
-			cds_list_for_each_entry(kchan,
-					&session->kernel_session->channel_list.head, list) {
-				/* Copy lttng_channel struct to array */
-				memcpy(&channels[i], kchan->channel, sizeof(struct lttng_channel));
-				channels[i].enabled = kchan->enabled;
-				i++;
-			}
-		}
-		break;
-	case LTTNG_DOMAIN_UST:
-	{
-		struct lttng_ht_iter iter;
-		struct ltt_ust_channel *uchan;
-
-		cds_lfht_for_each_entry(session->ust_session->domain_global.channels->ht,
-				&iter.iter, uchan, node.node) {
-			strncpy(channels[i].name, uchan->name, LTTNG_SYMBOL_NAME_LEN);
-			channels[i].attr.overwrite = uchan->attr.overwrite;
-			channels[i].attr.subbuf_size = uchan->attr.subbuf_size;
-			channels[i].attr.num_subbuf = uchan->attr.num_subbuf;
-			channels[i].attr.switch_timer_interval =
-				uchan->attr.switch_timer_interval;
-			channels[i].attr.read_timer_interval =
-				uchan->attr.read_timer_interval;
-			channels[i].enabled = uchan->enabled;
-			switch (uchan->attr.output) {
-			case LTTNG_UST_MMAP:
-			default:
-				channels[i].attr.output = LTTNG_EVENT_MMAP;
-				break;
-			}
-			i++;
-		}
-		break;
-	}
-	default:
-		break;
-	}
-}
-
-/*
- * Create a list of ust global domain events.
- */
-static int list_lttng_ust_global_events(char *channel_name,
-		struct ltt_ust_domain_global *ust_global, struct lttng_event **events)
-{
-	int i = 0, ret = 0;
-	unsigned int nb_event = 0;
-	struct lttng_ht_iter iter;
-	struct lttng_ht_node_str *node;
-	struct ltt_ust_channel *uchan;
-	struct ltt_ust_event *uevent;
-	struct lttng_event *tmp;
-
-	DBG("Listing UST global events for channel %s", channel_name);
-
-	rcu_read_lock();
-
-	lttng_ht_lookup(ust_global->channels, (void *)channel_name, &iter);
-	node = lttng_ht_iter_get_node_str(&iter);
-	if (node == NULL) {
-		ret = -LTTCOMM_UST_CHAN_NOT_FOUND;
-		goto error;
-	}
-
-	uchan = caa_container_of(&node->node, struct ltt_ust_channel, node.node);
-
-	nb_event += lttng_ht_get_count(uchan->events);
-
-	if (nb_event == 0) {
-		ret = nb_event;
-		goto error;
-	}
-
-	DBG3("Listing UST global %d events", nb_event);
-
-	tmp = zmalloc(nb_event * sizeof(struct lttng_event));
-	if (tmp == NULL) {
-		ret = -LTTCOMM_FATAL;
-		goto error;
-	}
-
-	cds_lfht_for_each_entry(uchan->events->ht, &iter.iter, uevent, node.node) {
-		strncpy(tmp[i].name, uevent->attr.name, LTTNG_SYMBOL_NAME_LEN);
-		tmp[i].name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
-		tmp[i].enabled = uevent->enabled;
-		switch (uevent->attr.instrumentation) {
-		case LTTNG_UST_TRACEPOINT:
-			tmp[i].type = LTTNG_EVENT_TRACEPOINT;
-			break;
-		case LTTNG_UST_PROBE:
-			tmp[i].type = LTTNG_EVENT_PROBE;
-			break;
-		case LTTNG_UST_FUNCTION:
-			tmp[i].type = LTTNG_EVENT_FUNCTION;
-			break;
-		}
-		tmp[i].loglevel = uevent->attr.loglevel;
-		switch (uevent->attr.loglevel_type) {
-		case LTTNG_UST_LOGLEVEL_ALL:
-			tmp[i].loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
-			break;
-		case LTTNG_UST_LOGLEVEL_RANGE:
-			tmp[i].loglevel_type = LTTNG_EVENT_LOGLEVEL_RANGE;
-			break;
-		case LTTNG_UST_LOGLEVEL_SINGLE:
-			tmp[i].loglevel_type = LTTNG_EVENT_LOGLEVEL_SINGLE;
-			break;
-		}
-		i++;
-	}
-
-	ret = nb_event;
-	*events = tmp;
-
-error:
-	rcu_read_unlock();
-	return ret;
-}
-
-/*
- * Fill lttng_event array of all kernel events in the channel.
- */
-static int list_lttng_kernel_events(char *channel_name,
-		struct ltt_kernel_session *kernel_session, struct lttng_event **events)
-{
-	int i = 0, ret;
-	unsigned int nb_event;
-	struct ltt_kernel_event *event;
-	struct ltt_kernel_channel *kchan;
-
-	kchan = trace_kernel_get_channel_by_name(channel_name, kernel_session);
-	if (kchan == NULL) {
-		ret = LTTCOMM_KERN_CHAN_NOT_FOUND;
-		goto error;
-	}
-
-	nb_event = kchan->event_count;
-
-	DBG("Listing events for channel %s", kchan->channel->name);
-
-	if (nb_event == 0) {
-		ret = nb_event;
-		goto error;
-	}
-
-	*events = zmalloc(nb_event * sizeof(struct lttng_event));
-	if (*events == NULL) {
-		ret = LTTCOMM_FATAL;
-		goto error;
-	}
-
-	/* Kernel channels */
-	cds_list_for_each_entry(event, &kchan->events_list.head , list) {
-		strncpy((*events)[i].name, event->event->name, LTTNG_SYMBOL_NAME_LEN);
-		(*events)[i].name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
-		(*events)[i].enabled = event->enabled;
-		switch (event->event->instrumentation) {
-			case LTTNG_KERNEL_TRACEPOINT:
-				(*events)[i].type = LTTNG_EVENT_TRACEPOINT;
-				break;
-			case LTTNG_KERNEL_KPROBE:
-			case LTTNG_KERNEL_KRETPROBE:
-				(*events)[i].type = LTTNG_EVENT_PROBE;
-				memcpy(&(*events)[i].attr.probe, &event->event->u.kprobe,
-						sizeof(struct lttng_kernel_kprobe));
-				break;
-			case LTTNG_KERNEL_FUNCTION:
-				(*events)[i].type = LTTNG_EVENT_FUNCTION;
-				memcpy(&((*events)[i].attr.ftrace), &event->event->u.ftrace,
-						sizeof(struct lttng_kernel_function));
-				break;
-			case LTTNG_KERNEL_NOOP:
-				(*events)[i].type = LTTNG_EVENT_NOOP;
-				break;
-			case LTTNG_KERNEL_SYSCALL:
-				(*events)[i].type = LTTNG_EVENT_SYSCALL;
-				break;
-			case LTTNG_KERNEL_ALL:
-				assert(0);
-				break;
-		}
-		i++;
-	}
-
-	return nb_event;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_DISABLE_CHANNEL processed by the client thread.
- */
-static int cmd_disable_channel(struct ltt_session *session,
-		int domain, char *channel_name)
-{
-	int ret;
-	struct ltt_ust_session *usess;
-
-	usess = session->ust_session;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-	{
-		ret = channel_kernel_disable(session->kernel_session,
-				channel_name);
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-
-		kernel_wait_quiescent(kernel_tracer_fd);
-		break;
-	}
-	case LTTNG_DOMAIN_UST:
-	{
-		struct ltt_ust_channel *uchan;
-		struct lttng_ht *chan_ht;
-
-		chan_ht = usess->domain_global.channels;
-
-		uchan = trace_ust_find_channel_by_name(chan_ht, channel_name);
-		if (uchan == NULL) {
-			ret = LTTCOMM_UST_CHAN_NOT_FOUND;
-			goto error;
-		}
-
-		ret = channel_ust_disable(usess, domain, uchan);
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-		break;
-	}
-#if 0
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-#endif
-	default:
-		ret = LTTCOMM_UNKNOWN_DOMAIN;
-		goto error;
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_ENABLE_CHANNEL processed by the client thread.
- */
-static int cmd_enable_channel(struct ltt_session *session,
-		int domain, struct lttng_channel *attr)
-{
-	int ret;
-	struct ltt_ust_session *usess = session->ust_session;
-	struct lttng_ht *chan_ht;
-
-	DBG("Enabling channel %s for session %s", attr->name, session->name);
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-	{
-		struct ltt_kernel_channel *kchan;
-
-		kchan = trace_kernel_get_channel_by_name(attr->name,
-				session->kernel_session);
-		if (kchan == NULL) {
-			ret = channel_kernel_create(session->kernel_session,
-					attr, kernel_poll_pipe[1]);
-		} else {
-			ret = channel_kernel_enable(session->kernel_session, kchan);
-		}
-
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-
-		kernel_wait_quiescent(kernel_tracer_fd);
-		break;
-	}
-	case LTTNG_DOMAIN_UST:
-	{
-		struct ltt_ust_channel *uchan;
-
-		chan_ht = usess->domain_global.channels;
-
-		uchan = trace_ust_find_channel_by_name(chan_ht, attr->name);
-		if (uchan == NULL) {
-			ret = channel_ust_create(usess, domain, attr);
-		} else {
-			ret = channel_ust_enable(usess, domain, uchan);
-		}
-		break;
-	}
-#if 0
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-#endif
-	default:
-		ret = LTTCOMM_UNKNOWN_DOMAIN;
-		goto error;
-	}
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_DISABLE_EVENT processed by the client thread.
- */
-static int cmd_disable_event(struct ltt_session *session, int domain,
-		char *channel_name, char *event_name)
-{
-	int ret;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-	{
-		struct ltt_kernel_channel *kchan;
-		struct ltt_kernel_session *ksess;
-
-		ksess = session->kernel_session;
-
-		kchan = trace_kernel_get_channel_by_name(channel_name, ksess);
-		if (kchan == NULL) {
-			ret = LTTCOMM_KERN_CHAN_NOT_FOUND;
-			goto error;
-		}
-
-		ret = event_kernel_disable_tracepoint(ksess, kchan, event_name);
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-
-		kernel_wait_quiescent(kernel_tracer_fd);
-		break;
-	}
-	case LTTNG_DOMAIN_UST:
-	{
-		struct ltt_ust_channel *uchan;
-		struct ltt_ust_session *usess;
-
-		usess = session->ust_session;
-
-		uchan = trace_ust_find_channel_by_name(usess->domain_global.channels,
-				channel_name);
-		if (uchan == NULL) {
-			ret = LTTCOMM_UST_CHAN_NOT_FOUND;
-			goto error;
-		}
-
-		ret = event_ust_disable_tracepoint(usess, domain, uchan, event_name);
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-
-		DBG3("Disable UST event %s in channel %s completed", event_name,
-				channel_name);
-		break;
-	}
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
-	default:
-		ret = LTTCOMM_UND;
-		goto error;
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_DISABLE_ALL_EVENT processed by the client thread.
- */
-static int cmd_disable_event_all(struct ltt_session *session, int domain,
-		char *channel_name)
-{
-	int ret;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-	{
-		struct ltt_kernel_session *ksess;
-		struct ltt_kernel_channel *kchan;
-
-		ksess = session->kernel_session;
-
-		kchan = trace_kernel_get_channel_by_name(channel_name, ksess);
-		if (kchan == NULL) {
-			ret = LTTCOMM_KERN_CHAN_NOT_FOUND;
-			goto error;
-		}
-
-		ret = event_kernel_disable_all(ksess, kchan);
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-
-		kernel_wait_quiescent(kernel_tracer_fd);
-		break;
-	}
-	case LTTNG_DOMAIN_UST:
-	{
-		struct ltt_ust_session *usess;
-		struct ltt_ust_channel *uchan;
-
-		usess = session->ust_session;
-
-		uchan = trace_ust_find_channel_by_name(usess->domain_global.channels,
-				channel_name);
-		if (uchan == NULL) {
-			ret = LTTCOMM_UST_CHAN_NOT_FOUND;
-			goto error;
-		}
-
-		ret = event_ust_disable_all_tracepoints(usess, domain, uchan);
-		if (ret != 0) {
-			goto error;
-		}
-
-		DBG3("Disable all UST events in channel %s completed", channel_name);
-
-		break;
-	}
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
-	default:
-		ret = LTTCOMM_UND;
-		goto error;
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_ADD_CONTEXT processed by the client thread.
- */
-static int cmd_add_context(struct ltt_session *session, int domain,
-		char *channel_name, char *event_name, struct lttng_event_context *ctx)
-{
-	int ret;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-		/* Add kernel context to kernel tracer */
-		ret = context_kernel_add(session->kernel_session, ctx,
-				event_name, channel_name);
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-		break;
-	case LTTNG_DOMAIN_UST:
-	{
-		struct ltt_ust_session *usess = session->ust_session;
-
-		ret = context_ust_add(usess, domain, ctx, event_name, channel_name);
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-		break;
-	}
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
-	default:
-		ret = LTTCOMM_UND;
-		goto error;
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_ENABLE_EVENT processed by the client thread.
- */
-static int cmd_enable_event(struct ltt_session *session, int domain,
-		char *channel_name, struct lttng_event *event)
-{
-	int ret;
-	struct lttng_channel *attr;
-	struct ltt_ust_session *usess = session->ust_session;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-	{
-		struct ltt_kernel_channel *kchan;
-
-		kchan = trace_kernel_get_channel_by_name(channel_name,
-				session->kernel_session);
-		if (kchan == NULL) {
-			attr = channel_new_default_attr(domain);
-			if (attr == NULL) {
-				ret = LTTCOMM_FATAL;
-				goto error;
-			}
-			snprintf(attr->name, NAME_MAX, "%s", channel_name);
-
-			/* This call will notify the kernel thread */
-			ret = channel_kernel_create(session->kernel_session,
-					attr, kernel_poll_pipe[1]);
-			if (ret != LTTCOMM_OK) {
-				free(attr);
-				goto error;
-			}
-			free(attr);
-		}
-
-		/* Get the newly created kernel channel pointer */
-		kchan = trace_kernel_get_channel_by_name(channel_name,
-				session->kernel_session);
-		if (kchan == NULL) {
-			/* This sould not happen... */
-			ret = LTTCOMM_FATAL;
-			goto error;
-		}
-
-		ret = event_kernel_enable_tracepoint(session->kernel_session, kchan,
-				event);
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-
-		kernel_wait_quiescent(kernel_tracer_fd);
-		break;
-	}
-	case LTTNG_DOMAIN_UST:
-	{
-		struct lttng_channel *attr;
-		struct ltt_ust_channel *uchan;
-
-		/* Get channel from global UST domain */
-		uchan = trace_ust_find_channel_by_name(usess->domain_global.channels,
-				channel_name);
-		if (uchan == NULL) {
-			/* Create default channel */
-			attr = channel_new_default_attr(domain);
-			if (attr == NULL) {
-				ret = LTTCOMM_FATAL;
-				goto error;
-			}
-			snprintf(attr->name, NAME_MAX, "%s", channel_name);
-			attr->name[NAME_MAX - 1] = '\0';
-
-			ret = channel_ust_create(usess, domain, attr);
-			if (ret != LTTCOMM_OK) {
-				free(attr);
-				goto error;
-			}
-			free(attr);
-
-			/* Get the newly created channel reference back */
-			uchan = trace_ust_find_channel_by_name(
-					usess->domain_global.channels, channel_name);
-			if (uchan == NULL) {
-				/* Something is really wrong */
-				ret = LTTCOMM_FATAL;
-				goto error;
-			}
-		}
-
-		/* At this point, the session and channel exist on the tracer */
-		ret = event_ust_enable_tracepoint(usess, domain, uchan, event);
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-		break;
-	}
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
-	default:
-		ret = LTTCOMM_UND;
-		goto error;
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_ENABLE_ALL_EVENT processed by the client thread.
- */
-static int cmd_enable_event_all(struct ltt_session *session, int domain,
-		char *channel_name, int event_type)
-{
-	int ret;
-	struct ltt_kernel_channel *kchan;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-		kchan = trace_kernel_get_channel_by_name(channel_name,
-				session->kernel_session);
-		if (kchan == NULL) {
-			/* This call will notify the kernel thread */
-			ret = channel_kernel_create(session->kernel_session, NULL,
-					kernel_poll_pipe[1]);
-			if (ret != LTTCOMM_OK) {
-				goto error;
-			}
-
-			/* Get the newly created kernel channel pointer */
-			kchan = trace_kernel_get_channel_by_name(channel_name,
-					session->kernel_session);
-			if (kchan == NULL) {
-				/* This sould not happen... */
-				ret = LTTCOMM_FATAL;
-				goto error;
-			}
-
-		}
-
-		switch (event_type) {
-		case LTTNG_EVENT_SYSCALL:
-			ret = event_kernel_enable_all_syscalls(session->kernel_session,
-					kchan, kernel_tracer_fd);
-			break;
-		case LTTNG_EVENT_TRACEPOINT:
-			/*
-			 * This call enables all LTTNG_KERNEL_TRACEPOINTS and
-			 * events already registered to the channel.
-			 */
-			ret = event_kernel_enable_all_tracepoints(session->kernel_session,
-					kchan, kernel_tracer_fd);
-			break;
-		case LTTNG_EVENT_ALL:
-			/* Enable syscalls and tracepoints */
-			ret = event_kernel_enable_all(session->kernel_session,
-					kchan, kernel_tracer_fd);
-			break;
-		default:
-			ret = LTTCOMM_KERN_ENABLE_FAIL;
-			goto error;
-		}
-
-		/* Manage return value */
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-
-		kernel_wait_quiescent(kernel_tracer_fd);
-		break;
-	case LTTNG_DOMAIN_UST:
-	{
-		struct lttng_channel *attr;
-		struct ltt_ust_channel *uchan;
-		struct ltt_ust_session *usess = session->ust_session;
-
-		/* Get channel from global UST domain */
-		uchan = trace_ust_find_channel_by_name(usess->domain_global.channels,
-				channel_name);
-		if (uchan == NULL) {
-			/* Create default channel */
-			attr = channel_new_default_attr(domain);
-			if (attr == NULL) {
-				ret = LTTCOMM_FATAL;
-				goto error;
-			}
-			snprintf(attr->name, NAME_MAX, "%s", channel_name);
-			attr->name[NAME_MAX - 1] = '\0';
-
-			/* Use the internal command enable channel */
-			ret = channel_ust_create(usess, domain, attr);
-			if (ret != LTTCOMM_OK) {
-				free(attr);
-				goto error;
-			}
-			free(attr);
-
-			/* Get the newly created channel reference back */
-			uchan = trace_ust_find_channel_by_name(
-					usess->domain_global.channels, channel_name);
-			if (uchan == NULL) {
-				/* Something is really wrong */
-				ret = LTTCOMM_FATAL;
-				goto error;
-			}
-		}
-
-		/* At this point, the session and channel exist on the tracer */
-
-		switch (event_type) {
-		case LTTNG_EVENT_ALL:
-		case LTTNG_EVENT_TRACEPOINT:
-			ret = event_ust_enable_all_tracepoints(usess, domain, uchan);
-			if (ret != LTTCOMM_OK) {
-				goto error;
-			}
-			break;
-		default:
-			ret = LTTCOMM_UST_ENABLE_FAIL;
-			goto error;
-		}
-
-		/* Manage return value */
-		if (ret != LTTCOMM_OK) {
-			goto error;
-		}
-
-		break;
-	}
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
-	default:
-		ret = LTTCOMM_UND;
-		goto error;
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_LIST_TRACEPOINTS processed by the client thread.
- */
-static ssize_t cmd_list_tracepoints(int domain, struct lttng_event **events)
-{
-	int ret;
-	ssize_t nb_events = 0;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-		nb_events = kernel_list_events(kernel_tracer_fd, events);
-		if (nb_events < 0) {
-			ret = LTTCOMM_KERN_LIST_FAIL;
-			goto error;
-		}
-		break;
-	case LTTNG_DOMAIN_UST:
-		nb_events = ust_app_list_events(events);
-		if (nb_events < 0) {
-			ret = LTTCOMM_UST_LIST_FAIL;
-			goto error;
-		}
-		break;
-	default:
-		ret = LTTCOMM_UND;
-		goto error;
-	}
-
-	return nb_events;
-
-error:
-	/* Return negative value to differentiate return code */
-	return -ret;
-}
-
-/*
- * Command LTTNG_START_TRACE processed by the client thread.
- */
-static int cmd_start_trace(struct ltt_session *session)
-{
-	int ret;
-	struct ltt_kernel_session *ksession;
-	struct ltt_ust_session *usess;
-
-	/* Short cut */
-	ksession = session->kernel_session;
-	usess = session->ust_session;
-
-	if (session->enabled) {
-		/* Already started. */
-		ret = LTTCOMM_TRACE_ALREADY_STARTED;
-		goto error;
-	}
-
-	session->enabled = 1;
-
-	/* Kernel tracing */
-	if (ksession != NULL) {
-		struct ltt_kernel_channel *kchan;
-
-		/* Open kernel metadata */
-		if (ksession->metadata == NULL) {
-			ret = kernel_open_metadata(ksession, ksession->trace_path);
-			if (ret < 0) {
-				ret = LTTCOMM_KERN_META_FAIL;
-				goto error;
-			}
-		}
-
-		/* Open kernel metadata stream */
-		if (ksession->metadata_stream_fd < 0) {
-			ret = kernel_open_metadata_stream(ksession);
-			if (ret < 0) {
-				ERR("Kernel create metadata stream failed");
-				ret = LTTCOMM_KERN_STREAM_FAIL;
-				goto error;
-			}
-		}
-
-		/* For each channel */
-		cds_list_for_each_entry(kchan, &ksession->channel_list.head, list) {
-			if (kchan->stream_count == 0) {
-				ret = kernel_open_channel_stream(kchan);
-				if (ret < 0) {
-					ret = LTTCOMM_KERN_STREAM_FAIL;
-					goto error;
-				}
-				/* Update the stream global counter */
-				ksession->stream_count_global += ret;
-			}
-		}
-
-		/* Setup kernel consumer socket and send fds to it */
-		ret = init_kernel_tracing(ksession);
-		if (ret < 0) {
-			ret = LTTCOMM_KERN_START_FAIL;
-			goto error;
-		}
-
-		/* This start the kernel tracing */
-		ret = kernel_start_session(ksession);
-		if (ret < 0) {
-			ret = LTTCOMM_KERN_START_FAIL;
-			goto error;
-		}
-
-		/* Quiescent wait after starting trace */
-		kernel_wait_quiescent(kernel_tracer_fd);
-	}
-
-	/* Flag session that trace should start automatically */
-	if (usess) {
-		usess->start_trace = 1;
-
-		ret = ust_app_start_trace_all(usess);
-		if (ret < 0) {
-			ret = LTTCOMM_UST_START_FAIL;
-			goto error;
-		}
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_STOP_TRACE processed by the client thread.
- */
-static int cmd_stop_trace(struct ltt_session *session)
-{
-	int ret;
-	struct ltt_kernel_channel *kchan;
-	struct ltt_kernel_session *ksession;
-	struct ltt_ust_session *usess;
-
-	/* Short cut */
-	ksession = session->kernel_session;
-	usess = session->ust_session;
-
-	if (!session->enabled) {
-		ret = LTTCOMM_TRACE_ALREADY_STOPPED;
-		goto error;
-	}
-
-	session->enabled = 0;
-
-	/* Kernel tracer */
-	if (ksession != NULL) {
-		DBG("Stop kernel tracing");
-
-		/* Flush all buffers before stopping */
-		ret = kernel_metadata_flush_buffer(ksession->metadata_stream_fd);
-		if (ret < 0) {
-			ERR("Kernel metadata flush failed");
-		}
-
-		cds_list_for_each_entry(kchan, &ksession->channel_list.head, list) {
-			ret = kernel_flush_buffer(kchan);
-			if (ret < 0) {
-				ERR("Kernel flush buffer error");
-			}
-		}
-
-		ret = kernel_stop_session(ksession);
-		if (ret < 0) {
-			ret = LTTCOMM_KERN_STOP_FAIL;
-			goto error;
-		}
-
-		kernel_wait_quiescent(kernel_tracer_fd);
-	}
-
-	if (usess) {
-		usess->start_trace = 0;
-
-		ret = ust_app_stop_trace_all(usess);
-		if (ret < 0) {
-			ret = LTTCOMM_UST_STOP_FAIL;
-			goto error;
-		}
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_CREATE_SESSION processed by the client thread.
- */
-static int cmd_create_session(char *name, char *path, lttng_sock_cred *creds)
-{
-	int ret;
-
-	ret = session_create(name, path, LTTNG_SOCK_GET_UID_CRED(creds),
-			LTTNG_SOCK_GET_GID_CRED(creds));
-	if (ret != LTTCOMM_OK) {
-		goto error;
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_DESTROY_SESSION processed by the client thread.
- */
-static int cmd_destroy_session(struct ltt_session *session, char *name)
-{
-	int ret;
-
-	/* Clean kernel session teardown */
-	teardown_kernel_session(session);
-	/* UST session teardown */
-	teardown_ust_session(session);
-
-	/*
-	 * Must notify the kernel thread here to update it's poll setin order
-	 * to remove the channel(s)' fd just destroyed.
-	 */
-	ret = notify_thread_pipe(kernel_poll_pipe[1]);
-	if (ret < 0) {
-		PERROR("write kernel poll pipe");
-	}
-
-	ret = session_destroy(session);
-
-	return ret;
-}
-
-/*
- * Command LTTNG_CALIBRATE processed by the client thread.
- */
-static int cmd_calibrate(int domain, struct lttng_calibrate *calibrate)
-{
-	int ret;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-	{
-		struct lttng_kernel_calibrate kcalibrate;
-
-		kcalibrate.type = calibrate->type;
-		ret = kernel_calibrate(kernel_tracer_fd, &kcalibrate);
-		if (ret < 0) {
-			ret = LTTCOMM_KERN_ENABLE_FAIL;
-			goto error;
-		}
-		break;
-	}
-	case LTTNG_DOMAIN_UST:
-	{
-		struct lttng_ust_calibrate ucalibrate;
-
-		ucalibrate.type = calibrate->type;
-		ret = ust_app_calibrate_glb(&ucalibrate);
-		if (ret < 0) {
-			ret = LTTCOMM_UST_CALIBRATE_FAIL;
-			goto error;
-		}
-		break;
-	}
-	default:
-		ret = LTTCOMM_UND;
-		goto error;
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_REGISTER_CONSUMER processed by the client thread.
- */
-static int cmd_register_consumer(struct ltt_session *session, int domain,
-		char *sock_path)
-{
-	int ret, sock;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-		/* Can't register a consumer if there is already one */
-		if (session->kernel_session->consumer_fds_sent != 0) {
-			ret = LTTCOMM_KERN_CONSUMER_FAIL;
-			goto error;
-		}
-
-		sock = lttcomm_connect_unix_sock(sock_path);
-		if (sock < 0) {
-			ret = LTTCOMM_CONNECT_FAIL;
-			goto error;
-		}
-
-		session->kernel_session->consumer_fd = sock;
-		break;
-	default:
-		/* TODO: Userspace tracing */
-		ret = LTTCOMM_UND;
-		goto error;
-	}
-
-	ret = LTTCOMM_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_LIST_DOMAINS processed by the client thread.
- */
-static ssize_t cmd_list_domains(struct ltt_session *session,
-		struct lttng_domain **domains)
-{
-	int ret, index = 0;
-	ssize_t nb_dom = 0;
-
-	if (session->kernel_session != NULL) {
-		DBG3("Listing domains found kernel domain");
-		nb_dom++;
-	}
-
-	if (session->ust_session != NULL) {
-		DBG3("Listing domains found UST global domain");
-		nb_dom++;
-	}
-
-	*domains = zmalloc(nb_dom * sizeof(struct lttng_domain));
-	if (*domains == NULL) {
-		ret = -LTTCOMM_FATAL;
-		goto error;
-	}
-
-	if (session->kernel_session != NULL) {
-		(*domains)[index].type = LTTNG_DOMAIN_KERNEL;
-		index++;
-	}
-
-	if (session->ust_session != NULL) {
-		(*domains)[index].type = LTTNG_DOMAIN_UST;
-		index++;
-	}
-
-	return nb_dom;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_LIST_CHANNELS processed by the client thread.
- */
-static ssize_t cmd_list_channels(int domain, struct ltt_session *session,
-		struct lttng_channel **channels)
-{
-	int ret;
-	ssize_t nb_chan = 0;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-		if (session->kernel_session != NULL) {
-			nb_chan = session->kernel_session->channel_count;
-		}
-		DBG3("Number of kernel channels %zd", nb_chan);
-		break;
-	case LTTNG_DOMAIN_UST:
-		if (session->ust_session != NULL) {
-			nb_chan = lttng_ht_get_count(
-					session->ust_session->domain_global.channels);
-		}
-		DBG3("Number of UST global channels %zd", nb_chan);
-		break;
-	default:
-		*channels = NULL;
-		ret = -LTTCOMM_UND;
-		goto error;
-	}
-
-	if (nb_chan > 0) {
-		*channels = zmalloc(nb_chan * sizeof(struct lttng_channel));
-		if (*channels == NULL) {
-			ret = -LTTCOMM_FATAL;
-			goto error;
-		}
-
-		list_lttng_channels(domain, session, *channels);
-	} else {
-		*channels = NULL;
-	}
-
-	return nb_chan;
-
-error:
-	return ret;
-}
-
-/*
- * Command LTTNG_LIST_EVENTS processed by the client thread.
- */
-static ssize_t cmd_list_events(int domain, struct ltt_session *session,
-		char *channel_name, struct lttng_event **events)
-{
-	int ret = 0;
-	ssize_t nb_event = 0;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-		if (session->kernel_session != NULL) {
-			nb_event = list_lttng_kernel_events(channel_name,
-					session->kernel_session, events);
-		}
-		break;
-	case LTTNG_DOMAIN_UST:
-	{
-		if (session->ust_session != NULL) {
-			nb_event = list_lttng_ust_global_events(channel_name,
-					&session->ust_session->domain_global, events);
-		}
-		break;
-	}
-	default:
-		ret = -LTTCOMM_UND;
-		goto error;
-	}
-
-	ret = nb_event;
-
-error:
-	return ret;
-}
-
-/*
  * Process the command requested by the lttng client within the command
  * context structure. This function make sure that the return structure (llm)
  * is set and ready for transmission before returning.
  *
  * Return any error encountered or 0 for success.
+ *
+ * "sock" is only used for special-case var. len data.
  */
-static int process_client_msg(struct command_ctx *cmd_ctx)
+static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
+		int *sock_error)
 {
 	int ret = LTTCOMM_OK;
 	int need_tracing_session = 1;
 	int need_domain;
 
 	DBG("Processing client command %d", cmd_ctx->lsm->cmd_type);
+
+	*sock_error = 0;
 
 	switch (cmd_ctx->lsm->cmd_type) {
 	case LTTNG_CREATE_SESSION:
@@ -3331,6 +2022,17 @@ static int process_client_msg(struct command_ctx *cmd_ctx)
 		goto error;
 	}
 
+	/* Deny register consumer if we already have a spawned consumer. */
+	if (cmd_ctx->lsm->cmd_type == LTTNG_REGISTER_CONSUMER) {
+		pthread_mutex_lock(&kconsumer_data.pid_mutex);
+		if (kconsumer_data.pid > 0) {
+			ret = LTTCOMM_KERN_CONSUMER_FAIL;
+			pthread_mutex_unlock(&kconsumer_data.pid_mutex);
+			goto error;
+		}
+		pthread_mutex_unlock(&kconsumer_data.pid_mutex);
+	}
+
 	/*
 	 * Check for command that don't needs to allocate a returned payload. We do
 	 * this here so we don't have to make the call for no payload at each
@@ -3339,6 +2041,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx)
 	switch(cmd_ctx->lsm->cmd_type) {
 	case LTTNG_LIST_SESSIONS:
 	case LTTNG_LIST_TRACEPOINTS:
+	case LTTNG_LIST_TRACEPOINT_FIELDS:
 	case LTTNG_LIST_DOMAINS:
 	case LTTNG_LIST_CHANNELS:
 	case LTTNG_LIST_EVENTS:
@@ -3358,6 +2061,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx)
 	case LTTNG_CALIBRATE:
 	case LTTNG_LIST_SESSIONS:
 	case LTTNG_LIST_TRACEPOINTS:
+	case LTTNG_LIST_TRACEPOINT_FIELDS:
 		need_tracing_session = 0;
 		break;
 	default:
@@ -3387,6 +2091,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx)
 	if (!need_domain) {
 		goto skip_domain;
 	}
+
 	/*
 	 * Check domain type for specific "pre-action".
 	 */
@@ -3425,7 +2130,8 @@ static int process_client_msg(struct command_ctx *cmd_ctx)
 			/* Start the kernel consumer daemon */
 			pthread_mutex_lock(&kconsumer_data.pid_mutex);
 			if (kconsumer_data.pid == 0 &&
-					cmd_ctx->lsm->cmd_type != LTTNG_REGISTER_CONSUMER) {
+					cmd_ctx->lsm->cmd_type != LTTNG_REGISTER_CONSUMER &&
+					cmd_ctx->session->start_consumer) {
 				pthread_mutex_unlock(&kconsumer_data.pid_mutex);
 				ret = start_consumerd(&kconsumer_data);
 				if (ret < 0) {
@@ -3435,6 +2141,16 @@ static int process_client_msg(struct command_ctx *cmd_ctx)
 				uatomic_set(&kernel_consumerd_state, CONSUMER_STARTED);
 			} else {
 				pthread_mutex_unlock(&kconsumer_data.pid_mutex);
+			}
+
+			/*
+			 * The consumer was just spawned so we need to add the socket to
+			 * the consumer output of the session if exist.
+			 */
+			ret = consumer_create_socket(&kconsumer_data,
+					cmd_ctx->session->kernel_session->consumer);
+			if (ret < 0) {
+				goto error;
 			}
 		}
 
@@ -3448,6 +2164,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx)
 		}
 
 		if (need_tracing_session) {
+			/* Create UST session if none exist. */
 			if (cmd_ctx->session->ust_session == NULL) {
 				ret = create_ust_session(cmd_ctx->session,
 						&cmd_ctx->lsm->domain);
@@ -3455,41 +2172,65 @@ static int process_client_msg(struct command_ctx *cmd_ctx)
 					goto error;
 				}
 			}
+
 			/* Start the UST consumer daemons */
 			/* 64-bit */
 			pthread_mutex_lock(&ustconsumer64_data.pid_mutex);
 			if (consumerd64_bin[0] != '\0' &&
 					ustconsumer64_data.pid == 0 &&
-					cmd_ctx->lsm->cmd_type != LTTNG_REGISTER_CONSUMER) {
+					cmd_ctx->lsm->cmd_type != LTTNG_REGISTER_CONSUMER &&
+					cmd_ctx->session->start_consumer) {
 				pthread_mutex_unlock(&ustconsumer64_data.pid_mutex);
 				ret = start_consumerd(&ustconsumer64_data);
 				if (ret < 0) {
 					ret = LTTCOMM_UST_CONSUMER64_FAIL;
-					ust_consumerd64_fd = -EINVAL;
+					uatomic_set(&ust_consumerd64_fd, -EINVAL);
 					goto error;
 				}
 
-				ust_consumerd64_fd = ustconsumer64_data.cmd_sock;
+				uatomic_set(&ust_consumerd64_fd, ustconsumer64_data.cmd_sock);
 				uatomic_set(&ust_consumerd_state, CONSUMER_STARTED);
 			} else {
 				pthread_mutex_unlock(&ustconsumer64_data.pid_mutex);
 			}
+
+			/*
+			 * Setup socket for consumer 64 bit. No need for atomic access
+			 * since it was set above and can ONLY be set in this thread.
+			 */
+			ret = consumer_create_socket(&ustconsumer64_data,
+					cmd_ctx->session->ust_session->consumer);
+			if (ret < 0) {
+				goto error;
+			}
+
 			/* 32-bit */
 			if (consumerd32_bin[0] != '\0' &&
 					ustconsumer32_data.pid == 0 &&
-					cmd_ctx->lsm->cmd_type != LTTNG_REGISTER_CONSUMER) {
+					cmd_ctx->lsm->cmd_type != LTTNG_REGISTER_CONSUMER &&
+					cmd_ctx->session->start_consumer) {
 				pthread_mutex_unlock(&ustconsumer32_data.pid_mutex);
 				ret = start_consumerd(&ustconsumer32_data);
 				if (ret < 0) {
 					ret = LTTCOMM_UST_CONSUMER32_FAIL;
-					ust_consumerd32_fd = -EINVAL;
+					uatomic_set(&ust_consumerd32_fd, -EINVAL);
 					goto error;
 				}
 
-				ust_consumerd32_fd = ustconsumer32_data.cmd_sock;
+				uatomic_set(&ust_consumerd32_fd, ustconsumer32_data.cmd_sock);
 				uatomic_set(&ust_consumerd_state, CONSUMER_STARTED);
 			} else {
 				pthread_mutex_unlock(&ustconsumer32_data.pid_mutex);
+			}
+
+			/*
+			 * Setup socket for consumer 64 bit. No need for atomic access
+			 * since it was set above and can ONLY be set in this thread.
+			 */
+			ret = consumer_create_socket(&ustconsumer32_data,
+					cmd_ctx->session->ust_session->consumer);
+			if (ret < 0) {
+				goto error;
 			}
 		}
 		break;
@@ -3562,17 +2303,46 @@ skip_domain:
 				cmd_ctx->lsm->u.disable.channel_name);
 		break;
 	}
+	case LTTNG_DISABLE_CONSUMER:
+	{
+		ret = cmd_disable_consumer(cmd_ctx->lsm->domain.type, cmd_ctx->session);
+		break;
+	}
 	case LTTNG_ENABLE_CHANNEL:
 	{
 		ret = cmd_enable_channel(cmd_ctx->session, cmd_ctx->lsm->domain.type,
-				&cmd_ctx->lsm->u.channel.chan);
+				&cmd_ctx->lsm->u.channel.chan, kernel_poll_pipe[1]);
+		break;
+	}
+	case LTTNG_ENABLE_CONSUMER:
+	{
+		/*
+		 * XXX: 0 means that this URI should be applied on the session. Should
+		 * be a DOMAIN enuam.
+		 */
+		ret = cmd_enable_consumer(cmd_ctx->lsm->domain.type, cmd_ctx->session);
+		if (ret != LTTCOMM_OK) {
+			goto error;
+		}
+
+		if (cmd_ctx->lsm->domain.type == 0) {
+			/* Add the URI for the UST session if a consumer is present. */
+			if (cmd_ctx->session->ust_session &&
+					cmd_ctx->session->ust_session->consumer) {
+				ret = cmd_enable_consumer(LTTNG_DOMAIN_UST, cmd_ctx->session);
+			} else if (cmd_ctx->session->kernel_session &&
+					cmd_ctx->session->kernel_session->consumer) {
+				ret = cmd_enable_consumer(LTTNG_DOMAIN_KERNEL,
+						cmd_ctx->session);
+			}
+		}
 		break;
 	}
 	case LTTNG_ENABLE_EVENT:
 	{
 		ret = cmd_enable_event(cmd_ctx->session, cmd_ctx->lsm->domain.type,
 				cmd_ctx->lsm->u.enable.channel_name,
-				&cmd_ctx->lsm->u.enable.event);
+				&cmd_ctx->lsm->u.enable.event, kernel_poll_pipe[1]);
 		break;
 	}
 	case LTTNG_ENABLE_ALL_EVENT:
@@ -3581,7 +2351,7 @@ skip_domain:
 
 		ret = cmd_enable_event_all(cmd_ctx->session, cmd_ctx->lsm->domain.type,
 				cmd_ctx->lsm->u.enable.channel_name,
-				cmd_ctx->lsm->u.enable.event.type);
+				cmd_ctx->lsm->u.enable.event.type, kernel_poll_pipe[1]);
 		break;
 	}
 	case LTTNG_LIST_TRACEPOINTS:
@@ -3614,6 +2384,92 @@ skip_domain:
 		ret = LTTCOMM_OK;
 		break;
 	}
+	case LTTNG_LIST_TRACEPOINT_FIELDS:
+	{
+		struct lttng_event_field *fields;
+		ssize_t nb_fields;
+
+		nb_fields = cmd_list_tracepoint_fields(cmd_ctx->lsm->domain.type,
+				&fields);
+		if (nb_fields < 0) {
+			ret = -nb_fields;
+			goto error;
+		}
+
+		/*
+		 * Setup lttng message with payload size set to the event list size in
+		 * bytes and then copy list into the llm payload.
+		 */
+		ret = setup_lttng_msg(cmd_ctx,
+				sizeof(struct lttng_event_field) * nb_fields);
+		if (ret < 0) {
+			free(fields);
+			goto setup_error;
+		}
+
+		/* Copy event list into message payload */
+		memcpy(cmd_ctx->llm->payload, fields,
+				sizeof(struct lttng_event_field) * nb_fields);
+
+		free(fields);
+
+		ret = LTTCOMM_OK;
+		break;
+	}
+	case LTTNG_SET_CONSUMER_URI:
+	{
+		size_t nb_uri, len;
+		struct lttng_uri *uris;
+
+		nb_uri = cmd_ctx->lsm->u.uri.size;
+		len = nb_uri * sizeof(struct lttng_uri);
+
+		if (nb_uri == 0) {
+			ret = LTTCOMM_INVALID;
+			goto error;
+		}
+
+		uris = zmalloc(len);
+		if (uris == NULL) {
+			ret = LTTCOMM_FATAL;
+			goto error;
+		}
+
+		/* Receive variable len data */
+		DBG("Receiving %zu URI(s) from client ...", nb_uri);
+		ret = lttcomm_recv_unix_sock(sock, uris, len);
+		if (ret <= 0) {
+			DBG("No URIs received from client... continuing");
+			*sock_error = 1;
+			ret = LTTCOMM_SESSION_FAIL;
+			goto error;
+		}
+
+		ret = cmd_set_consumer_uri(cmd_ctx->lsm->domain.type, cmd_ctx->session,
+				nb_uri, uris);
+		if (ret != LTTCOMM_OK) {
+			goto error;
+		}
+
+		/*
+		 * XXX: 0 means that this URI should be applied on the session. Should
+		 * be a DOMAIN enuam.
+		 */
+		if (cmd_ctx->lsm->domain.type == 0) {
+			/* Add the URI for the UST session if a consumer is present. */
+			if (cmd_ctx->session->ust_session &&
+					cmd_ctx->session->ust_session->consumer) {
+				ret = cmd_set_consumer_uri(LTTNG_DOMAIN_UST, cmd_ctx->session,
+						nb_uri, uris);
+			} else if (cmd_ctx->session->kernel_session &&
+					cmd_ctx->session->kernel_session->consumer) {
+				ret = cmd_set_consumer_uri(LTTNG_DOMAIN_KERNEL,
+						cmd_ctx->session, nb_uri, uris);
+			}
+		}
+
+		break;
+	}
 	case LTTNG_START_TRACE:
 	{
 		ret = cmd_start_trace(cmd_ctx->session);
@@ -3626,18 +2482,46 @@ skip_domain:
 	}
 	case LTTNG_CREATE_SESSION:
 	{
-		ret = cmd_create_session(cmd_ctx->lsm->session.name,
-				cmd_ctx->lsm->session.path, &cmd_ctx->creds);
+		size_t nb_uri, len;
+		struct lttng_uri *uris = NULL;
+
+		nb_uri = cmd_ctx->lsm->u.uri.size;
+		len = nb_uri * sizeof(struct lttng_uri);
+
+		if (nb_uri > 0) {
+			uris = zmalloc(len);
+			if (uris == NULL) {
+				ret = LTTCOMM_FATAL;
+				goto error;
+			}
+
+			/* Receive variable len data */
+			DBG("Waiting for %zu URIs from client ...", nb_uri);
+			ret = lttcomm_recv_unix_sock(sock, uris, len);
+			if (ret <= 0) {
+				DBG("No URIs received from client... continuing");
+				*sock_error = 1;
+				ret = LTTCOMM_SESSION_FAIL;
+				goto error;
+			}
+
+			if (nb_uri == 1 && uris[0].dtype != LTTNG_DST_PATH) {
+				DBG("Creating session with ONE network URI is a bad call");
+				ret = LTTCOMM_SESSION_FAIL;
+				goto error;
+			}
+		}
+
+		ret = cmd_create_session_uri(cmd_ctx->lsm->session.name, uris, nb_uri,
+			&cmd_ctx->creds);
+
 		break;
 	}
 	case LTTNG_DESTROY_SESSION:
 	{
-		ret = cmd_destroy_session(cmd_ctx->session,
-				cmd_ctx->lsm->session.name);
-		/*
-		 * Set session to NULL so we do not unlock it after
-		 * free.
-		 */
+		ret = cmd_destroy_session(cmd_ctx->session, kernel_poll_pipe[1]);
+
+		/* Set session to NULL so we do not unlock it after free. */
 		cmd_ctx->session = NULL;
 		break;
 	}
@@ -3734,7 +2618,7 @@ skip_domain:
 		}
 
 		/* Filled the session array */
-		list_lttng_sessions((struct lttng_session *)(cmd_ctx->llm->payload),
+		cmd_list_lttng_sessions((struct lttng_session *)(cmd_ctx->llm->payload),
 			LTTNG_SOCK_GET_UID_CRED(&cmd_ctx->creds),
 			LTTNG_SOCK_GET_GID_CRED(&cmd_ctx->creds));
 
@@ -3751,8 +2635,56 @@ skip_domain:
 	}
 	case LTTNG_REGISTER_CONSUMER:
 	{
+		struct consumer_data *cdata;
+
+		switch (cmd_ctx->lsm->domain.type) {
+		case LTTNG_DOMAIN_KERNEL:
+			cdata = &kconsumer_data;
+			break;
+		default:
+			ret = LTTCOMM_UND;
+			goto error;
+		}
+
 		ret = cmd_register_consumer(cmd_ctx->session, cmd_ctx->lsm->domain.type,
-				cmd_ctx->lsm->u.reg.path);
+				cmd_ctx->lsm->u.reg.path, cdata);
+		break;
+	}
+	case LTTNG_SET_FILTER:
+	{
+		struct lttng_filter_bytecode *bytecode;
+
+		if (cmd_ctx->lsm->u.filter.bytecode_len > 65336) {
+			ret = LTTCOMM_FILTER_INVAL;
+			goto error;
+		}
+		bytecode = zmalloc(cmd_ctx->lsm->u.filter.bytecode_len);
+		if (!bytecode) {
+			ret = LTTCOMM_FILTER_NOMEM;
+			goto error;
+		}
+		/* Receive var. len. data */
+		DBG("Receiving var len data from client ...");
+		ret = lttcomm_recv_unix_sock(sock, bytecode,
+				cmd_ctx->lsm->u.filter.bytecode_len);
+		if (ret <= 0) {
+			DBG("Nothing recv() from client var len data... continuing");
+			*sock_error = 1;
+			ret = LTTCOMM_FILTER_INVAL;
+			goto error;
+		}
+
+		if (bytecode->len + sizeof(*bytecode)
+				!= cmd_ctx->lsm->u.filter.bytecode_len) {
+			free(bytecode);
+			ret = LTTCOMM_FILTER_INVAL;
+			goto error;
+		}
+
+		ret = cmd_set_filter(cmd_ctx->session, cmd_ctx->lsm->domain.type,
+				cmd_ctx->lsm->u.filter.channel_name,
+				cmd_ctx->lsm->u.filter.event_name,
+				bytecode);
 		break;
 	}
 	default:
@@ -3781,12 +2713,194 @@ init_setup_error:
 }
 
 /*
+ * Thread managing health check socket.
+ */
+static void *thread_manage_health(void *data)
+{
+	int sock = -1, new_sock = -1, ret, i, pollfd, err = -1;
+	uint32_t revents, nb_fd;
+	struct lttng_poll_event events;
+	struct lttcomm_health_msg msg;
+	struct lttcomm_health_data reply;
+
+	DBG("[thread] Manage health check started");
+
+	rcu_register_thread();
+
+	/* Create unix socket */
+	sock = lttcomm_create_unix_sock(health_unix_sock_path);
+	if (sock < 0) {
+		ERR("Unable to create health check Unix socket");
+		ret = -1;
+		goto error;
+	}
+
+	ret = lttcomm_listen_unix_sock(sock);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/*
+	 * Pass 2 as size here for the thread quit pipe and client_sock. Nothing
+	 * more will be added to this poll set.
+	 */
+	ret = create_thread_poll_set(&events, 2);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Add the application registration socket */
+	ret = lttng_poll_add(&events, sock, LPOLLIN | LPOLLPRI);
+	if (ret < 0) {
+		goto error;
+	}
+
+	while (1) {
+		DBG("Health check ready");
+
+		nb_fd = LTTNG_POLL_GETNB(&events);
+
+		/* Inifinite blocking call, waiting for transmission */
+restart:
+		ret = lttng_poll_wait(&events, -1);
+		if (ret < 0) {
+			/*
+			 * Restart interrupted system call.
+			 */
+			if (errno == EINTR) {
+				goto restart;
+			}
+			goto error;
+		}
+
+		for (i = 0; i < nb_fd; i++) {
+			/* Fetch once the poll data */
+			revents = LTTNG_POLL_GETEV(&events, i);
+			pollfd = LTTNG_POLL_GETFD(&events, i);
+
+			/* Thread quit pipe has been closed. Killing thread. */
+			ret = check_thread_quit_pipe(pollfd, revents);
+			if (ret) {
+				err = 0;
+				goto exit;
+			}
+
+			/* Event on the registration socket */
+			if (pollfd == sock) {
+				if (revents & (LPOLLERR | LPOLLHUP | LPOLLRDHUP)) {
+					ERR("Health socket poll error");
+					goto error;
+				}
+			}
+		}
+
+		new_sock = lttcomm_accept_unix_sock(sock);
+		if (new_sock < 0) {
+			goto error;
+		}
+
+		DBG("Receiving data from client for health...");
+		ret = lttcomm_recv_unix_sock(new_sock, (void *)&msg, sizeof(msg));
+		if (ret <= 0) {
+			DBG("Nothing recv() from client... continuing");
+			ret = close(new_sock);
+			if (ret) {
+				PERROR("close");
+			}
+			new_sock = -1;
+			continue;
+		}
+
+		rcu_thread_online();
+
+		switch (msg.component) {
+		case LTTNG_HEALTH_CMD:
+			reply.ret_code = health_check_state(&health_thread_cmd);
+			break;
+		case LTTNG_HEALTH_APP_MANAGE:
+			reply.ret_code = health_check_state(&health_thread_app_manage);
+			break;
+		case LTTNG_HEALTH_APP_REG:
+			reply.ret_code = health_check_state(&health_thread_app_reg);
+			break;
+		case LTTNG_HEALTH_KERNEL:
+			reply.ret_code = health_check_state(&health_thread_kernel);
+			break;
+		case LTTNG_HEALTH_CONSUMER:
+			reply.ret_code = check_consumer_health();
+			break;
+		case LTTNG_HEALTH_ALL:
+			reply.ret_code =
+				health_check_state(&health_thread_app_manage) &&
+				health_check_state(&health_thread_app_reg) &&
+				health_check_state(&health_thread_cmd) &&
+				health_check_state(&health_thread_kernel) &&
+				check_consumer_health();
+			break;
+		default:
+			reply.ret_code = LTTCOMM_UND;
+			break;
+		}
+
+		/*
+		 * Flip ret value since 0 is a success and 1 indicates a bad health for
+		 * the client where in the sessiond it is the opposite. Again, this is
+		 * just to make things easier for us poor developer which enjoy a lot
+		 * lazyness.
+		 */
+		if (reply.ret_code == 0 || reply.ret_code == 1) {
+			reply.ret_code = !reply.ret_code;
+		}
+
+		DBG2("Health check return value %d", reply.ret_code);
+
+		ret = send_unix_sock(new_sock, (void *) &reply, sizeof(reply));
+		if (ret < 0) {
+			ERR("Failed to send health data back to client");
+		}
+
+		/* End of transmission */
+		ret = close(new_sock);
+		if (ret) {
+			PERROR("close");
+		}
+		new_sock = -1;
+	}
+
+exit:
+error:
+	if (err) {
+		ERR("Health error occurred in %s", __func__);
+	}
+	DBG("Health check thread dying");
+	unlink(health_unix_sock_path);
+	if (sock >= 0) {
+		ret = close(sock);
+		if (ret) {
+			PERROR("close");
+		}
+	}
+	if (new_sock >= 0) {
+		ret = close(new_sock);
+		if (ret) {
+			PERROR("close");
+		}
+	}
+
+	lttng_poll_clean(&events);
+
+	rcu_unregister_thread();
+	return NULL;
+}
+
+/*
  * This thread manage all clients request using the unix client socket for
  * communication.
  */
 static void *thread_manage_clients(void *data)
 {
-	int sock = -1, ret, i, pollfd;
+	int sock = -1, ret, i, pollfd, err = -1;
+	int sock_error;
 	uint32_t revents, nb_fd;
 	struct command_ctx *cmd_ctx = NULL;
 	struct lttng_poll_event events;
@@ -3794,6 +2908,8 @@ static void *thread_manage_clients(void *data)
 	DBG("[thread] Manage client started");
 
 	rcu_register_thread();
+
+	health_code_update(&health_thread_cmd);
 
 	ret = lttcomm_listen_unix_sock(client_sock);
 	if (ret < 0) {
@@ -3822,6 +2938,8 @@ static void *thread_manage_clients(void *data)
 		kill(ppid, SIGUSR1);
 	}
 
+	health_code_update(&health_thread_cmd);
+
 	while (1) {
 		DBG("Accepting client command ...");
 
@@ -3829,7 +2947,9 @@ static void *thread_manage_clients(void *data)
 
 		/* Inifinite blocking call, waiting for transmission */
 	restart:
+		health_poll_update(&health_thread_cmd);
 		ret = lttng_poll_wait(&events, -1);
+		health_poll_update(&health_thread_cmd);
 		if (ret < 0) {
 			/*
 			 * Restart interrupted system call.
@@ -3845,10 +2965,13 @@ static void *thread_manage_clients(void *data)
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
+			health_code_update(&health_thread_cmd);
+
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = check_thread_quit_pipe(pollfd, revents);
 			if (ret) {
-				goto error;
+				err = 0;
+				goto exit;
 			}
 
 			/* Event on the registration socket */
@@ -3861,6 +2984,8 @@ static void *thread_manage_clients(void *data)
 		}
 
 		DBG("Wait for client response");
+
+		health_code_update(&health_thread_cmd);
 
 		sock = lttcomm_accept_unix_sock(client_sock);
 		if (sock < 0) {
@@ -3890,6 +3015,8 @@ static void *thread_manage_clients(void *data)
 		cmd_ctx->llm = NULL;
 		cmd_ctx->session = NULL;
 
+		health_code_update(&health_thread_cmd);
+
 		/*
 		 * Data is received from the lttng client. The struct
 		 * lttcomm_session_msg (lsm) contains the command and data request of
@@ -3909,6 +3036,8 @@ static void *thread_manage_clients(void *data)
 			continue;
 		}
 
+		health_code_update(&health_thread_cmd);
+
 		// TODO: Validate cmd_ctx including sanity check for
 		// security purpose.
 
@@ -3919,17 +3048,28 @@ static void *thread_manage_clients(void *data)
 		 * informations for the client. The command context struct contains
 		 * everything this function may needs.
 		 */
-		ret = process_client_msg(cmd_ctx);
+		ret = process_client_msg(cmd_ctx, sock, &sock_error);
 		rcu_thread_offline();
 		if (ret < 0) {
+			if (sock_error) {
+				ret = close(sock);
+				if (ret) {
+					PERROR("close");
+				}
+				sock = -1;
+			}
 			/*
 			 * TODO: Inform client somehow of the fatal error. At
 			 * this point, ret < 0 means that a zmalloc failed
-			 * (ENOMEM). Error detected but still accept command.
+			 * (ENOMEM). Error detected but still accept
+			 * command, unless a socket error has been
+			 * detected.
 			 */
 			clean_command_ctx(&cmd_ctx);
 			continue;
 		}
+
+		health_code_update(&health_thread_cmd);
 
 		DBG("Sending response (size: %d, retcode: %s)",
 				cmd_ctx->lttng_msg_size,
@@ -3947,9 +3087,18 @@ static void *thread_manage_clients(void *data)
 		sock = -1;
 
 		clean_command_ctx(&cmd_ctx);
+
+		health_code_update(&health_thread_cmd);
 	}
 
+exit:
 error:
+	if (err) {
+		health_error(&health_thread_cmd);
+		ERR("Health error occurred in %s", __func__);
+	}
+	health_exit(&health_thread_cmd);
+
 	DBG("Client thread dying");
 	unlink(client_unix_sock_path);
 	if (client_sock >= 0) {
@@ -4256,58 +3405,6 @@ end:
 }
 
 /*
- * Create the pipe used to wake up the kernel thread.
- * Closed in cleanup().
- */
-static int create_kernel_poll_pipe(void)
-{
-	int ret, i;
-
-	ret = pipe(kernel_poll_pipe);
-	if (ret < 0) {
-		PERROR("kernel poll pipe");
-		goto error;
-	}
-
-	for (i = 0; i < 2; i++) {
-		ret = fcntl(kernel_poll_pipe[i], F_SETFD, FD_CLOEXEC);
-		if (ret < 0) {
-			PERROR("fcntl kernel_poll_pipe");
-			goto error;
-		}
-	}
-
-error:
-	return ret;
-}
-
-/*
- * Create the application command pipe to wake thread_manage_apps.
- * Closed in cleanup().
- */
-static int create_apps_cmd_pipe(void)
-{
-	int ret, i;
-
-	ret = pipe(apps_cmd_pipe);
-	if (ret < 0) {
-		PERROR("apps cmd pipe");
-		goto error;
-	}
-
-	for (i = 0; i < 2; i++) {
-		ret = fcntl(apps_cmd_pipe[i], F_SETFD, FD_CLOEXEC);
-		if (ret < 0) {
-			PERROR("fcntl apps_cmd_pipe");
-			goto error;
-		}
-	}
-
-error:
-	return ret;
-}
-
-/*
  * Create the lttng run directory needed for all global sockets and pipe.
  */
 static int create_lttng_rundir(const char *rundir)
@@ -4550,6 +3647,11 @@ int main(int argc, char **argv)
 					DEFAULT_GLOBAL_APPS_WAIT_SHM_PATH);
 		}
 
+		if (strlen(health_unix_sock_path) == 0) {
+			snprintf(health_unix_sock_path, sizeof(health_unix_sock_path),
+					DEFAULT_GLOBAL_HEALTH_UNIX_SOCK);
+		}
+
 		/* Setup kernel consumerd path */
 		snprintf(kconsumer_data.err_unix_sock_path, PATH_MAX,
 				DEFAULT_KCONSUMERD_ERR_SOCK_PATH, rundir);
@@ -4599,6 +3701,12 @@ int main(int argc, char **argv)
 		if (strlen(wait_shm_path) == 0) {
 			snprintf(wait_shm_path, PATH_MAX,
 					DEFAULT_HOME_APPS_WAIT_SHM_PATH, geteuid());
+		}
+
+		/* Set health check Unix path */
+		if (strlen(health_unix_sock_path) == 0) {
+			snprintf(health_unix_sock_path, sizeof(health_unix_sock_path),
+					DEFAULT_HOME_HEALTH_UNIX_SOCK, home_path);
 		}
 	}
 
@@ -4705,12 +3813,12 @@ int main(int argc, char **argv)
 	}
 
 	/* Setup the kernel pipe for waking up the kernel thread */
-	if ((ret = create_kernel_poll_pipe()) < 0) {
+	if ((ret = utils_create_pipe_cloexec(kernel_poll_pipe)) < 0) {
 		goto exit;
 	}
 
 	/* Setup the thread apps communication pipe. */
-	if ((ret = create_apps_cmd_pipe()) < 0) {
+	if ((ret = utils_create_pipe_cloexec(apps_cmd_pipe)) < 0) {
 		goto exit;
 	}
 
@@ -4725,6 +3833,34 @@ int main(int argc, char **argv)
 
 	/* Set up max poll set size */
 	lttng_poll_set_max_size();
+
+	cmd_init();
+
+	/* Init all health thread counters. */
+	health_init(&health_thread_cmd);
+	health_init(&health_thread_kernel);
+	health_init(&health_thread_app_manage);
+	health_init(&health_thread_app_reg);
+
+	/*
+	 * Init health counters of the consumer thread. We do a quick hack here to
+	 * the state of the consumer health is fine even if the thread is not
+	 * started.  This is simply to ease our life and has no cost what so ever.
+	 */
+	health_init(&kconsumer_data.health);
+	health_poll_update(&kconsumer_data.health);
+	health_init(&ustconsumer32_data.health);
+	health_poll_update(&ustconsumer32_data.health);
+	health_init(&ustconsumer64_data.health);
+	health_poll_update(&ustconsumer64_data.health);
+
+	/* Create thread to manage the client socket */
+	ret = pthread_create(&health_thread, NULL,
+			thread_manage_health, (void *) NULL);
+	if (ret != 0) {
+		PERROR("pthread_create health");
+		goto exit_health;
+	}
 
 	/* Create thread to manage the client socket */
 	ret = pthread_create(&client_thread, NULL,
@@ -4807,6 +3943,7 @@ exit_dispatch:
 	}
 
 exit_client:
+exit_health:
 exit:
 	/*
 	 * cleanup() is called when no other thread is running.

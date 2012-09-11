@@ -45,7 +45,7 @@
 static struct ltt_session_list ltt_session_list = {
 	.head = CDS_LIST_HEAD_INIT(ltt_session_list.head),
 	.lock = PTHREAD_MUTEX_INITIALIZER,
-	.count = 0,
+	.next_uuid = 0,
 };
 
 /*
@@ -57,7 +57,7 @@ static struct ltt_session_list ltt_session_list = {
 static unsigned int add_session_list(struct ltt_session *ls)
 {
 	cds_list_add(&ls->list, &ltt_session_list.head);
-	return ++ltt_session_list.count;
+	return ltt_session_list.next_uuid++;
 }
 
 /*
@@ -68,10 +68,6 @@ static unsigned int add_session_list(struct ltt_session *ls)
 static void del_session_list(struct ltt_session *ls)
 {
 	cds_list_del(&ls->list);
-	/* Sanity check */
-	if (ltt_session_list.count > 0) {
-		ltt_session_list.count--;
-	}
 }
 
 /*
@@ -153,6 +149,10 @@ int session_destroy(struct ltt_session *session)
 	DBG("Destroying session %s", session->name);
 	del_session_list(session);
 	pthread_mutex_destroy(&session->lock);
+
+	rcu_read_lock();
+	consumer_destroy_output(session->consumer);
+	rcu_read_unlock();
 	free(session);
 
 	return LTTCOMM_OK;
@@ -165,12 +165,6 @@ int session_create(char *name, char *path, uid_t uid, gid_t gid)
 {
 	int ret;
 	struct ltt_session *new_session;
-
-	new_session = session_find_by_name(name);
-	if (new_session != NULL) {
-		ret = LTTCOMM_EXIST_SESS;
-		goto error_exist;
-	}
 
 	/* Allocate session data structure */
 	new_session = zmalloc(sizeof(struct ltt_session));
@@ -198,10 +192,11 @@ int session_create(char *name, char *path, uid_t uid, gid_t gid)
 			ret = LTTCOMM_FATAL;
 			goto error_asprintf;
 		}
+		new_session->start_consumer = 1;
 	} else {
-		ERR("No session path given");
-		ret = LTTCOMM_FATAL;
-		goto error;
+		/* No path indicates that there is no use for a consumer. */
+		new_session->start_consumer = 0;
+		new_session->path[0] = '\0';
 	}
 
 	/* Init kernel session */
@@ -214,13 +209,16 @@ int session_create(char *name, char *path, uid_t uid, gid_t gid)
 	new_session->uid = uid;
 	new_session->gid = gid;
 
-	ret = run_as_mkdir_recursive(new_session->path, S_IRWXU | S_IRWXG,
-			new_session->uid, new_session->gid);
-	if (ret < 0) {
-		if (ret != -EEXIST) {
-			ERR("Trace directory creation error");
-			ret = LTTCOMM_CREATE_DIR_FAIL;
-			goto error;
+	/* Mkdir if we have a valid path and length */
+	if (strlen(new_session->path) > 0) {
+		ret = run_as_mkdir_recursive(new_session->path, S_IRWXU | S_IRWXG,
+				new_session->uid, new_session->gid);
+		if (ret < 0) {
+			if (ret != -EEXIST) {
+				ERR("Trace directory creation error");
+				ret = LTTCOMM_CREATE_DIR_FAIL;
+				goto error;
+			}
 		}
 	}
 
@@ -229,9 +227,13 @@ int session_create(char *name, char *path, uid_t uid, gid_t gid)
 	new_session->id = add_session_list(new_session);
 	session_unlock_list();
 
-	DBG("Tracing session %s created in %s with ID %u by UID %d GID %d",
-		name, path, new_session->id,
-		new_session->uid, new_session->gid);
+	/*
+	 * Consumer is let to NULL since the create_session_uri command will set it
+	 * up and, if valid, assign it to the session.
+	 */
+
+	DBG("Tracing session %s created in %s with ID %u by UID %d GID %d", name,
+			path, new_session->id, new_session->uid, new_session->gid);
 
 	return LTTCOMM_OK;
 
@@ -241,7 +243,21 @@ error_asprintf:
 		free(new_session);
 	}
 
-error_exist:
 error_malloc:
 	return ret;
+}
+
+/*
+ * Check if the UID or GID match the session. Root user has access to all
+ * sessions.
+ */
+int session_access_ok(struct ltt_session *session, uid_t uid, gid_t gid)
+{
+	assert(session);
+
+	if (uid != session->uid && gid != session->gid && uid != 0) {
+		return 0;
+	} else {
+		return 1;
+	}
 }

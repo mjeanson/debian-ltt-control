@@ -109,11 +109,35 @@ struct ltt_ust_session *trace_ust_create_session(char *path,
 	/* Alloc UST global domain channels' HT */
 	lus->domain_global.channels = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
 
-	/* Set session path */
-	ret = snprintf(lus->pathname, PATH_MAX, "%s/ust", path);
-	if (ret < 0) {
-		PERROR("snprintf kernel traces path");
+	lus->consumer = consumer_create_output(CONSUMER_DST_LOCAL);
+	if (lus->consumer == NULL) {
 		goto error_free_session;
+	}
+
+	/*
+	 * The tmp_consumer stays NULL until a set_consumer_uri command is
+	 * executed. At this point, the consumer should be nullify until an
+	 * enable_consumer command. This assignment is symbolic since we've zmalloc
+	 * the struct.
+	 */
+	lus->tmp_consumer = NULL;
+
+	/* Use the default consumer output which is the tracing session path. */
+	if (path && strlen(path) > 0) {
+		ret = snprintf(lus->consumer->dst.trace_path, PATH_MAX,
+				"%s" DEFAULT_UST_TRACE_DIR, path);
+		if (ret < 0) {
+			PERROR("snprintf UST consumer trace path");
+			goto error;
+		}
+
+		/* Set session path */
+		ret = snprintf(lus->pathname, PATH_MAX, "%s" DEFAULT_UST_TRACE_DIR,
+				path);
+		if (ret < 0) {
+			PERROR("snprintf kernel traces path");
+			goto error_free_session;
+		}
 	}
 
 	DBG2("UST trace session create successful");
@@ -390,7 +414,7 @@ void trace_ust_destroy_event(struct ltt_ust_event *event)
 {
 	DBG2("Trace destroy UST event %s", event->attr.name);
 	destroy_contexts(event->ctx);
-
+	free(event->filter);
 	free(event);
 }
 
@@ -553,6 +577,9 @@ void trace_ust_destroy_session(struct ltt_ust_session *session)
 	destroy_domain_global(&session->domain_global);
 	destroy_domain_pid(session->domain_pid);
 	destroy_domain_exec(session->domain_exec);
+
+	consumer_destroy_output(session->consumer);
+	consumer_destroy_output(session->tmp_consumer);
 
 	free(session);
 

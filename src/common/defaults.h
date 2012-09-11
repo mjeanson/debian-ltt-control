@@ -40,6 +40,16 @@
 #define DEFAULT_GLOBAL_APPS_WAIT_SHM_PATH       "/lttng-ust-apps-wait"
 #define DEFAULT_HOME_APPS_WAIT_SHM_PATH         "/lttng-ust-apps-wait-%u"
 
+/* Default directory where the trace are written in per domain */
+#define DEFAULT_KERNEL_TRACE_DIR                "/kernel"
+#define DEFAULT_UST_TRACE_DIR                   "/ust"
+
+/*
+ * Default session name for the lttng command line. This default value will
+ * get the date and time appended (%Y%m%d-%H%M%S) to it.
+ */
+#define DEFAULT_SESSION_NAME                    "auto"
+
 /* Default consumer paths */
 #define DEFAULT_CONSUMERD_RUNDIR                "%s"
 
@@ -68,6 +78,8 @@
 #define DEFAULT_GLOBAL_APPS_UNIX_SOCK           DEFAULT_LTTNG_RUNDIR "/apps-lttng-sessiond"
 #define DEFAULT_HOME_APPS_UNIX_SOCK             DEFAULT_LTTNG_HOME_RUNDIR "/apps-lttng-sessiond"
 #define DEFAULT_HOME_CLIENT_UNIX_SOCK           DEFAULT_LTTNG_HOME_RUNDIR "/client-lttng-sessiond"
+#define DEFAULT_GLOBAL_HEALTH_UNIX_SOCK         DEFAULT_LTTNG_RUNDIR "/health.sock"
+#define DEFAULT_HOME_HEALTH_UNIX_SOCK           DEFAULT_LTTNG_HOME_RUNDIR "/health.sock"
 
 /*
  * Value taken from the hard limit allowed by the kernel when using setrlimit
@@ -116,5 +128,16 @@
  * session daemon.
  */
 #define DEFAULT_SEM_WAIT_TIMEOUT            30    /* in seconds */
+
+/* Default network ports for trace streaming support */
+#define DEFAULT_NETWORK_CONTROL_PORT        5342
+#define DEFAULT_NETWORK_DATA_PORT           5343
+
+/*
+ * If a thread stalls for this amount of time, it will be considered bogus (bad
+ * health).
+ */
+#define DEFAULT_HEALTH_CHECK_DELTA_S        20
+#define DEFAULT_HEALTH_CHECK_DELTA_NS       0
 
 #endif /* _DEFAULTS_H */

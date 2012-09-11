@@ -16,6 +16,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
 
 SESSIOND_BIN="lttng-sessiond"
+RELAYD_BIN="lttng-relayd"
 LTTNG_BIN="lttng"
 BABELTRACE_BIN="babeltrace"
 
@@ -39,18 +40,31 @@ function validate_kernel_version ()
 	return 1
 }
 
-function start_sessiond ()
+# Generate a random string 
+#  $1 = number of characters; defaults to 16
+#  $2 = include special characters; 1 = yes, 0 = no; defaults to yes
+function randstring() 
+{
+	[ "$2" == "0" ] && CHAR="[:alnum:]" || CHAR="[:graph:]"
+	cat /dev/urandom | tr -cd "$CHAR" | head -c ${1:-16}
+	echo
+}
+
+function spawn_sessiond ()
 {
 	echo ""
 	echo -n "Starting session daemon... "
 	validate_kernel_version
 	if [ $? -ne 0 ]; then
-		echo -e "\n*** Kernel to old for session daemon tests ***\n"
+		echo -e "\n*** Kernel too old for session daemon tests ***\n"
 		return 2
 	fi
 
+	DIR=$(readlink -f $TESTDIR)
+
 	if [ -z $(pidof lt-$SESSIOND_BIN) ]; then
-		$TESTDIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --daemonize --quiet --consumerd32-path="$(pwd)/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$(pwd)/../src/bin/lttng-consumerd/lttng-consumerd"
+		$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --daemonize --quiet --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
+		#$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --verbose-consumer >>/tmp/sessiond.log 2>&1 &
 		if [ $? -eq 1 ]; then
 			echo -e "\e[1;31mFAILED\e[0m"
 			return 1
@@ -62,8 +76,97 @@ function start_sessiond ()
 	return 0
 }
 
+function lttng_enable_kernel_event
+{
+	sess_name=$1
+	event_name=$2
+
+	if [ -z $event_name ]; then
+		# Enable all event if no event name specified
+		$event_name="-a"
+	fi
+
+	echo -n "Enabling kernel event $event_name for session $sess_name"
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN enable-event $event_name -s $sess_name -k >/dev/null 2>&1
+	if [ $? -eq 1 ]; then
+		echo -e '\e[1;31mFAILED\e[0m'
+		return 1
+	else
+		echo -e "\e[1;32mOK\e[0m"
+	fi
+}
+
+function lttng_start_relayd
+{
+	local opt="$1"
+
+	echo -e -n "Starting lttng-relayd (opt: $opt)... "
+
+	DIR=$(readlink -f $TESTDIR)
+
+	if [ -z $(pidof lt-$RELAYD_BIN) ]; then
+		$DIR/../src/bin/lttng-relayd/$RELAYD_BIN $opt >/dev/null 2>&1 &
+		#$DIR/../src/bin/lttng-relayd/$RELAYD_BIN $opt -vvv >>/tmp/relayd.log 2>&1 &
+		if [ $? -eq 1 ]; then
+			echo -e "\e[1;31mFAILED\e[0m"
+			return 1
+		else
+			echo -e "\e[1;32mOK\e[0m"
+		fi
+	else
+		echo -e "\e[1;32mOK\e[0m"
+	fi
+}
+
+function lttng_stop_relayd
+{
+	PID_RELAYD=`pidof lt-$RELAYD_BIN`
+
+	echo -e -n "Killing lttng-relayd (pid: $PID_RELAYD)... "
+	kill $PID_RELAYD >/dev/null 2>&1
+	if [ $? -eq 1 ]; then
+		echo -e "\e[1;31mFAILED\e[0m"
+		return 1
+	else
+		out=1
+		while [ -n "$out" ]; do
+			out=$(pidof lt-$RELAYD_BIN)
+			sleep 0.5
+		done
+		echo -e "\e[1;32mOK\e[0m"
+		return 0
+	fi
+}
+
+function start_sessiond()
+{
+	if [ -n $TEST_NO_SESSIOND ] && [ "$TEST_NO_SESSIOND" == "1" ]; then
+		# Env variable requested no session daemon
+		return
+	fi
+
+	spawn_sessiond
+	out=$?
+	if [ $out -eq 2 ]; then
+		# Kernel version is not compatible.
+		exit 0
+	elif [ $out -ne 0 ]; then
+		echo "NOT bad $?"
+		exit 1
+	fi
+
+	# Simply wait for the session daemon bootstrap
+	echo "Waiting for the session daemon to bootstrap (2 secs)"
+	sleep 2
+}
+
 function stop_sessiond ()
 {
+	if [ -n $TEST_NO_SESSIOND ] && [ "$TEST_NO_SESSIOND" == "1" ]; then
+		# Env variable requested no session daemon
+		return
+	fi
+
 	PID_SESSIOND=`pidof lt-$SESSIOND_BIN`
 
 	echo -e -n "Killing session daemon... "
@@ -86,14 +189,43 @@ function create_lttng_session ()
 	sess_name=$1
 	trace_path=$2
 
-	echo -n "Creating lttng session $SESSION_NAME in $TRACE_PATH "
+	echo -n "Creating lttng session $sess_name in $trace_path "
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN create $sess_name -o $trace_path >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
 		echo -e "\e[1;31mFAILED\e[0m"
 		return 1
 	else
 		echo -e "\e[1;32mOK\e[0m"
-		#echo $out | grep "written in" | cut -d' ' -f6
+	fi
+}
+
+function enable_lttng_channel()
+{
+	sess_name=$1
+	channel_name=$2
+
+	echo -n "Enabling lttng channel $channel_name for session $sess_name"
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN enable-channel $channel_name -s $sess_name >/dev/null 2>&1
+	if [ $? -eq 1 ]; then
+		echo -e "\e[1;31mFAILED\e[0m"
+		return 1
+	else
+		echo -e "\e[1;32mOK\e[0m"
+	fi
+}
+
+function disable_lttng_channel()
+{
+	sess_name=$1
+	channel_name=$2
+
+	echo -n "Disabling lttng channel $channel_name for session $sess_name"
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN disable-channel $channel_name -s $sess_name >/dev/null 2>&1
+	if [ $? -eq 1 ]; then
+		echo -e "\e[1;31mFAILED\e[0m"
+		return 1
+	else
+		echo -e "\e[1;32mOK\e[0m"
 	fi
 }
 
@@ -174,6 +306,28 @@ function trace_matches ()
 		return 1
 	else
 		echo -e "Trace is coherent \e[1;32mOK\e[0m"
+		return 0
+	fi
+}
+
+function validate_trace
+{
+	event_name=$1
+	trace_path=$2
+
+	which $BABELTRACE_BIN >/dev/null
+	if [ $? -eq 1 ]; then
+		echo "Babeltrace binary not found. Skipping trace matches"
+		return 0
+	fi
+
+	echo -n "Validating trace for event $event_name... "
+	traced=$($BABELTRACE_BIN $trace_path 2>/dev/null | grep $event_name | wc -l)
+	if [ $traced -eq 0 ]; then
+		echo -e "\e[1;31mFAILED\e[0m"
+		return 1
+	else
+		echo -e "\e[1;32mOK\e[0m"
 		return 0
 	fi
 }

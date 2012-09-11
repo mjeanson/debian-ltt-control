@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#include <assert.h>
 #include <popt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,10 +29,18 @@
 #include "../command.h"
 #include "../utils.h"
 
+#include <common/defaults.h>
 #include <common/sessiond-comm/sessiond-comm.h>
+#include <common/uri.h>
+#include <common/utils.h>
 
 static char *opt_output_path;
 static char *opt_session_name;
+static char *opt_url;
+static char *opt_ctrl_url;
+static char *opt_data_url;
+static int opt_no_consumer;
+static int opt_disable_consumer;
 
 enum {
 	OPT_HELP = 1,
@@ -43,21 +52,195 @@ static struct poptOption long_options[] = {
 	{"help", 'h', POPT_ARG_NONE, NULL, OPT_HELP, NULL, NULL},
 	{"output", 'o', POPT_ARG_STRING, &opt_output_path, 0, NULL, NULL},
 	{"list-options", 0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
+	{"set-uri",        'U', POPT_ARG_STRING, &opt_url, 0, 0, 0},
+	{"ctrl-uri",       'C', POPT_ARG_STRING, &opt_ctrl_url, 0, 0, 0},
+	{"data-uri",       'D', POPT_ARG_STRING, &opt_data_url, 0, 0, 0},
+	{"no-consumer",      0, POPT_ARG_VAL, &opt_no_consumer, 1, 0, 0},
+	{"disable-consumer", 0, POPT_ARG_VAL, &opt_disable_consumer, 1, 0, 0},
 	{0, 0, 0, 0, 0, 0, 0}
 };
+
+/*
+ * Please have a look at src/lib/lttng-ctl/lttng-ctl.c for more information on
+ * why this declaration exists and used ONLY in for this command.
+ */
+extern int _lttng_create_session_ext(const char *name, const char *url,
+		const char *datetime);
 
 /*
  * usage
  */
 static void usage(FILE *ofp)
 {
-	fprintf(ofp, "usage: lttng create [options] [NAME]\n");
+	fprintf(ofp, "usage: lttng create [NAME] [OPTIONS] \n");
 	fprintf(ofp, "\n");
-	fprintf(ofp, "  The default NAME is 'auto-yyyymmdd-hhmmss'\n");
+	fprintf(ofp, "Without a given NAME, the default is 'auto-<yyyymmdd>-<hhmmss>'\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "Options:\n");
 	fprintf(ofp, "  -h, --help           Show this help\n");
 	fprintf(ofp, "      --list-options   Simple listing of options\n");
 	fprintf(ofp, "  -o, --output PATH    Specify output path for traces\n");
 	fprintf(ofp, "\n");
+	fprintf(ofp, "Extended Options:\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "Using these options, each API call can be controlled individually.\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "  -U, --set-url=URL    Set URL destination of the trace data.\n");
+	fprintf(ofp, "                       It is persistent for the session lifetime.\n");
+	fprintf(ofp, "                       This will set both data and control URL.\n");
+	fprintf(ofp, "                       You can change it with the enable-consumer cmd\n");
+	fprintf(ofp, "  -C, --ctrl-url=URL   Set control path URL. (Must use -D also)\n");
+	fprintf(ofp, "  -D, --data-url=URL   Set data path URL. (Must use -C also)\n");
+	fprintf(ofp, "      --no-consumer    Don't activate a consumer for this session.\n");
+	fprintf(ofp, "      --disable-consumer\n");
+	fprintf(ofp, "                       Disable consumer for this session.\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "Please refer to the man page (lttng(1)) for more information on network\n");
+	fprintf(ofp, "streaming mechanisms and explanation of the control and data port\n");
+	fprintf(ofp, "You must have a running remote lttng-relayd for network streaming\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "URL format is has followed:\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "  proto://[HOST|IP][:PORT1[:PORT2]][/TRACE_PATH]\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "  Supported protocols are (proto):\n");
+	fprintf(ofp, "  > file://...\n");
+	fprintf(ofp, "    Local filesystem full path.\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "  > net[6]://...\n");
+	fprintf(ofp, "    This will use the default network transport layer which is\n");
+	fprintf(ofp, "    TCP for both control (PORT1) and data port (PORT2).\n");
+	fprintf(ofp, "    The default ports are respectively 5342 and 5343.\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "  > tcp[4|6]://...\n");
+	fprintf(ofp, "    Can only be used with -C and -D together\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "NOTE: IPv6 address MUST be enclosed in brackets '[]' (rfc2732)\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "Examples:\n");
+	fprintf(ofp, "    # lttng create -U net://192.168.1.42\n");
+	fprintf(ofp, "    Uses TCP and default ports for the given destination.\n");
+	fprintf(ofp, "    # lttng create -U net6://[fe80::f66d:4ff:fe53:d220]\n");
+	fprintf(ofp, "    Uses TCP, default ports and IPv6.\n");
+	fprintf(ofp, "    # lttng create s1 -U net://myhost.com:3229\n");
+	fprintf(ofp, "    Set the consumer to the remote HOST on port 3229 for control.\n");
+	fprintf(ofp, "\n");
+}
+
+/*
+ * For a session name, set the consumer URLs.
+ */
+static int set_consumer_url(const char *session_name, const char *ctrl_url,
+		const char *data_url)
+{
+	int ret;
+	struct lttng_handle *handle;
+	struct lttng_domain dom;
+
+	assert(session_name);
+
+	/*
+	 * Set handle with the session name and the domain set to 0. This means to
+	 * the session daemon that the next action applies on the tracing session
+	 * rather then the domain specific session.
+	 */
+	memset(&dom, 0, sizeof(dom));
+
+	handle = lttng_create_handle(session_name, &dom);
+	if (handle == NULL) {
+		ret = CMD_FATAL;
+		goto error;
+	}
+
+	ret = lttng_set_consumer_url(handle, ctrl_url, data_url);
+	if (ret < 0) {
+		goto error;
+	}
+
+	if (ctrl_url) {
+		MSG("Control URL %s set for session %s", ctrl_url, session_name);
+	}
+
+	if (data_url) {
+		MSG("Data URL %s set for session %s", data_url, session_name);
+	}
+
+error:
+	lttng_destroy_handle(handle);
+	return ret;
+}
+
+/*
+ * For a session name, enable the consumer.
+ */
+static int enable_consumer(const char *session_name)
+{
+	int ret;
+	struct lttng_handle *handle;
+	struct lttng_domain dom;
+
+	assert(session_name);
+
+	/*
+	 * Set handle with the session name and the domain set to 0. This means to
+	 * the session daemon that the next action applies on the tracing session
+	 * rather then the domain specific session.
+	 *
+	 * XXX: This '0' value should be a domain enum value.
+	 */
+	memset(&dom, 0, sizeof(dom));
+
+	handle = lttng_create_handle(session_name, 0);
+	if (handle == NULL) {
+		ret = CMD_FATAL;
+		goto error;
+	}
+
+	ret = lttng_enable_consumer(handle);
+	if (ret < 0) {
+		goto error;
+	}
+
+	MSG("Consumer enabled for session %s", session_name);
+
+error:
+	lttng_destroy_handle(handle);
+	return ret;
+}
+
+/*
+ * For a session name, disable the consumer.
+ */
+static int disable_consumer(const char *session_name)
+{
+	int ret;
+	struct lttng_handle *handle;
+
+	assert(session_name);
+
+	/*
+	 * Set handle with the session name and the domain set to 0. This means to
+	 * the session daemon that the next action applies on the tracing session
+	 * rather then the domain specific session.
+	 *
+	 * XXX: This '0' value should be a domain enum value.
+	 */
+	handle = lttng_create_handle(session_name, 0);
+	if (handle == NULL) {
+		ret = CMD_FATAL;
+		goto error;
+	}
+
+	ret = lttng_disable_consumer(handle);
+	if (ret < 0) {
+		goto error;
+	}
+	free(handle);
+
+	MSG("Consumer disabled for session %s", session_name);
+
+error:
+	return ret;
 }
 
 /*
@@ -66,11 +249,12 @@ static void usage(FILE *ofp)
  *
  *  Returns one of the CMD_* result constants.
  */
-static int create_session()
+static int create_session(void)
 {
-	int ret, have_name = 0;
-	char datetime[16];
-	char *session_name, *traces_path = NULL, *alloc_path = NULL;
+	int ret;
+	char *session_name = NULL, *traces_path = NULL, *alloc_path = NULL;
+	char *alloc_url = NULL, *url = NULL, datetime[16];
+	char session_name_date[NAME_MAX], *print_str_url = NULL;
 	time_t rawtime;
 	struct tm *timeinfo;
 
@@ -81,49 +265,76 @@ static int create_session()
 
 	/* Auto session name creation */
 	if (opt_session_name == NULL) {
-		ret = asprintf(&session_name, "auto-%s", datetime);
+		ret = snprintf(session_name_date, sizeof(session_name_date),
+				DEFAULT_SESSION_NAME "-%s", datetime);
 		if (ret < 0) {
-			perror("asprintf session name");
+			PERROR("snprintf session name");
 			goto error;
 		}
-		DBG("Auto session name set to %s", session_name);
+		session_name = strdup(DEFAULT_SESSION_NAME);
+		if (session_name == NULL) {
+			PERROR("strdup session name");
+			goto error;
+		}
+		DBG("Auto session name set to %s", session_name_date);
 	} else {
 		session_name = opt_session_name;
-		have_name = 1;
+		ret = snprintf(session_name_date, sizeof(session_name_date),
+				"%s-%s", session_name, datetime);
+		if (ret < 0) {
+			PERROR("snprintf session name");
+			goto error;
+		}
 	}
 
-	/* Auto output path */
-	if (opt_output_path == NULL) {
+	if (opt_no_consumer) {
+		url = NULL;
+		print_str_url = "";
+	} else if (opt_output_path != NULL) {
+		traces_path = utils_expand_path(opt_output_path);
+		if (traces_path == NULL) {
+			ret = CMD_ERROR;
+			goto error;
+		}
+
+		/* Create URL string from the local filesytem path */
+		ret = asprintf(&alloc_url, "file://%s", traces_path);
+		if (ret < 0) {
+			PERROR("asprintf url path");
+			ret = CMD_FATAL;
+			goto error;
+		}
+		/* URL to use in the lttng_create_session() call */
+		url = alloc_url;
+		print_str_url = traces_path;
+	} else if (opt_url) { /* Handling URL (-U opt) */
+		url = opt_url;
+		print_str_url = url;
+	} else if (opt_ctrl_url == NULL && opt_data_url == NULL) {
+		/* Auto output path */
 		alloc_path = config_get_default_path();
 		if (alloc_path == NULL) {
 			ERR("HOME path not found.\n \
-				 Please specify an output path using -o, --output PATH");
+					Please specify an output path using -o, --output PATH");
 			ret = CMD_FATAL;
 			goto error;
 		}
 		alloc_path = strdup(alloc_path);
 
-		if (have_name) {
-			ret = asprintf(&traces_path, "%s/" DEFAULT_TRACE_DIR_NAME
-					"/%s-%s", alloc_path, session_name, datetime);
-		} else {
-			ret = asprintf(&traces_path, "%s/" DEFAULT_TRACE_DIR_NAME
-					"/%s", alloc_path, session_name);
+		ret = asprintf(&alloc_url,
+				"file://%s/" DEFAULT_TRACE_DIR_NAME "/%s",
+				alloc_path, session_name_date);
+		if (ret < 0) {
+			PERROR("asprintf trace dir name");
+			ret = CMD_FATAL;
+			goto error;
 		}
 
-		if (ret < 0) {
-			perror("asprintf trace dir name");
-			goto error;
-		}
-	} else {
-		traces_path = expand_full_path(opt_output_path);
-		if (traces_path == NULL) {
-			ret = CMD_ERROR;
-			goto error;
-		}
+		url = alloc_url;
+		print_str_url = alloc_url + strlen("file://");
 	}
 
-	ret = lttng_create_session(session_name, traces_path);
+	ret = _lttng_create_session_ext(session_name, url, datetime);
 	if (ret < 0) {
 		/* Don't set ret so lttng can interpret the sessiond error. */
 		switch (-ret) {
@@ -134,6 +345,38 @@ static int create_session()
 		goto error;
 	}
 
+	if (opt_session_name == NULL) {
+		MSG("Session %s created.", session_name_date);
+	} else {
+		MSG("Session %s created.", session_name);
+	}
+	MSG("Traces will be written in %s", print_str_url);
+
+	if (opt_ctrl_url || opt_data_url) {
+		/* Setting up control URI (-C or/and -D opt) */
+		ret = set_consumer_url(session_name, opt_ctrl_url, opt_data_url);
+		if (ret < 0) {
+			goto error;
+		}
+
+		ret = enable_consumer(session_name);
+		if (ret < 0) {
+			goto error;
+		}
+	}
+
+	if (opt_disable_consumer && !opt_no_consumer) {
+		ret = disable_consumer(session_name);
+		if (ret < 0) {
+			goto error;
+		}
+	}
+
+	if (opt_session_name == NULL) {
+		free(session_name);
+		session_name = session_name_date;
+	}
+
 	/* Init lttng session config */
 	ret = config_init(session_name);
 	if (ret < 0) {
@@ -141,22 +384,24 @@ static int create_session()
 		goto error;
 	}
 
-	MSG("Session %s created.", session_name);
-	MSG("Traces will be written in %s" , traces_path);
 
 	ret = CMD_SUCCESS;
 
 error:
-	if (opt_session_name == NULL) {
+	if (opt_session_name == NULL && session_name != session_name_date) {
 		free(session_name);
 	}
 
-	if (alloc_path) {
-		free(alloc_path);
+	if (alloc_url) {
+		free(alloc_url);
 	}
 
 	if (traces_path) {
 		free(traces_path);
+	}
+
+	if (ret < 0) {
+		ERR("%s", lttng_strerror(ret));
 	}
 	return ret;
 }

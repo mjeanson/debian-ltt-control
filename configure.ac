@@ -1,4 +1,4 @@
-AC_INIT([lttng-tools],[2.0.3],[dgoulet@efficios.com],[],[http://lttng.org])
+AC_INIT([lttng-tools],[2.1.0-rc2],[dgoulet@efficios.com],[],[http://lttng.org])
 AC_CONFIG_AUX_DIR([config])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
@@ -6,13 +6,38 @@ AC_CONFIG_MACRO_DIR([config])
 AM_INIT_AUTOMAKE([foreign dist-bzip2 no-dist-gzip])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
-version_name="Annedd'ale"
-version_description="New type of beer, 100% from Quebec, flavored with sapin beaumier needles, with a touch of hops."
+version_name="Basse Messe"
+version_description="Light coloured German ale whose style was named after the city Cologne (Koln) where it was first brewed. It is a rather simple beer with lightly fruity aromas and a delicate hoppy fragrance. The beer has a pronounced malty taste with a subtle bitter aftertaste"
 
 AC_DEFINE_UNQUOTED([VERSION_NAME], ["$version_name"], "")
 AC_DEFINE_UNQUOTED([VERSION_DESCRIPTION], ["$version_description"], "")
 
 AC_CONFIG_HEADERS([include/config.h])
+
+AC_PROG_GREP
+# libtool link_all_deplibs fixup. See http://bugs.lttng.org/issues/321.
+AC_ARG_ENABLE(libtool-linkdep-fixup,
+	AS_HELP_STRING([--disable-libtool-linkdep-fixup],
+			[disable the libtool fixup for linking all dependent libraries (link_all_deplibs)]),
+	libtool_fixup=$enableval,
+	libtool_fixup=yes)
+
+AS_IF([test "x$libtool_fixup" = "xyes"],
+	    [
+	    libtool_m4="$srcdir/config/libtool.m4"
+	    libtool_flag_pattern=".*link_all_deplibs\s*,\s*\$1\s*)"
+	    AC_MSG_CHECKING([for occurence(s) of link_all_deplibs = no in $libtool_m4])
+	    libtool_flag_pattern_count=$(grep -c "$libtool_flag_pattern\s*=\s*no" $libtool_m4)
+	    AS_IF([test $libtool_flag_pattern_count -ne 0],
+	    [
+		  AC_MSG_RESULT([$libtool_flag_pattern_count])
+		  AC_MSG_WARN([the detected libtool will not link all dependencies, forcing link_all_deplibs = unknown])
+		  sed -i "s/\($libtool_flag_pattern\)\s*=\s*no/\1=unknown/g" $libtool_m4
+		  ],
+		  [
+		  AC_MSG_RESULT([none])
+		  ])
+	    ])
 
 AC_CHECK_HEADERS([ \
 	sys/types.h unistd.h fcntl.h string.h pthread.h limits.h \
@@ -113,13 +138,16 @@ AC_ARG_ENABLE(lttng-ust,
 	lttng_ust_support=$enableval, lttng_ust_support=yes)
 
 AS_IF([test "x$lttng_ust_support" = "xyes"], [
-	AC_CHECK_LIB([lttng-ust-ctl], [ustctl_create_session], [],
-		[AC_MSG_ERROR([Cannot find LTTng-UST. Use [LDFLAGS]=-Ldir to specify its location, or specify --disable-lttng-ust to build lttng-tools without LTTng-UST support.])]
+	AC_CHECK_LIB([lttng-ust-ctl], [ustctl_set_filter],
+		[
+			AC_DEFINE([HAVE_LIBLTTNG_UST_CTL], [1], [has LTTng-UST control support])
+			lttng_ust_ctl_found=yes
+		],
+		[AC_MSG_ERROR([Cannot find LTTng-UST. Use [LDFLAGS]=-Ldir to specify its location, or specify --disable-lttng-ust to build lttng-tools without LTTng-UST support.])],
+		[-lurcu-common -lurcu-bp -lurcu-cds]
 	)
 ])
-
-AM_CONDITIONAL([HAVE_LIBLTTNG_UST_CTL], [ test "x$ac_cv_lib_lttng_ust_ctl_ustctl_create_session" = "xyes" ])
-
+AM_CONDITIONAL([HAVE_LIBLTTNG_UST_CTL], [test "x$lttng_ust_ctl_found" = xyes])
 AC_CHECK_FUNCS([sched_getcpu sysconf])
 
 # check for dlopen
@@ -140,6 +168,20 @@ AC_CHECK_LIB([dl], [dlopen],
 AM_CONDITIONAL([LTTNG_TOOLS_BUILD_WITH_LIBDL], [test "x$have_libdl" = "xyes"])
 AM_CONDITIONAL([LTTNG_TOOLS_BUILD_WITH_LIBC_DL], [test "x$have_libc_dl" = "xyes"])
 
+# Check for fmemopen
+AC_CHECK_LIB([c], [fmemopen],
+[
+	AC_DEFINE_UNQUOTED([LTTNG_HAVE_FMEMOPEN], 1, [Has fmemopen support.])
+]
+)
+
+# Check for open_memstream
+AC_CHECK_LIB([c], [open_memstream],
+[
+	AC_DEFINE_UNQUOTED([LTTNG_HAVE_OPEN_MEMSTREAM], 1, [Has open_memstream support.])
+]
+)
+
 # Option to only build the consumer daemon and its libraries
 AC_ARG_WITH([consumerd-only],
 	AS_HELP_STRING([--with-consumerd-only],[Only build the consumer daemon [default=no]]),
@@ -159,12 +201,17 @@ AX_CONFIG_FEATURE(
 )
 AM_CONDITIONAL([COMPAT_EPOLL], [ test "$enable_epoll" = "yes" ])
 
+AC_SYS_LARGEFILE
 AC_PROG_CC
 LT_INIT
+AC_PROG_YACC
+AC_PROG_LEX
+
+AC_DEFUN([AC_PROG_BISON], [AC_CHECK_PROGS(BISON, bison, bison)])
 
 CFLAGS="-Wall $CFLAGS -g -fno-strict-aliasing"
 
-DEFAULT_INCLUDES="-I\$(top_srcdir) -I\$(top_builddir) -I\$(top_builddir)/src -I\$(top_builddir)/include"
+DEFAULT_INCLUDES="-I\$(top_srcdir) -I\$(top_builddir) -I\$(top_builddir)/src -I\$(top_builddir)/include -include config.h"
 
 lttngincludedir="${includedir}/lttng"
 
@@ -187,15 +234,24 @@ AC_CONFIG_FILES([
 	src/common/hashtable/Makefile
 	src/common/sessiond-comm/Makefile
 	src/common/compat/Makefile
+	src/common/relayd/Makefile
 	src/lib/Makefile
 	src/lib/lttng-ctl/Makefile
 	src/bin/Makefile
 	src/bin/lttng-consumerd/Makefile
 	src/bin/lttng-sessiond/Makefile
+	src/bin/lttng-relayd/Makefile
 	src/bin/lttng/Makefile
 	tests/Makefile
-	tests/ust-nevents/Makefile
-	tests/ust-nprocesses/Makefile
+	tests/kernel/Makefile
+	tests/tools/Makefile
+	tests/tools/streaming/Makefile
+	tests/ust/Makefile
+	tests/ust/nprocesses/Makefile
+	tests/ust/high-throughput/Makefile
+	tests/ust/low-throughput/Makefile
+	tests/ust/before-after/Makefile
+	tests/ust/multi-session/Makefile
 ])
 
 AC_OUTPUT

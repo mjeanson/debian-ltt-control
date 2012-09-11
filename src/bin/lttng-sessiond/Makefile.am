@@ -12,12 +12,16 @@ lttng_sessiond_SOURCES = utils.c utils.h \
                        context.c context.h \
                        channel.c channel.h \
                        event.c event.h \
-                       futex.c futex.h \
                        shm.c shm.h \
+                       consumer.c consumer.h \
                        session.c session.h \
                        modprobe.c modprobe.h kern-modules.h \
                        lttng-ust-ctl.h lttng-ust-abi.h \
-                       fd-limit.c fd-limit.h
+                       fd-limit.c fd-limit.h \
+                       kernel-consumer.c kernel-consumer.h \
+                       consumer.h filter.c filter.h \
+                       health.c health.h \
+                       cmd.c cmd.h
 
 if HAVE_LIBLTTNG_UST_CTL
 lttng_sessiond_SOURCES += trace-ust.c ust-app.c ust-consumer.c ust-consumer.h
@@ -33,7 +37,8 @@ lttng_sessiond_LDADD = -lrt -lurcu-common -lurcu \
 		$(top_builddir)/src/common/kernel-ctl/libkernel-ctl.la \
 		$(top_builddir)/src/common/hashtable/libhashtable.la \
 		$(top_builddir)/src/common/libcommon.la \
-		$(top_builddir)/src/common/compat/libcompat.la
+		$(top_builddir)/src/common/compat/libcompat.la \
+		$(top_builddir)/src/common/relayd/librelayd.la
 
 if HAVE_LIBLTTNG_UST_CTL
 lttng_sessiond_LDADD += -llttng-ust-ctl

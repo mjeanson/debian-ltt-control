@@ -20,6 +20,7 @@
  */
 
 #define _GNU_SOURCE
+#include <assert.h>
 #include <grp.h>
 #include <errno.h>
 #include <stdio.h>
@@ -30,11 +31,33 @@
 #include <common/common.h>
 #include <common/defaults.h>
 #include <common/sessiond-comm/sessiond-comm.h>
+#include <common/uri.h>
 #include <lttng/lttng.h>
+
+#include "filter-ast.h"
+#include "filter-parser.h"
+#include "filter-bytecode.h"
+#include "memstream.h"
+
+#ifdef DEBUG
+const int print_xml = 1;
+#define dbg_printf(fmt, args...)	\
+	printf("[debug liblttng-ctl] " fmt, ## args)
+#else
+const int print_xml = 0;
+#define dbg_printf(fmt, args...)				\
+do {								\
+	/* do nothing but check printf format */		\
+	if (0)							\
+		printf("[debug liblttnctl] " fmt, ## args);	\
+} while (0)
+#endif
+
 
 /* Socket to session daemon for communication */
 static int sessiond_socket;
 static char sessiond_sock_path[PATH_MAX];
+static char health_sock_path[PATH_MAX];
 
 /* Variables */
 static char *tracing_group;
@@ -51,6 +74,134 @@ static int connected;
  */
 int lttng_opt_quiet;
 int lttng_opt_verbose;
+
+static void set_default_url_attr(struct lttng_uri *uri,
+		enum lttng_stream_type stype)
+{
+	uri->stype = stype;
+	if (uri->dtype != LTTNG_DST_PATH && uri->port == 0) {
+		uri->port = (stype == LTTNG_STREAM_CONTROL) ?
+			DEFAULT_NETWORK_CONTROL_PORT : DEFAULT_NETWORK_DATA_PORT;
+	}
+}
+
+/*
+ * Parse a string URL and creates URI(s) returning the size of the populated
+ * array.
+ */
+static ssize_t parse_str_urls_to_uri(const char *ctrl_url, const char *data_url,
+		struct lttng_uri **uris)
+{
+	int ret;
+	unsigned int equal = 1, idx = 0;
+	/* Add the "file://" size to the URL maximum size */
+	char url[PATH_MAX + 7];
+	ssize_t size_ctrl = 0, size_data = 0, size;
+	struct lttng_uri *ctrl_uris = NULL, *data_uris = NULL;
+	struct lttng_uri *tmp_uris = NULL;
+
+	/* No URL(s) is allowed. This means that the consumer will be disabled. */
+	if (ctrl_url == NULL && data_url == NULL) {
+		return 0;
+	}
+
+	/* Check if URLs are equal and if so, only use the control URL */
+	if (ctrl_url && data_url) {
+		equal = !strcmp(ctrl_url, data_url);
+	}
+
+	/*
+	 * Since we allow the str_url to be a full local filesystem path, we are
+	 * going to create a valid file:// URL if it's the case.
+	 *
+	 * Check if first character is a '/' or else reject the URL.
+	 */
+	if (ctrl_url && ctrl_url[0] == '/') {
+		ret = snprintf(url, sizeof(url), "file://%s", ctrl_url);
+		if (ret < 0) {
+			PERROR("snprintf file url");
+			goto parse_error;
+		}
+		ctrl_url = url;
+	}
+
+	/* Parse the control URL if there is one */
+	if (ctrl_url) {
+		size_ctrl = uri_parse(ctrl_url, &ctrl_uris);
+		if (size_ctrl < 1) {
+			ERR("Unable to parse the URL %s", ctrl_url);
+			goto parse_error;
+		}
+
+		/* At this point, we know there is at least one URI in the array */
+		set_default_url_attr(&ctrl_uris[0], LTTNG_STREAM_CONTROL);
+
+		if (ctrl_uris[0].dtype == LTTNG_DST_PATH && data_url) {
+			ERR("Can not have a data URL when destination is file://");
+			goto error;
+		}
+
+		/* URL are not equal but the control URL uses a net:// protocol */
+		if (size_ctrl == 2) {
+			if (!equal) {
+				ERR("Control URL uses the net:// protocol and the data URL is "
+						"different. Not allowed.");
+				goto error;
+			} else {
+				set_default_url_attr(&ctrl_uris[1], LTTNG_STREAM_DATA);
+				/*
+				 * The data_url and ctrl_url are equal and the ctrl_url
+				 * contains a net:// protocol so we just skip the data part.
+				 */
+				data_url = NULL;
+			}
+		}
+	}
+
+	if (data_url) {
+		/* We have to parse the data URL in this case */
+		size_data = uri_parse(data_url, &data_uris);
+		if (size_data < 1) {
+			ERR("Unable to parse the URL %s", data_url);
+			goto error;
+		} else if (size_data == 2) {
+			ERR("Data URL can not be set with the net[4|6]:// protocol");
+			goto error;
+		}
+
+		set_default_url_attr(&data_uris[0], LTTNG_STREAM_DATA);
+	}
+
+	/* Compute total size */
+	size = size_ctrl + size_data;
+
+	tmp_uris = zmalloc(sizeof(struct lttng_uri) * size);
+	if (tmp_uris == NULL) {
+		PERROR("zmalloc uris");
+		goto error;
+	}
+
+	if (ctrl_uris) {
+		/* It's possible the control URIs array contains more than one URI */
+		memcpy(tmp_uris, ctrl_uris, sizeof(struct lttng_uri) * size_ctrl);
+		++idx;
+	}
+
+	if (data_uris) {
+		memcpy(&tmp_uris[idx], data_uris, sizeof(struct lttng_uri));
+	}
+
+	*uris = tmp_uris;
+
+	return size;
+
+error:
+	free(ctrl_uris);
+	free(data_uris);
+	free(tmp_uris);
+parse_error:
+	return -1;
+}
 
 /*
  * Copy string from src to dst and enforce null terminated byte.
@@ -75,19 +226,18 @@ static void copy_lttng_domain(struct lttng_domain *dst, struct lttng_domain *src
 {
 	if (src && dst) {
 		switch (src->type) {
-			case LTTNG_DOMAIN_KERNEL:
-			case LTTNG_DOMAIN_UST:
-			/*
-			case LTTNG_DOMAIN_UST_EXEC_NAME:
-			case LTTNG_DOMAIN_UST_PID:
-			case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-			*/
-				memcpy(dst, src, sizeof(struct lttng_domain));
-				break;
-			default:
-				memset(dst, 0, sizeof(struct lttng_domain));
-				dst->type = LTTNG_DOMAIN_KERNEL;
-				break;
+		case LTTNG_DOMAIN_KERNEL:
+		case LTTNG_DOMAIN_UST:
+		/*
+		case LTTNG_DOMAIN_UST_EXEC_NAME:
+		case LTTNG_DOMAIN_UST_PID:
+		case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
+		*/
+			memcpy(dst, src, sizeof(struct lttng_domain));
+			break;
+		default:
+			memset(dst, 0, sizeof(struct lttng_domain));
+			break;
 		}
 	}
 }
@@ -107,8 +257,36 @@ static int send_session_msg(struct lttcomm_session_msg *lsm)
 		goto end;
 	}
 
+	DBG("LSM cmd type : %d", lsm->cmd_type);
+
 	ret = lttcomm_send_creds_unix_sock(sessiond_socket, lsm,
 			sizeof(struct lttcomm_session_msg));
+
+end:
+	return ret;
+}
+
+/*
+ * Send var len data to the session daemon.
+ *
+ * On success, returns the number of bytes sent (>=0)
+ * On error, returns -1
+ */
+static int send_session_varlen(void *data, size_t len)
+{
+	int ret;
+
+	if (!connected) {
+		ret = -ENOTCONN;
+		goto end;
+	}
+
+	if (!data || !len) {
+		ret = 0;
+		goto end;
+	}
+
+	ret = lttcomm_send_unix_sock(sessiond_socket, data, len);
 
 end:
 	return ret;
@@ -311,10 +489,12 @@ static int disconnect_sessiond(void)
 
 /*
  * Ask the session daemon a specific command and put the data into buf.
+ * Takes extra var. len. data as input to send to the session daemon.
  *
  * Return size of data (only payload, not header) or a negative error code.
  */
-static int ask_sessiond(struct lttcomm_session_msg *lsm, void **buf)
+static int ask_sessiond_varlen(struct lttcomm_session_msg *lsm,
+		void *vardata, size_t varlen, void **buf)
 {
 	int ret;
 	size_t size;
@@ -328,6 +508,11 @@ static int ask_sessiond(struct lttcomm_session_msg *lsm, void **buf)
 
 	/* Send command to session daemon */
 	ret = send_session_msg(lsm);
+	if (ret < 0) {
+		goto end;
+	}
+	/* Send var len data */
+	ret = send_session_varlen(vardata, varlen);
 	if (ret < 0) {
 		goto end;
 	}
@@ -379,6 +564,16 @@ static int ask_sessiond(struct lttcomm_session_msg *lsm, void **buf)
 end:
 	disconnect_sessiond();
 	return ret;
+}
+
+/*
+ * Ask the session daemon a specific command and put the data into buf.
+ *
+ * Return size of data (only payload, not header) or a negative error code.
+ */
+static int ask_sessiond(struct lttcomm_session_msg *lsm, void **buf)
+{
+	return ask_sessiond_varlen(lsm, NULL, 0, buf);
 }
 
 /*
@@ -556,6 +751,139 @@ int lttng_enable_event(struct lttng_handle *handle,
 }
 
 /*
+ * set filter for an event
+ * Return negative error value on error.
+ * Return size of returned session payload data if OK.
+ */
+
+int lttng_set_event_filter(struct lttng_handle *handle,
+		const char *event_name, const char *channel_name,
+		const char *filter_expression)
+{
+	struct lttcomm_session_msg lsm;
+	struct filter_parser_ctx *ctx;
+	FILE *fmem;
+	int ret = 0;
+
+	/* Safety check. */
+	if (handle == NULL) {
+		return -1;
+	}
+
+	if (!filter_expression) {
+		return 0;
+	}
+
+	/*
+	 * casting const to non-const, as the underlying function will
+	 * use it in read-only mode.
+	 */
+	fmem = lttng_fmemopen((void *) filter_expression,
+			strlen(filter_expression), "r");
+	if (!fmem) {
+		fprintf(stderr, "Error opening memory as stream\n");
+		return -ENOMEM;
+	}
+	ctx = filter_parser_ctx_alloc(fmem);
+	if (!ctx) {
+		fprintf(stderr, "Error allocating parser\n");
+		ret = -ENOMEM;
+		goto alloc_error;
+	}
+	ret = filter_parser_ctx_append_ast(ctx);
+	if (ret) {
+		fprintf(stderr, "Parse error\n");
+		ret = -EINVAL;
+		goto parse_error;
+	}
+	ret = filter_visitor_set_parent(ctx);
+	if (ret) {
+		fprintf(stderr, "Set parent error\n");
+		ret = -EINVAL;
+		goto parse_error;
+	}
+	if (print_xml) {
+		ret = filter_visitor_print_xml(ctx, stdout, 0);
+		if (ret) {
+			fflush(stdout);
+			fprintf(stderr, "XML print error\n");
+			ret = -EINVAL;
+			goto parse_error;
+		}
+	}
+
+	dbg_printf("Generating IR... ");
+	fflush(stdout);
+	ret = filter_visitor_ir_generate(ctx);
+	if (ret) {
+		fprintf(stderr, "Generate IR error\n");
+		ret = -EINVAL;
+		goto parse_error;
+	}
+	dbg_printf("done\n");
+
+	dbg_printf("Validating IR... ");
+	fflush(stdout);
+	ret = filter_visitor_ir_check_binary_op_nesting(ctx);
+	if (ret) {
+		ret = -EINVAL;
+		goto parse_error;
+	}
+	dbg_printf("done\n");
+
+	dbg_printf("Generating bytecode... ");
+	fflush(stdout);
+	ret = filter_visitor_bytecode_generate(ctx);
+	if (ret) {
+		fprintf(stderr, "Generate bytecode error\n");
+		ret = -EINVAL;
+		goto parse_error;
+	}
+	dbg_printf("done\n");
+	dbg_printf("Size of bytecode generated: %u bytes.\n",
+		bytecode_get_len(&ctx->bytecode->b));
+
+	memset(&lsm, 0, sizeof(lsm));
+
+	lsm.cmd_type = LTTNG_SET_FILTER;
+
+	/* Copy channel name */
+	copy_string(lsm.u.filter.channel_name, channel_name,
+			sizeof(lsm.u.filter.channel_name));
+	/* Copy event name */
+	copy_string(lsm.u.filter.event_name, event_name,
+			sizeof(lsm.u.filter.event_name));
+	lsm.u.filter.bytecode_len = sizeof(ctx->bytecode->b)
+			+ bytecode_get_len(&ctx->bytecode->b);
+
+	copy_lttng_domain(&lsm.domain, &handle->domain);
+
+	copy_string(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+
+	ret = ask_sessiond_varlen(&lsm, &ctx->bytecode->b,
+				lsm.u.filter.bytecode_len, NULL);
+
+	filter_bytecode_free(ctx);
+	filter_ir_free(ctx);
+	filter_parser_ctx_free(ctx);
+	if (fclose(fmem) != 0) {
+		perror("fclose");
+	}
+	return ret;
+
+parse_error:
+	filter_bytecode_free(ctx);
+	filter_ir_free(ctx);
+	filter_parser_ctx_free(ctx);
+alloc_error:
+	if (fclose(fmem) != 0) {
+		perror("fclose");
+	}
+	return ret;
+}
+
+/*
  *  Disable event(s) of a channel and domain.
  *  If no event name is specified, all events are disabled.
  *  If no channel name is specified, the default 'channel0' is used.
@@ -681,6 +1009,33 @@ int lttng_list_tracepoints(struct lttng_handle *handle,
 }
 
 /*
+ *  Lists all available tracepoint fields of domain.
+ *  Sets the contents of the event field array.
+ *  Returns the number of lttng_event_field entries in events;
+ *  on error, returns a negative value.
+ */
+int lttng_list_tracepoint_fields(struct lttng_handle *handle,
+		struct lttng_event_field **fields)
+{
+	int ret;
+	struct lttcomm_session_msg lsm;
+
+	if (handle == NULL) {
+		return -1;
+	}
+
+	lsm.cmd_type = LTTNG_LIST_TRACEPOINT_FIELDS;
+	copy_lttng_domain(&lsm.domain, &handle->domain);
+
+	ret = ask_sessiond(&lsm, (void **) fields);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return ret / sizeof(struct lttng_event_field);
+}
+
+/*
  *  Returns a human readable string describing
  *  the error code (a negative value).
  */
@@ -695,18 +1050,35 @@ const char *lttng_strerror(int code)
 }
 
 /*
- *  Create a brand new session using name and path.
- *  Returns size of returned session payload data or a negative error code.
+ * Create a brand new session using name and url for destination.
+ *
+ * Returns LTTCOMM_OK on success or a negative error code.
  */
-int lttng_create_session(const char *name, const char *path)
+int lttng_create_session(const char *name, const char *url)
 {
+	ssize_t size;
 	struct lttcomm_session_msg lsm;
+	struct lttng_uri *uris = NULL;
+
+	if (name == NULL) {
+		return -1;
+	}
+
+	memset(&lsm, 0, sizeof(lsm));
 
 	lsm.cmd_type = LTTNG_CREATE_SESSION;
 	copy_string(lsm.session.name, name, sizeof(lsm.session.name));
-	copy_string(lsm.session.path, path, sizeof(lsm.session.path));
 
-	return ask_sessiond(&lsm, NULL);
+	/* There should never be a data URL */
+	size = parse_str_urls_to_uri(url, NULL, &uris);
+	if (size < 0) {
+		return LTTCOMM_INVALID;
+	}
+
+	lsm.u.uri.size = size;
+
+	return ask_sessiond_varlen(&lsm, uris, sizeof(struct lttng_uri) * size,
+			NULL);
 }
 
 /*
@@ -954,10 +1326,248 @@ int lttng_session_daemon_alive(void)
 }
 
 /*
+ * Set URL for a consumer for a session and domain.
+ *
+ * Return 0 on success, else a negative value.
+ */
+int lttng_set_consumer_url(struct lttng_handle *handle,
+		const char *control_url, const char *data_url)
+{
+	ssize_t size;
+	struct lttcomm_session_msg lsm;
+	struct lttng_uri *uris = NULL;
+
+	if (handle == NULL || (control_url == NULL && data_url == NULL)) {
+		return -1;
+	}
+
+	memset(&lsm, 0, sizeof(lsm));
+
+	lsm.cmd_type = LTTNG_SET_CONSUMER_URI;
+
+	copy_string(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+	copy_lttng_domain(&lsm.domain, &handle->domain);
+
+	size = parse_str_urls_to_uri(control_url, data_url, &uris);
+	if (size < 0) {
+		return LTTCOMM_INVALID;
+	}
+
+	lsm.u.uri.size = size;
+
+	return ask_sessiond_varlen(&lsm, uris, sizeof(struct lttng_uri) * size,
+			NULL);
+}
+
+/*
+ * Enable consumer for a session and domain.
+ *
+ * Return 0 on success, else a negative value.
+ */
+int lttng_enable_consumer(struct lttng_handle *handle)
+{
+	struct lttcomm_session_msg lsm;
+
+	if (handle == NULL) {
+		return -1;
+	}
+
+	lsm.cmd_type = LTTNG_ENABLE_CONSUMER;
+
+	copy_string(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+	copy_lttng_domain(&lsm.domain, &handle->domain);
+
+	return ask_sessiond(&lsm, NULL);
+}
+
+/*
+ * Disable consumer for a session and domain.
+ *
+ * Return 0 on success, else a negative value.
+ */
+int lttng_disable_consumer(struct lttng_handle *handle)
+{
+	struct lttcomm_session_msg lsm;
+
+	if (handle == NULL) {
+		return -1;
+	}
+
+	lsm.cmd_type = LTTNG_DISABLE_CONSUMER;
+
+	copy_string(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+	copy_lttng_domain(&lsm.domain, &handle->domain);
+
+	return ask_sessiond(&lsm, NULL);
+}
+
+/*
+ * Set health socket path by putting it in the global health_sock_path
+ * variable.
+ *
+ * Returns 0 on success or assert(0) on ENOMEM.
+ */
+static int set_health_socket_path(void)
+{
+	int ret;
+	int in_tgroup = 0;	/* In tracing group */
+	uid_t uid;
+	const char *home;
+
+	uid = getuid();
+
+	if (uid != 0) {
+		/* Are we in the tracing group ? */
+		in_tgroup = check_tracing_group(tracing_group);
+	}
+
+	if ((uid == 0) || in_tgroup) {
+		copy_string(health_sock_path, DEFAULT_GLOBAL_HEALTH_UNIX_SOCK,
+				sizeof(health_sock_path));
+	}
+
+	if (uid != 0) {
+		/*
+		 * With GNU C <  2.1, snprintf returns -1 if the target buffer is too small;
+		 * With GNU C >= 2.1, snprintf returns the required size (excluding closing null)
+		 */
+		home = getenv("HOME");
+		if (home == NULL) {
+			/* Fallback in /tmp .. */
+			home = "/tmp";
+		}
+
+		ret = snprintf(health_sock_path, sizeof(health_sock_path),
+				DEFAULT_HOME_HEALTH_UNIX_SOCK, home);
+		if ((ret < 0) || (ret >= sizeof(health_sock_path))) {
+			/* ENOMEM at this point... just kill the control lib. */
+			assert(0);
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * Check session daemon health for a specific health component.
+ *
+ * Return 0 if health is OK or else 1 if BAD. A return value of -1 indicate
+ * that the control library was not able to connect to the session daemon
+ * health socket.
+ *
+ * Any other positive value is an lttcomm error which can be translate with
+ * lttng_strerror().
+ */
+int lttng_health_check(enum lttng_health_component c)
+{
+	int sock, ret;
+	struct lttcomm_health_msg msg;
+	struct lttcomm_health_data reply;
+
+	/* Connect to the sesssion daemon */
+	sock = lttcomm_connect_unix_sock(health_sock_path);
+	if (sock < 0) {
+		ret = -1;
+		goto error;
+	}
+
+	msg.cmd = LTTNG_HEALTH_CHECK;
+	msg.component = c;
+
+	ret = lttcomm_send_unix_sock(sock, (void *)&msg, sizeof(msg));
+	if (ret < 0) {
+		goto close_error;
+	}
+
+	ret = lttcomm_recv_unix_sock(sock, (void *)&reply, sizeof(reply));
+	if (ret < 0) {
+		goto close_error;
+	}
+
+	ret = reply.ret_code;
+
+close_error:
+	close(sock);
+
+error:
+	return ret;
+}
+
+/*
+ * This is an extension of create session that is ONLY and SHOULD only be used
+ * by the lttng command line program. It exists to avoid using URI parsing in
+ * the lttng client.
+ *
+ * We need the date and time for the trace path subdirectory for the case where
+ * the user does NOT define one using either -o or -U. Using the normal
+ * lttng_create_session API call, we have no clue on the session daemon side if
+ * the URL was generated automatically by the client or define by the user.
+ *
+ * So this function "wrapper" is hidden from the public API, takes the datetime
+ * string and appends it if necessary to the URI subdirectory before sending it
+ * to the session daemon.
+ *
+ * With this extra function, the lttng_create_session call behavior is not
+ * changed and the timestamp is appended to the URI on the session daemon side
+ * if necessary.
+ */
+int _lttng_create_session_ext(const char *name, const char *url,
+		const char *datetime)
+{
+	int ret;
+	ssize_t size;
+	struct lttcomm_session_msg lsm;
+	struct lttng_uri *uris = NULL;
+
+	if (name == NULL || datetime == NULL) {
+		return -1;
+	}
+
+	memset(&lsm, 0, sizeof(lsm));
+
+	lsm.cmd_type = LTTNG_CREATE_SESSION;
+	if (!strncmp(name, DEFAULT_SESSION_NAME, strlen(DEFAULT_SESSION_NAME))) {
+		ret = snprintf(lsm.session.name, sizeof(lsm.session.name), "%s-%s",
+				name, datetime);
+		if (ret < 0) {
+			PERROR("snprintf session name datetime");
+			return -1;
+		}
+	} else {
+		copy_string(lsm.session.name, name, sizeof(lsm.session.name));
+	}
+
+	/* There should never be a data URL */
+	size = parse_str_urls_to_uri(url, NULL, &uris);
+	if (size < 0) {
+		return LTTCOMM_INVALID;
+	}
+
+	lsm.u.uri.size = size;
+
+	if (uris[0].dtype != LTTNG_DST_PATH && strlen(uris[0].subdir) == 0) {
+		ret = snprintf(uris[0].subdir, sizeof(uris[0].subdir), "%s-%s", name,
+				datetime);
+		if (ret < 0) {
+			PERROR("snprintf uri subdir");
+			return -1;
+		}
+	}
+
+	return ask_sessiond_varlen(&lsm, uris, sizeof(struct lttng_uri) * size,
+			NULL);
+}
+
+/*
  * lib constructor
  */
 static void __attribute__((constructor)) init()
 {
 	/* Set default session group */
 	lttng_set_tracing_group(DEFAULT_TRACING_GROUP);
+	/* Set socket for health check */
+	(void) set_health_socket_path();
 }

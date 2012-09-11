@@ -29,10 +29,8 @@
 #include "conf.h"
 
 /*
- *  config_get_file_path
- *
- *  Returns the path with '/CONFIG_FILENAME' added to it;
- *  path will be NULL if an error occurs.
+ * Returns the path with '/CONFIG_FILENAME' added to it;
+ * path will be NULL if an error occurs.
  */
 char *config_get_file_path(char *path)
 {
@@ -48,10 +46,8 @@ char *config_get_file_path(char *path)
 }
 
 /*
- *  open_config
- *
- *  Returns an open FILE pointer to the config file;
- *  on error, NULL is returned.
+ * Returns an open FILE pointer to the config file;
+ * on error, NULL is returned.
  */
 static FILE *open_config(char *path, const char *mode)
 {
@@ -76,11 +72,9 @@ error:
 }
 
 /*
- *  create_config_file
- *
- *  Creates the empty config file at the path.
- *  On success, returns 0;
- *  on error, returns -1.
+ * Creates the empty config file at the path.
+ * On success, returns 0;
+ * on error, returns -1.
  */
 static int create_config_file(char *path)
 {
@@ -101,11 +95,9 @@ error:
 }
 
 /*
- *  write_config
- *
- *  Append data to the config file in file_path
- *  On success, returns 0;
- *  on error, returns -1.
+ * Append data to the config file in file_path
+ * On success, returns 0;
+ * on error, returns -1.
  */
 static int write_config(char *file_path, size_t size, char *data)
 {
@@ -130,9 +122,7 @@ end:
 }
 
 /*
- *  config_get_default_path
- *
- *  Returns the HOME directory path. Caller MUST NOT free(3) the return pointer.
+ * Returns the HOME directory path. Caller MUST NOT free(3) the return pointer.
  */
 char *config_get_default_path(void)
 {
@@ -140,9 +130,7 @@ char *config_get_default_path(void)
 }
 
 /*
- *  config_destroy
- *
- *  Destroys directory config and file config.
+ * Destroys directory config and file config.
  */
 void config_destroy(char *path)
 {
@@ -154,20 +142,50 @@ void config_destroy(char *path)
 		return;
 	}
 
+	if (!config_exists(config_path)) {
+		goto end;
+	}
+
+	DBG("Removing %s\n", config_path);
 	ret = remove(config_path);
 	if (ret < 0) {
 		perror("remove config file");
 	}
-
+end:
 	free(config_path);
 }
 
 /*
- *  config_read_session_name
- *
- *  Returns the session name from the config file.
- *  The caller is responsible for freeing the returned string.
- *  On error, NULL is returned.
+ * Destroys the default config
+ */
+void config_destroy_default(void)
+{
+	char *path = config_get_default_path();
+	if (path == NULL) {
+		return;
+	}
+	config_destroy(path);
+}
+
+/*
+ * Returns 1 if config exists, 0 otherwise
+ */
+int config_exists(const char *path)
+{
+	int ret;
+	struct stat info;
+
+	ret = stat(path, &info);
+	if (ret < 0) {
+		return 0;
+	}
+	return S_ISREG(info.st_mode) || S_ISDIR(info.st_mode);
+}
+
+/*
+ * Returns the session name from the config file.
+ * The caller is responsible for freeing the returned string.
+ * On error, NULL is returned.
  */
 char *config_read_session_name(char *path)
 {
@@ -215,11 +233,9 @@ found:
 }
 
 /*
- *  config_add_session_name
- *
- *  Write session name option to the config file.
- *  On success, returns 0;
- *  on error, returns -1.
+ * Write session name option to the config file.
+ * On success, returns 0;
+ * on error, returns -1.
  */
 int config_add_session_name(char *path, char *name)
 {
@@ -241,11 +257,9 @@ error:
 }
 
 /*
- *  config_init
- *
- *  Init configuration directory and file.
- *  On success, returns 0;
- *  on error, returns -1.
+ * Init configuration directory and file.
+ * On success, returns 0;
+ * on error, returns -1.
  */
 int config_init(char *session_name)
 {

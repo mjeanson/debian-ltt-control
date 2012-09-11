@@ -36,7 +36,7 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
-/* Define to 1 if you have the `lttng-ust-ctl' library (-llttng-ust-ctl). */
+/* has LTTng-UST control support */
 #undef HAVE_LIBLTTNG_UST_CTL
 
 /* Define to 1 if you have the `popt' library (-lpopt). */
@@ -102,6 +102,12 @@
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
 
+/* Has fmemopen support. */
+#undef LTTNG_HAVE_FMEMOPEN
+
+/* Has open_memstream support. */
+#undef LTTNG_HAVE_OPEN_MEMSTREAM
+
 /* Define to the sub-directory in which libtool stores uninstalled libraries.
    */
 #undef LT_OBJDIR
@@ -138,3 +144,18 @@
 
 /* "" */
 #undef VERSION_NAME
+
+/* Define to 1 if `lex' declares `yytext' as a `char *' by default, not a
+   `char[]'. */
+#undef YYTEXT_POINTER
+
+/* Enable large inode numbers on Mac OS X 10.5.  */
+#ifndef _DARWIN_USE_64_BIT_INODE
+# define _DARWIN_USE_64_BIT_INODE 1
+#endif
+
+/* Number of bits in a file offset, on hosts where this is settable. */
+#undef _FILE_OFFSET_BITS
+
+/* Define for large files, on AIX-style hosts. */
+#undef _LARGE_FILES
