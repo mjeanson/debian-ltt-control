@@ -1,3 +1,12 @@
+ltt-control (2.1.0~rc2-1) unstable; urgency=low
+
+  * [f99ee50] Synchronize with upstream's packaging effort
+  * [9ca37c7] Update watchfile to handle upstream RC releases
+  * [bd91604] New upstream version 2.1.0~rc2
+  * [8dc90ea] Disable compile time tests
+
+ -- Jon Bernard <jbernard@debian.org>  Tue, 11 Sep 2012 17:18:55 -0400
+
 ltt-control (0.89-05122011-1) unstable; urgency=low
 
   * [35237d1] New upstream version 0.89-05122011
