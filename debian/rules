@@ -17,3 +17,5 @@ override_dh_installinit:
 override_dh_clean:
 	dh_clean
 	rm -Rf $(CURDIR)/debian/bash_completion
+
+override_dh_auto_test:
