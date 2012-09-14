@@ -369,7 +369,7 @@ static int enable_events(char *session_name)
 		ret = lttng_enable_event(handle, &ev, channel_name);
 		if (ret < 0) {
 			switch (-ret) {
-			case LTTCOMM_KERN_EVENT_EXIST:
+			case LTTNG_ERR_KERN_EVENT_EXIST:
 				WARN("Kernel events already enabled (channel %s, session %s)",
 						channel_name, session_name);
 				break;
@@ -384,7 +384,17 @@ static int enable_events(char *session_name)
 			ret = lttng_set_event_filter(handle, ev.name, channel_name,
 						opt_filter);
 			if (ret < 0) {
-				ERR("Error setting filter");
+				switch (-ret) {
+				case LTTNG_ERR_FILTER_EXIST:
+					ERR("Filter on events is already enabled"
+							" (channel %s, session %s)",
+						channel_name, session_name);
+					break;
+				default:
+					ERR("Error setting filter");
+					break;
+				}
+
 				ret = -1;
 				goto error;
 			}
@@ -536,7 +546,7 @@ static int enable_events(char *session_name)
 		if (ret < 0) {
 			/* Turn ret to positive value to handle the positive error code */
 			switch (-ret) {
-			case LTTCOMM_KERN_EVENT_EXIST:
+			case LTTNG_ERR_KERN_EVENT_EXIST:
 				WARN("Kernel event %s already enabled (channel %s, session %s)",
 						event_name, channel_name, session_name);
 				break;
@@ -554,7 +564,17 @@ static int enable_events(char *session_name)
 			ret = lttng_set_event_filter(handle, ev.name,
 				channel_name, opt_filter);
 			if (ret < 0) {
-				ERR("Error setting filter");
+				switch (-ret) {
+				case LTTNG_ERR_FILTER_EXIST:
+					ERR("Filter on event %s is already enabled"
+							" (channel %s, session %s)",
+						event_name, channel_name, session_name);
+					break;
+				default:
+					ERR("Error setting filter");
+					break;
+				}
+
 				ret = -1;
 				goto error;
 			}

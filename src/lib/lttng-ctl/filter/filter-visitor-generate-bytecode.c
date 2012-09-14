@@ -38,6 +38,45 @@ static
 int recursive_visit_gen_bytecode(struct filter_parser_ctx *ctx,
 		struct ir_op *node);
 
+static inline int fls(unsigned int x)
+{
+	int r = 32;
+
+	if (!x)
+		return 0;
+	if (!(x & 0xFFFF0000U)) {
+		x <<= 16;
+		r -= 16;
+	}
+	if (!(x & 0xFF000000U)) {
+		x <<= 8;
+		r -= 8;
+	}
+	if (!(x & 0xF0000000U)) {
+		x <<= 4;
+		r -= 4;
+	}
+	if (!(x & 0xC0000000U)) {
+		x <<= 2;
+		r -= 2;
+	}
+	if (!(x & 0x80000000U)) {
+		x <<= 1;
+		r -= 1;
+	}
+	return r;
+}
+
+static inline int get_count_order(unsigned int count)
+{
+	int order;
+
+	order = fls(count) - 1;
+	if (count & (count - 1))
+		order++;
+	return order;
+}
+
 static
 int bytecode_init(struct lttng_filter_bytecode_alloc **fb)
 {
@@ -55,20 +94,21 @@ int32_t bytecode_reserve(struct lttng_filter_bytecode_alloc **fb, uint32_t align
 {
 	int32_t ret;
 	uint32_t padding = offset_align((*fb)->b.len, align);
+	uint32_t new_len = (*fb)->b.len + padding + len;
+	uint32_t new_alloc_len = sizeof(struct lttng_filter_bytecode) + new_len;
+	uint32_t old_alloc_len = (*fb)->alloc_len;
 
-	if ((*fb)->b.len + padding + len > (*fb)->alloc_len) {
-		uint32_t new_len =
-			max_t(uint32_t, (*fb)->b.len + padding + len,
-				(*fb)->alloc_len << 1);
-		uint32_t old_len = (*fb)->alloc_len;
+	if (new_len > LTTNG_FILTER_MAX_LEN)
+		return -EINVAL;
 
-		if (new_len > 0xFFFF)
-			return -EINVAL;
-		*fb = realloc(*fb, sizeof(struct lttng_filter_bytecode_alloc) + new_len);
+	if (new_alloc_len > old_alloc_len) {
+		new_alloc_len =
+			max_t(uint32_t, 1U << get_count_order(new_alloc_len), old_alloc_len << 1);
+		*fb = realloc(*fb, new_alloc_len);
 		if (!*fb)
 			return -ENOMEM;
-		memset(&(*fb)->b.data[old_len], 0, new_len - old_len);
-		(*fb)->alloc_len = new_len;
+		memset(&((char *) *fb)[old_alloc_len], 0, new_alloc_len - old_alloc_len);
+		(*fb)->alloc_len = new_alloc_len;
 	}
 	(*fb)->b.len += padding;
 	ret = (*fb)->b.len;
@@ -199,6 +239,7 @@ int visit_node_load(struct filter_parser_ctx *ctx, struct ir_op *node)
 		uint32_t insn_len = sizeof(struct load_op)
 			+ sizeof(struct field_ref);
 		struct field_ref ref_offset;
+		uint32_t reloc_offset_u32;
 		uint16_t reloc_offset;
 
 		insn = calloc(insn_len, 1);
@@ -208,7 +249,12 @@ int visit_node_load(struct filter_parser_ctx *ctx, struct ir_op *node)
 		ref_offset.offset = (uint16_t) -1U;
 		memcpy(insn->data, &ref_offset, sizeof(ref_offset));
 		/* reloc_offset points to struct load_op */
-		reloc_offset = bytecode_get_len(&ctx->bytecode->b);
+		reloc_offset_u32 = bytecode_get_len(&ctx->bytecode->b);
+		if (reloc_offset_u32 > LTTNG_FILTER_MAX_LEN - 1) {
+			free(insn);
+			return -EINVAL;
+		}
+		reloc_offset = (uint16_t) reloc_offset_u32;
 		ret = bytecode_push(&ctx->bytecode, insn, 1, insn_len);
 		if (ret) {
 			free(insn);
@@ -447,6 +493,7 @@ int recursive_visit_gen_bytecode(struct filter_parser_ctx *ctx,
 	}
 }
 
+__attribute__((visibility("hidden")))
 void filter_bytecode_free(struct filter_parser_ctx *ctx)
 {
 	free(ctx->bytecode);
@@ -455,6 +502,7 @@ void filter_bytecode_free(struct filter_parser_ctx *ctx)
 	ctx->bytecode_reloc = NULL;
 }
 
+__attribute__((visibility("hidden")))
 int filter_visitor_bytecode_generate(struct filter_parser_ctx *ctx)
 {
 	int ret;

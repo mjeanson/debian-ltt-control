@@ -58,7 +58,8 @@ noinst_PROGRAMS = test_sessions$(EXEEXT) \
 subdir = tests/tools
 DIST_COMMON = $(srcdir)/Makefile.am $(srcdir)/Makefile.in
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/config/config_feature.m4 \
+am__aclocal_m4_deps = $(top_srcdir)/config/ax_pkg_swig.m4 \
+	$(top_srcdir)/config/config_feature.m4 \
 	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
 	$(top_srcdir)/config/ltoptions.m4 \
 	$(top_srcdir)/config/ltsugar.m4 \
@@ -84,7 +85,7 @@ AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
 am__objects_3 = session.$(OBJEXT) consumer.$(OBJEXT) uri.$(OBJEXT) \
-	utils.$(OBJEXT)
+	utils.$(OBJEXT) error.$(OBJEXT)
 am_test_sessions_OBJECTS = test_sessions.$(OBJEXT) $(am__objects_1) \
 	$(am__objects_3)
 test_sessions_OBJECTS = $(am_test_sessions_OBJECTS)
@@ -246,11 +247,20 @@ PACKAGE_TARNAME = @PACKAGE_TARNAME@
 PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
+PYTHON = @PYTHON@
+PYTHON_CONFIG = @PYTHON_CONFIG@
+PYTHON_EXEC_PREFIX = @PYTHON_EXEC_PREFIX@
+PYTHON_INCLUDE = @PYTHON_INCLUDE@
+PYTHON_PLATFORM = @PYTHON_PLATFORM@
+PYTHON_PREFIX = @PYTHON_PREFIX@
+PYTHON_VERSION = @PYTHON_VERSION@
 RANLIB = @RANLIB@
 SED = @SED@
 SET_MAKE = @SET_MAKE@
 SHELL = @SHELL@
 STRIP = @STRIP@
+SWIG = @SWIG@
+SWIG_LIB = @SWIG_LIB@
 VERSION = @VERSION@
 YACC = @YACC@
 YFLAGS = @YFLAGS@
@@ -297,9 +307,13 @@ mandir = @mandir@
 mkdir_p = @mkdir_p@
 oldincludedir = @oldincludedir@
 pdfdir = @pdfdir@
+pkgpyexecdir = @pkgpyexecdir@
+pkgpythondir = @pkgpythondir@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
+pyexecdir = @pyexecdir@
+pythondir = @pythondir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -320,7 +334,8 @@ UTILS = ../utils.h
 SESSIONS = $(top_srcdir)/src/bin/lttng-sessiond/session.c \
 		 $(top_srcdir)/src/bin/lttng-sessiond/consumer.c \
 		 $(top_srcdir)/src/common/uri.c \
-		 $(top_srcdir)/src/common/utils.c
+		 $(top_srcdir)/src/common/utils.c \
+		 $(top_srcdir)/src/common/error.c
 
 KERN_DATA_TRACE = $(top_srcdir)/src/bin/lttng-sessiond/trace-kernel.c \
 				$(top_srcdir)/src/bin/lttng-sessiond/consumer.c \
@@ -406,6 +421,7 @@ distclean-compile:
 	-rm -f *.tab.c
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/consumer.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/error.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/session.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/test_kernel_data_trace.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/test_sessions.Po@am__quote@
@@ -505,6 +521,20 @@ session.obj: $(top_srcdir)/src/bin/lttng-sessiond/session.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$(top_srcdir)/src/bin/lttng-sessiond/session.c' object='session.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o session.obj `if test -f '$(top_srcdir)/src/bin/lttng-sessiond/session.c'; then $(CYGPATH_W) '$(top_srcdir)/src/bin/lttng-sessiond/session.c'; else $(CYGPATH_W) '$(srcdir)/$(top_srcdir)/src/bin/lttng-sessiond/session.c'; fi`
+
+error.o: $(top_srcdir)/src/common/error.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT error.o -MD -MP -MF $(DEPDIR)/error.Tpo -c -o error.o `test -f '$(top_srcdir)/src/common/error.c' || echo '$(srcdir)/'`$(top_srcdir)/src/common/error.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/error.Tpo $(DEPDIR)/error.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$(top_srcdir)/src/common/error.c' object='error.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o error.o `test -f '$(top_srcdir)/src/common/error.c' || echo '$(srcdir)/'`$(top_srcdir)/src/common/error.c
+
+error.obj: $(top_srcdir)/src/common/error.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT error.obj -MD -MP -MF $(DEPDIR)/error.Tpo -c -o error.obj `if test -f '$(top_srcdir)/src/common/error.c'; then $(CYGPATH_W) '$(top_srcdir)/src/common/error.c'; else $(CYGPATH_W) '$(srcdir)/$(top_srcdir)/src/common/error.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/error.Tpo $(DEPDIR)/error.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$(top_srcdir)/src/common/error.c' object='error.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o error.obj `if test -f '$(top_srcdir)/src/common/error.c'; then $(CYGPATH_W) '$(top_srcdir)/src/common/error.c'; else $(CYGPATH_W) '$(srcdir)/$(top_srcdir)/src/common/error.c'; fi`
 
 trace-ust.o: $(top_srcdir)/src/bin/lttng-sessiond/trace-ust.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT trace-ust.o -MD -MP -MF $(DEPDIR)/trace-ust.Tpo -c -o trace-ust.o `test -f '$(top_srcdir)/src/bin/lttng-sessiond/trace-ust.c' || echo '$(srcdir)/'`$(top_srcdir)/src/bin/lttng-sessiond/trace-ust.c

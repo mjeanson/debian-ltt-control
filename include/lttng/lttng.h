@@ -26,6 +26,13 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+/* Error codes that can be returned by API calls */
+#include <lttng/lttng-error.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Event symbol length. Copied from LTTng kernel ABI.
  */
@@ -118,6 +125,7 @@ enum lttng_event_context_type {
 	LTTNG_EVENT_CONTEXT_PPID              = 8,
 	LTTNG_EVENT_CONTEXT_VPPID             = 9,
 	LTTNG_EVENT_CONTEXT_PTHREAD_ID        = 10,
+	LTTNG_EVENT_CONTEXT_HOSTNAME          = 11,
 };
 
 enum lttng_calibrate_type {
@@ -571,5 +579,9 @@ extern int lttng_disable_consumer(struct lttng_handle *handle);
  * lttng_strerror().
  */
 extern int lttng_health_check(enum lttng_health_component c);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* LTTNG_H */
