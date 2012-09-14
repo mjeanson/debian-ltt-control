@@ -977,9 +977,9 @@ end:
 	free(root_path);
 	/* send the session id to the client or a negative return code on error */
 	if (ret < 0) {
-		reply.ret_code = htobe32(LTTCOMM_ERR);
+		reply.ret_code = htobe32(LTTNG_ERR_UNK);
 	} else {
-		reply.ret_code = htobe32(LTTCOMM_OK);
+		reply.ret_code = htobe32(LTTNG_OK);
 	}
 	reply.handle = htobe64(stream->stream_handle);
 	send_ret = cmd->sock->ops->sendmsg(cmd->sock, &reply,
@@ -1058,9 +1058,9 @@ end_unlock:
 	rcu_read_unlock();
 
 	if (ret < 0) {
-		reply.ret_code = htobe32(LTTCOMM_ERR);
+		reply.ret_code = htobe32(LTTNG_ERR_UNK);
 	} else {
-		reply.ret_code = htobe32(LTTCOMM_OK);
+		reply.ret_code = htobe32(LTTNG_OK);
 	}
 	send_ret = cmd->sock->ops->sendmsg(cmd->sock, &reply,
 			sizeof(struct lttcomm_relayd_generic_reply), 0);
@@ -1081,7 +1081,7 @@ void relay_unknown_command(struct relay_command *cmd)
 	struct lttcomm_relayd_generic_reply reply;
 	int ret;
 
-	reply.ret_code = htobe32(LTTCOMM_ERR);
+	reply.ret_code = htobe32(LTTNG_ERR_UNK);
 	ret = cmd->sock->ops->sendmsg(cmd->sock, &reply,
 			sizeof(struct lttcomm_relayd_generic_reply), 0);
 	if (ret < 0) {
@@ -1097,13 +1097,13 @@ static
 int relay_start(struct lttcomm_relayd_hdr *recv_hdr,
 		struct relay_command *cmd)
 {
-	int ret = htobe32(LTTCOMM_OK);
+	int ret = htobe32(LTTNG_OK);
 	struct lttcomm_relayd_generic_reply reply;
 	struct relay_session *session = cmd->session;
 
 	if (!session) {
 		DBG("Trying to start the streaming without a session established");
-		ret = htobe32(LTTCOMM_ERR);
+		ret = htobe32(LTTNG_ERR_UNK);
 	}
 
 	reply.ret_code = ret;
@@ -1151,7 +1151,7 @@ static
 int relay_recv_metadata(struct lttcomm_relayd_hdr *recv_hdr,
 		struct relay_command *cmd, struct lttng_ht *streams_ht)
 {
-	int ret = htobe32(LTTCOMM_OK);
+	int ret = htobe32(LTTNG_OK);
 	struct relay_session *session = cmd->session;
 	struct lttcomm_relayd_metadata_payload *metadata_struct;
 	struct relay_stream *metadata_stream;
@@ -1223,7 +1223,7 @@ static
 int relay_send_version(struct lttcomm_relayd_hdr *recv_hdr,
 		struct relay_command *cmd)
 {
-	int ret = htobe32(LTTCOMM_OK);
+	int ret = htobe32(LTTNG_OK);
 	struct lttcomm_relayd_version reply;
 	struct relay_session *session = NULL;
 
@@ -1407,7 +1407,7 @@ int relay_add_connection(int fd, struct lttng_poll_event *events,
 		goto error;
 	}
 	ret = read(fd, relay_connection, sizeof(struct relay_command));
-	if (ret < 0 || ret < sizeof(relay_connection)) {
+	if (ret < 0 || ret < sizeof(struct relay_command)) {
 		PERROR("read relay cmd pipe");
 		goto error_read;
 	}

@@ -22,8 +22,9 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <common/sessiond-comm/sessiond-comm.h>
+
 #include "filter-ast.h"
-#include "../../common/sessiond-comm/sessiond-comm.h"
 
 /*
  * offsets are absolute from start of bytecode.
@@ -175,7 +176,7 @@ struct return_op {
 } __attribute__((packed));
 
 struct lttng_filter_bytecode_alloc {
-	uint16_t alloc_len;
+	uint32_t alloc_len;
 	struct lttng_filter_bytecode b;
 };
 

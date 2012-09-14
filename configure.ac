@@ -1,4 +1,4 @@
-AC_INIT([lttng-tools],[2.1.0-rc2],[dgoulet@efficios.com],[],[http://lttng.org])
+AC_INIT([lttng-tools],[2.1.0-rc3],[dgoulet@efficios.com],[],[http://lttng.org])
 AC_CONFIG_AUX_DIR([config])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
@@ -182,6 +182,42 @@ AC_CHECK_LIB([c], [open_memstream],
 ]
 )
 
+# For Python
+# SWIG version needed or newer:
+swig_version=2.0.0
+
+AC_ARG_ENABLE([python-bindings],
+              [AC_HELP_STRING([--enable-python-bindings],
+                              [compile Python bindings])],
+              [enable_python=yes], [enable_python=no])
+
+AM_CONDITIONAL([USE_PYTHON], [test "x${enable_python:-yes}" = xyes])
+
+if test "x${enable_python:-yes}" = xyes; then
+  AX_PKG_SWIG($swig_version, [], [ AC_MSG_ERROR([SWIG $swig_version or newer is needed]) ])
+  AM_PATH_PYTHON
+
+  AC_ARG_VAR([PYTHON_INCLUDE], [Include flags for python, bypassing python-config])
+  AC_ARG_VAR([PYTHON_CONFIG], [Path to python-config])
+  AS_IF([test -z "$PYTHON_INCLUDE"], [
+    AS_IF([test -z "$PYTHON_CONFIG"], [
+      AC_PATH_PROGS([PYTHON_CONFIG],
+                    [python$PYTHON_VERSION-config python-config],
+                    [no],
+                    [`dirname $PYTHON`])
+      AS_IF([test "$PYTHON_CONFIG" = no], [AC_MSG_ERROR([cannot find python-config for $PYTHON. Do you have python-dev installed?])])
+    ])
+    AC_MSG_CHECKING([python include flags])
+    PYTHON_INCLUDE=`$PYTHON_CONFIG --includes`
+    AC_MSG_RESULT([$PYTHON_INCLUDE])
+  ])
+
+else
+    AC_MSG_NOTICE([You may configure with --enable-python-bindings ]dnl
+[if you want Python bindings.])
+
+fi
+
 # Option to only build the consumer daemon and its libraries
 AC_ARG_WITH([consumerd-only],
 	AS_HELP_STRING([--with-consumerd-only],[Only build the consumer daemon [default=no]]),
@@ -226,6 +262,10 @@ AC_CONFIG_FILES([
 	doc/Makefile
 	doc/man/Makefile
 	include/Makefile
+	extras/Makefile
+	extras/bindings/Makefile
+	extras/bindings/swig/Makefile
+	extras/bindings/swig/python/Makefile
 	src/Makefile
 	src/common/Makefile
 	src/common/kernel-ctl/Makefile
@@ -237,6 +277,7 @@ AC_CONFIG_FILES([
 	src/common/relayd/Makefile
 	src/lib/Makefile
 	src/lib/lttng-ctl/Makefile
+	src/lib/lttng-ctl/filter/Makefile
 	src/bin/Makefile
 	src/bin/lttng-consumerd/Makefile
 	src/bin/lttng-sessiond/Makefile
@@ -283,6 +324,14 @@ AS_ECHO($target_arch)
 # LTTng-UST enabled/disabled
 AS_ECHO_N("Lttng-UST support: ")
 AS_IF([test "x$lttng_ust_support" = "xyes"],[
+	AS_ECHO("Enabled")
+],[
+	AS_ECHO("Disabled")
+])
+
+#Python binding enabled/disabled
+AS_ECHO_N("Python binding: ")
+AS_IF([test "x${enable_python:-yes}" = xyes], [
 	AS_ECHO("Enabled")
 ],[
 	AS_ECHO("Disabled")
