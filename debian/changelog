@@ -1,3 +1,9 @@
+ltt-control (2.1.0~rc3-2) unstable; urgency=low
+
+  * [fbda274] Fix broken lttng-sessiond initscript (Closes: #688730)
+
+ -- Jon Bernard <jbernard@debian.org>  Tue, 25 Sep 2012 14:25:15 -0400
+
 ltt-control (2.1.0~rc3-1) unstable; urgency=low
 
   * [b38aa00] New upstream version 2.1.0~rc3
