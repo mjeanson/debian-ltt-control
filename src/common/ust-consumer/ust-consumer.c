@@ -399,7 +399,7 @@ void lttng_ustconsumer_del_stream(struct lttng_consumer_stream *stream)
 int lttng_ustconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
 		struct lttng_consumer_local_data *ctx)
 {
-	unsigned long len;
+	unsigned long len, subbuf_size, padding;
 	int err;
 	long ret = 0;
 	struct lttng_ust_shm_handle *handle;
@@ -426,7 +426,7 @@ int lttng_ustconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
 	/* Get the next subbuffer */
 	err = ustctl_get_next_subbuf(handle, buf);
 	if (err != 0) {
-		ret = -ret;	/* ustctl_get_next_subbuf returns negative, caller expect positive. */
+		ret = err;	/* ustctl_get_next_subbuf returns negative, caller expect positive. */
 		/*
 		 * This is a debug message even for single-threaded consumer,
 		 * because poll() have more relaxed criterions than get subbuf,
@@ -438,17 +438,34 @@ int lttng_ustconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
 		goto end;
 	}
 	assert(stream->output == LTTNG_EVENT_MMAP);
-	/* read the used subbuffer size */
+	/* Get the full padded subbuffer size */
 	err = ustctl_get_padded_subbuf_size(handle, buf, &len);
 	assert(err == 0);
+
+	/* Get subbuffer data size (without padding) */
+	err = ustctl_get_subbuf_size(handle, buf, &subbuf_size);
+	assert(err == 0);
+
+	/* Make sure we don't get a subbuffer size bigger than the padded */
+	assert(len >= subbuf_size);
+
+	padding = len - subbuf_size;
 	/* write the subbuffer to the tracefile */
-	ret = lttng_consumer_on_read_subbuffer_mmap(ctx, stream, len);
-	if (ret != len) {
+	ret = lttng_consumer_on_read_subbuffer_mmap(ctx, stream, subbuf_size, padding);
+	/*
+	 * The mmap operation should write subbuf_size amount of data when network
+	 * streaming or the full padding (len) size when we are _not_ streaming.
+	 */
+	if ((ret != subbuf_size && stream->net_seq_idx != -1) ||
+			(ret != len && stream->net_seq_idx == -1)) {
 		/*
-		 * display the error but continue processing to try
-		 * to release the subbuffer
+		 * Display the error but continue processing to try to release the
+		 * subbuffer
 		 */
-		ERR("Error writing to tracefile (expected: %ld, got: %ld)", ret, len);
+		ERR("Error writing to tracefile "
+				"(ret: %zd != len: %lu != subbuf_size: %lu)",
+				ret, len, subbuf_size);
+
 	}
 	err = ustctl_put_next_subbuf(handle, buf);
 	assert(err == 0);

@@ -25,6 +25,38 @@ KERNEL_MAJOR_VERSION=2
 KERNEL_MINOR_VERSION=6
 KERNEL_PATCHLEVEL_VERSION=27
 
+function print_ok ()
+{
+	# Check if we are a terminal
+	if [ -t 1 ]; then
+		echo -e "\e[1;32mOK\e[0m"
+	else
+		echo -e "OK"
+	fi
+}
+
+function print_fail ()
+{
+	# Check if we are a terminal
+	if [ -t 1 ]; then
+		echo -e "\e[1;31mFAIL\e[0m"
+	else
+		echo -e "FAIL"
+	fi
+}
+
+function print_test_banner ()
+{
+	desc="$1"
+
+	count=$((${#desc}+2))
+	str=$(printf "%${count}s");
+	echo -e "\n"
+	echo -e ${str// /-}
+	echo -e " $desc "
+	echo -e ${str// /-}
+}
+
 function validate_kernel_version ()
 {
 	kern_version=($(uname -r | awk -F. '{ printf("%d.%d.%d\n",$1,$2,$3); }' | tr '.' '\n'))
@@ -66,10 +98,10 @@ function spawn_sessiond ()
 		$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --daemonize --quiet --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
 		#$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --verbose-consumer >>/tmp/sessiond.log 2>&1 &
 		if [ $? -eq 1 ]; then
-			echo -e "\e[1;31mFAILED\e[0m"
+		        print_fail
 			return 1
 		else
-			echo -e "\e[1;32mOK\e[0m"
+		        print_ok
 		fi
 	fi
 
@@ -89,14 +121,14 @@ function lttng_enable_kernel_event
 	echo -n "Enabling kernel event $event_name for session $sess_name"
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN enable-event $event_name -s $sess_name -k >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
-		echo -e '\e[1;31mFAILED\e[0m'
+		print_fail
 		return 1
 	else
-		echo -e "\e[1;32mOK\e[0m"
+	        print_ok
 	fi
 }
 
-function lttng_start_relayd
+function start_lttng_relayd
 {
 	local opt="$1"
 
@@ -108,24 +140,24 @@ function lttng_start_relayd
 		$DIR/../src/bin/lttng-relayd/$RELAYD_BIN $opt >/dev/null 2>&1 &
 		#$DIR/../src/bin/lttng-relayd/$RELAYD_BIN $opt -vvv >>/tmp/relayd.log 2>&1 &
 		if [ $? -eq 1 ]; then
-			echo -e "\e[1;31mFAILED\e[0m"
+		        print_fail
 			return 1
 		else
-			echo -e "\e[1;32mOK\e[0m"
+			print_ok
 		fi
 	else
-		echo -e "\e[1;32mOK\e[0m"
+		print_ok
 	fi
 }
 
-function lttng_stop_relayd
+function stop_lttng_relayd
 {
 	PID_RELAYD=`pidof lt-$RELAYD_BIN`
 
 	echo -e -n "Killing lttng-relayd (pid: $PID_RELAYD)... "
 	kill $PID_RELAYD >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
-		echo -e "\e[1;31mFAILED\e[0m"
+		print_fail
 		return 1
 	else
 		out=1
@@ -133,12 +165,12 @@ function lttng_stop_relayd
 			out=$(pidof lt-$RELAYD_BIN)
 			sleep 0.5
 		done
-		echo -e "\e[1;32mOK\e[0m"
+		print_ok
 		return 0
 	fi
 }
 
-function start_sessiond()
+function start_lttng_sessiond()
 {
 	if [ -n $TEST_NO_SESSIOND ] && [ "$TEST_NO_SESSIOND" == "1" ]; then
 		# Env variable requested no session daemon
@@ -160,7 +192,7 @@ function start_sessiond()
 	sleep 2
 }
 
-function stop_sessiond ()
+function stop_lttng_sessiond ()
 {
 	if [ -n $TEST_NO_SESSIOND ] && [ "$TEST_NO_SESSIOND" == "1" ]; then
 		# Env variable requested no session daemon
@@ -172,7 +204,7 @@ function stop_sessiond ()
 	echo -e -n "Killing session daemon... "
 	kill $PID_SESSIOND >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
-		echo -e "\e[1;31mFAILED\e[0m"
+		print_fail
 		return 1
 	else
 		out=1
@@ -180,7 +212,7 @@ function stop_sessiond ()
 			out=$(pidof lt-$SESSIOND_BIN)
 			sleep 0.5
 		done
-		echo -e "\e[1;32mOK\e[0m"
+		print_ok
 	fi
 }
 
@@ -192,10 +224,10 @@ function create_lttng_session ()
 	echo -n "Creating lttng session $sess_name in $trace_path "
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN create $sess_name -o $trace_path >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
-		echo -e "\e[1;31mFAILED\e[0m"
+		print_fail
 		return 1
 	else
-		echo -e "\e[1;32mOK\e[0m"
+		print_ok
 	fi
 }
 
@@ -207,10 +239,10 @@ function enable_lttng_channel()
 	echo -n "Enabling lttng channel $channel_name for session $sess_name"
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN enable-channel $channel_name -s $sess_name >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
-		echo -e "\e[1;31mFAILED\e[0m"
+		print_fail
 		return 1
 	else
-		echo -e "\e[1;32mOK\e[0m"
+		print_ok
 	fi
 }
 
@@ -222,10 +254,10 @@ function disable_lttng_channel()
 	echo -n "Disabling lttng channel $channel_name for session $sess_name"
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN disable-channel $channel_name -s $sess_name >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
-		echo -e "\e[1;31mFAILED\e[0m"
+	        print_fail
 		return 1
 	else
-		echo -e "\e[1;32mOK\e[0m"
+	        print_ok
 	fi
 }
 
@@ -237,38 +269,38 @@ function enable_ust_lttng_event ()
 	echo -n "Enabling lttng event $event_name for session $sess_name "
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN enable-event $event_name -s $sess_name -u >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
-		echo -e '\e[1;31mFAILED\e[0m'
+		print_fail
 		return 1
 	else
-		echo -e "\e[1;32mOK\e[0m"
+		print_ok
 	fi
 }
 
-function start_tracing ()
+function start_lttng_tracing ()
 {
 	sess_name=$1
 
 	echo -n "Start lttng tracing for session $sess_name "
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN start $sess_name >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
-		echo -e '\e[1;31mFAILED\e[0m'
+		print_fail
 		return 1
 	else
-		echo -e "\e[1;32mOK\e[0m"
+	        print_ok
 	fi
 }
 
-function stop_tracing ()
+function stop_lttng_tracing ()
 {
 	sess_name=$1
 
 	echo -n "Stop lttng tracing for session $sess_name "
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN stop $sess_name >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
-		echo -e '\e[1;31mFAILED\e[0m'
+		print_fail
 		return 1
 	else
-		echo -e "\e[1;32mOK\e[0m"
+	        print_ok
 	fi
 }
 
@@ -279,10 +311,10 @@ function destroy_lttng_session ()
 	echo -n "Destroy lttng session $sess_name "
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN destroy $sess_name >/dev/null 2>&1
 	if [ $? -eq 1 ]; then
-		echo -e '\e[1;31mFAILED\e[0m'
+		print_fail
 		return 1
 	else
-		echo -e "\e[1;32mOK\e[0m"
+	        print_ok
 	fi
 }
 
@@ -302,10 +334,12 @@ function trace_matches ()
 
 	count=$($BABELTRACE_BIN $trace_path | grep $event_name | wc -l)
 	if [ "$count" -ne "$nr_iter" ]; then
-		echo -e "$count found in trace \e[1;31mFAILED\e[0m"
+		echo -n "$count found in trace "
+		print_fail
 		return 1
 	else
-		echo -e "Trace is coherent \e[1;32mOK\e[0m"
+		echo -n "Trace is coherent "
+		print_ok
 		return 0
 	fi
 }
@@ -324,10 +358,10 @@ function validate_trace
 	echo -n "Validating trace for event $event_name... "
 	traced=$($BABELTRACE_BIN $trace_path 2>/dev/null | grep $event_name | wc -l)
 	if [ $traced -eq 0 ]; then
-		echo -e "\e[1;31mFAILED\e[0m"
+		print_fail
 		return 1
 	else
-		echo -e "\e[1;32mOK\e[0m"
+		print_ok
 		return 0
 	fi
 }

@@ -472,12 +472,6 @@ void *relay_thread_listener(void *data)
 	struct lttng_poll_event events;
 	struct lttcomm_sock *control_sock, *data_sock;
 
-	/*
-	 * Get allocated in this thread, enqueued to a global queue, dequeued and
-	 * freed in the worker thread.
-	 */
-	struct relay_command *relay_cmd = NULL;
-
 	DBG("[thread] Relay listener started");
 
 	control_sock = relay_init_sock(control_uri);
@@ -544,7 +538,13 @@ restart:
 				ERR("socket poll error");
 				goto error;
 			} else if (revents & LPOLLIN) {
-				struct lttcomm_sock *newsock = NULL;
+				/*
+				 * Get allocated in this thread,
+				 * enqueued to a global queue, dequeued
+				 * and freed in the worker thread.
+				 */
+				struct relay_command *relay_cmd;
+				struct lttcomm_sock *newsock;
 
 				relay_cmd = zmalloc(sizeof(struct relay_command));
 				if (relay_cmd == NULL) {
@@ -554,16 +554,19 @@ restart:
 
 				if (pollfd == data_sock->fd) {
 					newsock = data_sock->ops->accept(data_sock);
-					if (newsock < 0) {
+					if (!newsock) {
 						PERROR("accepting data sock");
+						free(relay_cmd);
 						goto error;
 					}
 					relay_cmd->type = RELAY_DATA;
 					DBG("Relay data connection accepted, socket %d", newsock->fd);
-				} else if (pollfd == control_sock->fd) {
+				} else {
+					assert(pollfd == control_sock->fd);
 					newsock = control_sock->ops->accept(control_sock);
-					if (newsock < 0) {
+					if (!newsock) {
 						PERROR("accepting control sock");
+						free(relay_cmd);
 						goto error;
 					}
 					relay_cmd->type = RELAY_CONTROL;
@@ -573,6 +576,8 @@ restart:
 						&val, sizeof(int));
 				if (ret < 0) {
 					PERROR("setsockopt inet");
+					lttcomm_destroy_sock(newsock);
+					free(relay_cmd);
 					goto error;
 				}
 				relay_cmd->sock = newsock;
@@ -1145,6 +1150,36 @@ end:
 }
 
 /*
+ * Append padding to the file pointed by the file descriptor fd.
+ */
+static int write_padding_to_file(int fd, uint32_t size)
+{
+	int ret = 0;
+	char *zeros;
+
+	if (size == 0) {
+		goto end;
+	}
+
+	zeros = zmalloc(size);
+	if (zeros == NULL) {
+		PERROR("zmalloc zeros for padding");
+		ret = -1;
+		goto end;
+	}
+
+	do {
+		ret = write(fd, zeros, size);
+	} while (ret < 0 && errno == EINTR);
+	if (ret < 0) {
+		PERROR("write padding to file");
+	}
+
+end:
+	return ret;
+}
+
+/*
  * relay_recv_metadata: receive the metada for the session.
  */
 static
@@ -1208,6 +1243,13 @@ int relay_recv_metadata(struct lttcomm_relayd_hdr *recv_hdr,
 		ret = -1;
 		goto end_unlock;
 	}
+
+	ret = write_padding_to_file(metadata_stream->fd,
+			be32toh(metadata_struct->padding_size));
+	if (ret < 0) {
+		goto end_unlock;
+	}
+
 	DBG2("Relay metadata written");
 
 end_unlock:
@@ -1223,9 +1265,9 @@ static
 int relay_send_version(struct lttcomm_relayd_hdr *recv_hdr,
 		struct relay_command *cmd)
 {
-	int ret = htobe32(LTTNG_OK);
+	int ret;
 	struct lttcomm_relayd_version reply;
-	struct relay_session *session = NULL;
+	struct relay_session *session;
 
 	if (cmd->session == NULL) {
 		session = zmalloc(sizeof(struct relay_session));
@@ -1237,10 +1279,17 @@ int relay_send_version(struct lttcomm_relayd_hdr *recv_hdr,
 		session->id = ++last_relay_session_id;
 		DBG("Created session %" PRIu64, session->id);
 		cmd->session = session;
+	} else {
+		session = cmd->session;
 	}
 	session->version_check_done = 1;
 
-	sscanf(VERSION, "%u.%u", &reply.major, &reply.minor);
+	ret = sscanf(VERSION, "%u.%u", &reply.major, &reply.minor);
+	if (ret < 2) {
+		ERR("Error in scanning version");
+		ret = -1;
+		goto end;
+	}
 	reply.major = htobe32(reply.major);
 	reply.minor = htobe32(reply.minor);
 	ret = cmd->sock->ops->sendmsg(cmd->sock, &reply,
@@ -1357,6 +1406,12 @@ int relay_process_data(struct relay_command *cmd, struct lttng_ht *streams_ht)
 		ret = -1;
 		goto end_unlock;
 	}
+
+	ret = write_padding_to_file(stream->fd, be32toh(data_hdr.padding_size));
+	if (ret < 0) {
+		goto end_unlock;
+	}
+
 	DBG2("Relay wrote %d bytes to tracefile for stream id %" PRIu64,
 		ret, stream->stream_handle);
 
