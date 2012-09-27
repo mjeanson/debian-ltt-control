@@ -6,7 +6,7 @@
 
 
 """
-LTTng 2.1.0-rc3
+LTTng 2.1.0-rc4
 
 The  LTTng  project  aims at providing highly efficient tracing tools for Linux.
 It's tracers help tracking down performance issues and debugging problems involving
