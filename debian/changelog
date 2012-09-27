@@ -1,3 +1,9 @@
+ltt-control (2.1.0~rc4-1) unstable; urgency=low
+
+  * [12b22ae] New upstream version 2.1.0~rc4
+
+ -- Jon Bernard <jbernard@debian.org>  Thu, 27 Sep 2012 09:39:03 -0400
+
 ltt-control (2.1.0~rc3-2) unstable; urgency=low
 
   * [fbda274] Fix broken lttng-sessiond initscript (Closes: #688730)
