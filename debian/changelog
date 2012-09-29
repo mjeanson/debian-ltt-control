@@ -1,3 +1,10 @@
+ltt-control (2.1.0~rc4-2) unstable; urgency=low
+
+  * [538a285] Override dh_makeshlibs to tighten symbol dependencies
+  * [e8e84aa] Depend on a more recent version of liburcu1 (Closes: #688779)
+
+ -- Jon Bernard <jbernard@debian.org>  Sat, 29 Sep 2012 11:30:56 -0400
+
 ltt-control (2.1.0~rc4-1) unstable; urgency=low
 
   * [12b22ae] New upstream version 2.1.0~rc4
