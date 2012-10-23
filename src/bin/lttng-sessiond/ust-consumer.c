@@ -52,7 +52,8 @@ static int send_channel(int sock, struct ust_app_channel *uchan)
 			uchan->obj->shm_fd,
 			uchan->attr.subbuf_size,
 			uchan->obj->memory_map_size,
-			uchan->name);
+			uchan->name,
+			uchan->streams.count);
 
 	ret = consumer_send_channel(sock, &msg);
 	if (ret < 0) {
@@ -100,7 +101,8 @@ static int send_channel_stream(int sock, struct ust_app_channel *uchan,
 			consumer->net_seq_index,
 			0, /* Metadata flag unset */
 			stream->name,
-			pathname);
+			pathname,
+			usess->id);
 
 	/* Send stream and file descriptor */
 	fds[0] = stream->obj->shm_fd;
@@ -208,7 +210,8 @@ static int send_metadata(int sock, struct ust_app_session *usess,
 			usess->metadata->obj->shm_fd,
 			usess->metadata->attr.subbuf_size,
 			usess->metadata->obj->memory_map_size,
-			"metadata");
+			"metadata",
+			1);
 
 	ret = consumer_send_channel(sock, &msg);
 	if (ret < 0) {
@@ -264,7 +267,8 @@ static int send_metadata(int sock, struct ust_app_session *usess,
 			consumer->net_seq_index,
 			1, /* Flag metadata set */
 			"metadata",
-			pathname);
+			pathname,
+			usess->id);
 
 	/* Send stream and file descriptor */
 	fds[0] = usess->metadata->stream_obj->shm_fd;

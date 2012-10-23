@@ -80,8 +80,8 @@ am__lttng_sessiond_SOURCES_DIST = utils.c utils.h trace-kernel.c \
 	modprobe.c modprobe.h kern-modules.h lttng-ust-ctl.h \
 	lttng-ust-abi.h fd-limit.c fd-limit.h kernel-consumer.c \
 	kernel-consumer.h filter.c filter.h health.c health.h cmd.c \
-	cmd.h trace-ust.c ust-app.c ust-consumer.c ust-consumer.h \
-	lttng-sessiond.h main.c
+	cmd.h testpoint.h trace-ust.c ust-app.c ust-consumer.c \
+	ust-consumer.h lttng-sessiond.h main.c
 @HAVE_LIBLTTNG_UST_CTL_TRUE@am__objects_1 = trace-ust.$(OBJEXT) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@	ust-app.$(OBJEXT) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@	ust-consumer.$(OBJEXT)
@@ -101,6 +101,7 @@ lttng_sessiond_DEPENDENCIES =  \
 	$(top_builddir)/src/common/libcommon.la \
 	$(top_builddir)/src/common/compat/libcompat.la \
 	$(top_builddir)/src/common/relayd/librelayd.la \
+	$(top_builddir)/src/common/testpoint/libtestpoint.la \
 	$(am__DEPENDENCIES_1)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
@@ -285,7 +286,8 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-AM_CPPFLAGS = -DINSTALL_BIN_PATH=\""$(lttnglibexecdir)"\" \
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src \
+			  -DINSTALL_BIN_PATH=\""$(lttnglibexecdir)"\" \
 			  -DINSTALL_LIB_PATH=\""$(libdir)"\"
 
 AM_CFLAGS = -fno-strict-aliasing
@@ -298,7 +300,7 @@ lttng_sessiond_SOURCES = utils.c utils.h trace-kernel.c trace-kernel.h \
 	modprobe.h kern-modules.h lttng-ust-ctl.h lttng-ust-abi.h \
 	fd-limit.c fd-limit.h kernel-consumer.c kernel-consumer.h \
 	consumer.h filter.c filter.h health.c health.h cmd.c cmd.h \
-	$(am__append_1) lttng-sessiond.h main.c
+	testpoint.h $(am__append_1) lttng-sessiond.h main.c
 
 # link on liblttngctl for check if sessiond is already alive.
 lttng_sessiond_LDADD = -lrt -lurcu-common -lurcu \
@@ -308,7 +310,9 @@ lttng_sessiond_LDADD = -lrt -lurcu-common -lurcu \
 	$(top_builddir)/src/common/hashtable/libhashtable.la \
 	$(top_builddir)/src/common/libcommon.la \
 	$(top_builddir)/src/common/compat/libcompat.la \
-	$(top_builddir)/src/common/relayd/librelayd.la $(am__append_2)
+	$(top_builddir)/src/common/relayd/librelayd.la \
+	$(top_builddir)/src/common/testpoint/libtestpoint.la \
+	$(am__append_2)
 all: all-am
 
 .SUFFIXES:

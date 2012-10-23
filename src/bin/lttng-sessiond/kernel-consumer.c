@@ -48,7 +48,8 @@ int kernel_consumer_add_channel(int sock, struct ltt_kernel_channel *channel)
 			channel->fd,
 			channel->channel->attr.subbuf_size,
 			0, /* Kernel */
-			channel->channel->name);
+			channel->channel->name,
+			channel->stream_count);
 
 	ret = consumer_send_channel(sock, &lkm);
 	if (ret < 0) {
@@ -116,7 +117,8 @@ int kernel_consumer_add_metadata(int sock, struct ltt_kernel_session *session)
 			session->metadata->fd,
 			session->metadata->conf->attr.subbuf_size,
 			0, /* for kernel */
-			"metadata");
+			"metadata",
+			1);
 
 	ret = consumer_send_channel(sock, &lkm);
 	if (ret < 0) {
@@ -136,7 +138,8 @@ int kernel_consumer_add_metadata(int sock, struct ltt_kernel_session *session)
 			consumer->net_seq_index,
 			1, /* Metadata flag set */
 			"metadata",
-			pathname);
+			pathname,
+			session->id);
 
 	/* Send stream and file descriptor */
 	ret = consumer_send_stream(sock, consumer, &lkm,
@@ -205,7 +208,8 @@ int kernel_consumer_add_stream(int sock, struct ltt_kernel_channel *channel,
 			consumer->net_seq_index,
 			0, /* Metadata flag unset */
 			stream->name,
-			pathname);
+			pathname,
+			session->id);
 
 	/* Send stream and file descriptor */
 	ret = consumer_send_stream(sock, consumer, &lkm, &stream->fd, 1);

@@ -553,6 +553,13 @@ static int send_consumer_relayd_socket(int domain, struct ltt_session *session,
 		goto close_sock;
 	}
 
+	/* Flag that the corresponding socket was sent. */
+	if (relayd_uri->stype == LTTNG_STREAM_CONTROL) {
+		consumer->dst.net.control_sock_sent = 1;
+	} else if (relayd_uri->stype == LTTNG_STREAM_DATA) {
+		consumer->dst.net.data_sock_sent = 1;
+	}
+
 	ret = LTTNG_OK;
 
 	/*
@@ -582,28 +589,23 @@ static int send_consumer_relayd_sockets(int domain,
 	assert(session);
 	assert(consumer);
 
-	/* Don't resend the sockets to the consumer. */
-	if (consumer->dst.net.relayd_socks_sent) {
-		ret = LTTNG_OK;
-		goto error;
-	}
-
 	/* Sending control relayd socket. */
-	ret = send_consumer_relayd_socket(domain, session,
-			&consumer->dst.net.control, consumer, fd);
-	if (ret != LTTNG_OK) {
-		goto error;
+	if (!consumer->dst.net.control_sock_sent) {
+		ret = send_consumer_relayd_socket(domain, session,
+				&consumer->dst.net.control, consumer, fd);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
 	}
 
 	/* Sending data relayd socket. */
-	ret = send_consumer_relayd_socket(domain, session,
-			&consumer->dst.net.data, consumer, fd);
-	if (ret != LTTNG_OK) {
-		goto error;
+	if (!consumer->dst.net.data_sock_sent) {
+		ret = send_consumer_relayd_socket(domain, session,
+				&consumer->dst.net.data, consumer, fd);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
 	}
-
-	/* Flag that all relayd sockets were sent to the consumer. */
-	consumer->dst.net.relayd_socks_sent = 1;
 
 error:
 	return ret;
@@ -1594,10 +1596,13 @@ int cmd_set_consumer_uri(int domain, struct ltt_session *session,
 
 		/*
 		 * Don't send relayd socket if URI is NOT remote or if the relayd
-		 * sockets for the session are already sent.
+		 * socket for the session was already sent.
 		 */
 		if (uris[i].dtype == LTTNG_DST_PATH ||
-				consumer->dst.net.relayd_socks_sent) {
+				(uris[i].stype == LTTNG_STREAM_CONTROL &&
+				consumer->dst.net.control_sock_sent) ||
+				(uris[i].stype == LTTNG_STREAM_DATA &&
+				consumer->dst.net.data_sock_sent)) {
 			continue;
 		}
 
@@ -2324,6 +2329,47 @@ int cmd_enable_consumer(int domain, struct ltt_session *session)
 		/* Should not really happend... */
 		ret = LTTNG_ERR_NO_CONSUMER;
 	}
+
+error:
+	return ret;
+}
+
+/*
+ * Command LTTNG_DATA_AVAILABLE returning 0 if the data is NOT ready to be read
+ * or else 1 if the data is available for trace analysis.
+ */
+int cmd_data_available(struct ltt_session *session)
+{
+	int ret;
+	struct ltt_kernel_session *ksess = session->kernel_session;
+	struct ltt_ust_session *usess = session->ust_session;
+
+	assert(session);
+
+	/* Session MUST be stopped to ask for data availability. */
+	if (session->enabled) {
+		ret = LTTNG_ERR_SESSION_STARTED;
+		goto error;
+	}
+
+	if (ksess && ksess->consumer) {
+		ret = consumer_is_data_available(ksess->id, ksess->consumer);
+		if (ret == 0) {
+			/* Data is still being extracted for the kernel. */
+			goto error;
+		}
+	}
+
+	if (usess && usess->consumer) {
+		ret = consumer_is_data_available(usess->id, usess->consumer);
+		if (ret == 0) {
+			/* Data is still being extracted for the kernel. */
+			goto error;
+		}
+	}
+
+	/* Data is ready to be read by a viewer */
+	ret = 1;
 
 error:
 	return ret;

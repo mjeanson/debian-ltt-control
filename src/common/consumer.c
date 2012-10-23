@@ -59,23 +59,37 @@ int consumer_poll_timeout = -1;
 volatile int consumer_quit = 0;
 
 /*
+ * The following two hash tables are visible by all threads which are separated
+ * in different source files.
+ *
+ * Global hash table containing respectively metadata and data streams. The
+ * stream element in this ht should only be updated by the metadata poll thread
+ * for the metadata and the data poll thread for the data.
+ */
+struct lttng_ht *metadata_ht = NULL;
+struct lttng_ht *data_ht = NULL;
+
+/*
  * Find a stream. The consumer_data.lock must be locked during this
  * call.
  */
-static struct lttng_consumer_stream *consumer_find_stream(int key)
+static struct lttng_consumer_stream *consumer_find_stream(int key,
+		struct lttng_ht *ht)
 {
 	struct lttng_ht_iter iter;
 	struct lttng_ht_node_ulong *node;
 	struct lttng_consumer_stream *stream = NULL;
 
+	assert(ht);
+
 	/* Negative keys are lookup failures */
-	if (key < 0)
+	if (key < 0) {
 		return NULL;
+	}
 
 	rcu_read_lock();
 
-	lttng_ht_lookup(consumer_data.stream_ht, (void *)((unsigned long) key),
-			&iter);
+	lttng_ht_lookup(ht, (void *)((unsigned long) key), &iter);
 	node = lttng_ht_iter_get_node_ulong(&iter);
 	if (node != NULL) {
 		stream = caa_container_of(node, struct lttng_consumer_stream, node);
@@ -86,12 +100,12 @@ static struct lttng_consumer_stream *consumer_find_stream(int key)
 	return stream;
 }
 
-static void consumer_steal_stream_key(int key)
+void consumer_steal_stream_key(int key, struct lttng_ht *ht)
 {
 	struct lttng_consumer_stream *stream;
 
 	rcu_read_lock();
-	stream = consumer_find_stream(key);
+	stream = consumer_find_stream(key, ht);
 	if (stream) {
 		stream->key = -1;
 		/*
@@ -111,8 +125,9 @@ static struct lttng_consumer_channel *consumer_find_channel(int key)
 	struct lttng_consumer_channel *channel = NULL;
 
 	/* Negative keys are lookup failures */
-	if (key < 0)
+	if (key < 0) {
 		return NULL;
+	}
 
 	rcu_read_lock();
 
@@ -175,7 +190,7 @@ static void consumer_rcu_free_relayd(struct rcu_head *head)
  *
  * This function MUST be called with the consumer_data lock acquired.
  */
-void consumer_destroy_relayd(struct consumer_relayd_sock_pair *relayd)
+static void destroy_relayd(struct consumer_relayd_sock_pair *relayd)
 {
 	int ret;
 	struct lttng_ht_iter iter;
@@ -218,7 +233,7 @@ void consumer_flag_relayd_for_destroy(struct consumer_relayd_sock_pair *relayd)
 
 	/* Destroy the relayd if refcount is 0 */
 	if (uatomic_read(&relayd->refcount) == 0) {
-		consumer_destroy_relayd(relayd);
+		destroy_relayd(relayd);
 	}
 }
 
@@ -226,7 +241,8 @@ void consumer_flag_relayd_for_destroy(struct consumer_relayd_sock_pair *relayd)
  * Remove a stream from the global list protected by a mutex. This
  * function is also responsible for freeing its data structures.
  */
-void consumer_del_stream(struct lttng_consumer_stream *stream)
+void consumer_del_stream(struct lttng_consumer_stream *stream,
+		struct lttng_ht *ht)
 {
 	int ret;
 	struct lttng_ht_iter iter;
@@ -235,6 +251,11 @@ void consumer_del_stream(struct lttng_consumer_stream *stream)
 
 	assert(stream);
 
+	if (ht == NULL) {
+		/* Means the stream was allocated but not successfully added */
+		goto free_stream;
+	}
+
 	pthread_mutex_lock(&consumer_data.lock);
 
 	switch (consumer_data.type) {
@@ -242,7 +263,7 @@ void consumer_del_stream(struct lttng_consumer_stream *stream)
 		if (stream->mmap_base != NULL) {
 			ret = munmap(stream->mmap_base, stream->mmap_len);
 			if (ret != 0) {
-				perror("munmap");
+				PERROR("munmap");
 			}
 		}
 		break;
@@ -258,18 +279,18 @@ void consumer_del_stream(struct lttng_consumer_stream *stream)
 
 	rcu_read_lock();
 	iter.iter.node = &stream->node.node;
-	ret = lttng_ht_del(consumer_data.stream_ht, &iter);
+	ret = lttng_ht_del(ht, &iter);
 	assert(!ret);
 
+	/* Remove node session id from the consumer_data stream ht */
+	iter.iter.node = &stream->node_session_id.node;
+	ret = lttng_ht_del(consumer_data.stream_list_ht, &iter);
+	assert(!ret);
 	rcu_read_unlock();
 
-	if (consumer_data.stream_count <= 0) {
-		goto end;
-	}
+	assert(consumer_data.stream_count > 0);
 	consumer_data.stream_count--;
-	if (!stream) {
-		goto end;
-	}
+
 	if (stream->out_fd >= 0) {
 		ret = close(stream->out_fd);
 		if (ret) {
@@ -314,23 +335,27 @@ void consumer_del_stream(struct lttng_consumer_stream *stream)
 		/* Both conditions are met, we destroy the relayd. */
 		if (uatomic_read(&relayd->refcount) == 0 &&
 				uatomic_read(&relayd->destroy_flag)) {
-			consumer_destroy_relayd(relayd);
+			destroy_relayd(relayd);
 		}
 	}
 	rcu_read_unlock();
 
-	if (!--stream->chan->refcount) {
+	uatomic_dec(&stream->chan->refcount);
+	if (!uatomic_read(&stream->chan->refcount)
+			&& !uatomic_read(&stream->chan->nb_init_streams)) {
 		free_chan = stream->chan;
 	}
 
-
-	call_rcu(&stream->node.head, consumer_free_stream);
 end:
 	consumer_data.need_update = 1;
 	pthread_mutex_unlock(&consumer_data.lock);
 
-	if (free_chan)
+	if (free_chan) {
 		consumer_del_channel(free_chan);
+	}
+
+free_stream:
+	call_rcu(&stream->node.head, consumer_free_stream);
 }
 
 struct lttng_consumer_stream *consumer_allocate_stream(
@@ -343,22 +368,30 @@ struct lttng_consumer_stream *consumer_allocate_stream(
 		uid_t uid,
 		gid_t gid,
 		int net_index,
-		int metadata_flag)
+		int metadata_flag,
+		uint64_t session_id,
+		int *alloc_ret)
 {
 	struct lttng_consumer_stream *stream;
-	int ret;
 
 	stream = zmalloc(sizeof(*stream));
 	if (stream == NULL) {
-		perror("malloc struct lttng_consumer_stream");
+		PERROR("malloc struct lttng_consumer_stream");
+		*alloc_ret = -ENOMEM;
 		goto end;
 	}
+
+	/*
+	 * Get stream's channel reference. Needed when adding the stream to the
+	 * global hash table.
+	 */
 	stream->chan = consumer_find_channel(channel_key);
 	if (!stream->chan) {
-		perror("Unable to find channel key");
-		goto end;
+		*alloc_ret = -ENOENT;
+		ERR("Unable to find channel for stream %d", stream_key);
+		goto error;
 	}
-	stream->chan->refcount++;
+
 	stream->key = stream_key;
 	stream->shm_fd = shm_fd;
 	stream->wait_fd = wait_fd;
@@ -372,77 +405,100 @@ struct lttng_consumer_stream *consumer_allocate_stream(
 	stream->gid = gid;
 	stream->net_seq_idx = net_index;
 	stream->metadata_flag = metadata_flag;
+	stream->session_id = session_id;
 	strncpy(stream->path_name, path_name, sizeof(stream->path_name));
 	stream->path_name[sizeof(stream->path_name) - 1] = '\0';
-	lttng_ht_node_init_ulong(&stream->node, stream->key);
-	lttng_ht_node_init_ulong(&stream->waitfd_node, stream->wait_fd);
+	pthread_mutex_init(&stream->lock, NULL);
 
-	switch (consumer_data.type) {
-	case LTTNG_CONSUMER_KERNEL:
-		break;
-	case LTTNG_CONSUMER32_UST:
-	case LTTNG_CONSUMER64_UST:
-		stream->cpu = stream->chan->cpucount++;
-		ret = lttng_ustconsumer_allocate_stream(stream);
-		if (ret) {
-			free(stream);
-			return NULL;
-		}
-		break;
-	default:
-		ERR("Unknown consumer_data type");
-		assert(0);
-		goto end;
+	/*
+	 * Index differently the metadata node because the thread is using an
+	 * internal hash table to match streams in the metadata_ht to the epoll set
+	 * file descriptor.
+	 */
+	if (metadata_flag) {
+		lttng_ht_node_init_ulong(&stream->node, stream->wait_fd);
+	} else {
+		lttng_ht_node_init_ulong(&stream->node, stream->key);
 	}
-	DBG("Allocated stream %s (key %d, shm_fd %d, wait_fd %d, mmap_len %llu, out_fd %d, net_seq_idx %d)",
-			stream->path_name, stream->key,
-			stream->shm_fd,
-			stream->wait_fd,
-			(unsigned long long) stream->mmap_len,
-			stream->out_fd,
-			stream->net_seq_idx);
-end:
+
+	/* Init session id node with the stream session id */
+	lttng_ht_node_init_ulong(&stream->node_session_id, stream->session_id);
+
+	/*
+	 * The cpu number is needed before using any ustctl_* actions. Ignored for
+	 * the kernel so the value does not matter.
+	 */
+	pthread_mutex_lock(&consumer_data.lock);
+	stream->cpu = stream->chan->cpucount++;
+	pthread_mutex_unlock(&consumer_data.lock);
+
+	DBG3("Allocated stream %s (key %d, shm_fd %d, wait_fd %d, mmap_len %llu,"
+			" out_fd %d, net_seq_idx %d, session_id %" PRIu64,
+			stream->path_name, stream->key, stream->shm_fd, stream->wait_fd,
+			(unsigned long long) stream->mmap_len, stream->out_fd,
+			stream->net_seq_idx, stream->session_id);
 	return stream;
+
+error:
+	free(stream);
+end:
+	return NULL;
 }
 
 /*
  * Add a stream to the global list protected by a mutex.
  */
-int consumer_add_stream(struct lttng_consumer_stream *stream)
+static int consumer_add_stream(struct lttng_consumer_stream *stream,
+		struct lttng_ht *ht)
 {
 	int ret = 0;
-	struct lttng_ht_node_ulong *node;
-	struct lttng_ht_iter iter;
 	struct consumer_relayd_sock_pair *relayd;
 
+	assert(stream);
+	assert(ht);
+
+	DBG3("Adding consumer stream %d", stream->key);
+
 	pthread_mutex_lock(&consumer_data.lock);
-	/* Steal stream identifier, for UST */
-	consumer_steal_stream_key(stream->key);
-
 	rcu_read_lock();
-	lttng_ht_lookup(consumer_data.stream_ht,
-			(void *)((unsigned long) stream->key), &iter);
-	node = lttng_ht_iter_get_node_ulong(&iter);
-	if (node != NULL) {
-		rcu_read_unlock();
-		/* Stream already exist. Ignore the insertion */
-		goto end;
-	}
 
-	lttng_ht_add_unique_ulong(consumer_data.stream_ht, &stream->node);
+	/* Steal stream identifier to avoid having streams with the same key */
+	consumer_steal_stream_key(stream->key, ht);
+
+	lttng_ht_add_unique_ulong(ht, &stream->node);
+
+	/*
+	 * Add stream to the stream_list_ht of the consumer data. No need to steal
+	 * the key since the HT does not use it and we allow to add redundant keys
+	 * into this table.
+	 */
+	lttng_ht_add_ulong(consumer_data.stream_list_ht, &stream->node_session_id);
 
 	/* Check and cleanup relayd */
 	relayd = consumer_find_relayd(stream->net_seq_idx);
 	if (relayd != NULL) {
 		uatomic_inc(&relayd->refcount);
 	}
-	rcu_read_unlock();
 
-	/* Update consumer data */
+	/* Update channel refcount once added without error(s). */
+	uatomic_inc(&stream->chan->refcount);
+
+	/*
+	 * When nb_init_streams reaches 0, we don't need to trigger any action in
+	 * terms of destroying the associated channel, because the action that
+	 * causes the count to become 0 also causes a stream to be added. The
+	 * channel deletion will thus be triggered by the following removal of this
+	 * stream.
+	 */
+	if (uatomic_read(&stream->chan->nb_init_streams) > 0) {
+		uatomic_dec(&stream->chan->nb_init_streams);
+	}
+
+	/* Update consumer data once the node is inserted. */
 	consumer_data.stream_count++;
 	consumer_data.need_update = 1;
 
-end:
+	rcu_read_unlock();
 	pthread_mutex_unlock(&consumer_data.lock);
 
 	return ret;
@@ -452,8 +508,7 @@ end:
  * Add relayd socket to global consumer data hashtable. RCU read side lock MUST
  * be acquired before calling this.
  */
-
-int consumer_add_relayd(struct consumer_relayd_sock_pair *relayd)
+static int add_relayd(struct consumer_relayd_sock_pair *relayd)
 {
 	int ret = 0;
 	struct lttng_ht_node_ulong *node;
@@ -586,23 +641,6 @@ error:
 	return outfd;
 }
 
-/*
- * Update a stream according to what we just received.
- */
-void consumer_change_stream_state(int stream_key,
-		enum lttng_consumer_stream_state state)
-{
-	struct lttng_consumer_stream *stream;
-
-	pthread_mutex_lock(&consumer_data.lock);
-	stream = consumer_find_stream(stream_key);
-	if (stream) {
-		stream->state = state;
-	}
-	consumer_data.need_update = 1;
-	pthread_mutex_unlock(&consumer_data.lock);
-}
-
 static
 void consumer_free_channel(struct rcu_head *head)
 {
@@ -647,7 +685,7 @@ void consumer_del_channel(struct lttng_consumer_channel *channel)
 	if (channel->mmap_base != NULL) {
 		ret = munmap(channel->mmap_base, channel->mmap_len);
 		if (ret != 0) {
-			perror("munmap");
+			PERROR("munmap");
 		}
 	}
 	if (channel->wait_fd >= 0 && !channel->wait_fd_is_copy) {
@@ -672,14 +710,15 @@ struct lttng_consumer_channel *consumer_allocate_channel(
 		int channel_key,
 		int shm_fd, int wait_fd,
 		uint64_t mmap_len,
-		uint64_t max_sb_size)
+		uint64_t max_sb_size,
+		unsigned int nb_init_streams)
 {
 	struct lttng_consumer_channel *channel;
 	int ret;
 
 	channel = zmalloc(sizeof(*channel));
 	if (channel == NULL) {
-		perror("malloc struct lttng_consumer_channel");
+		PERROR("malloc struct lttng_consumer_channel");
 		goto end;
 	}
 	channel->key = channel_key;
@@ -688,6 +727,7 @@ struct lttng_consumer_channel *consumer_allocate_channel(
 	channel->mmap_len = mmap_len;
 	channel->max_sb_size = max_sb_size;
 	channel->refcount = 0;
+	channel->nb_init_streams = nb_init_streams;
 	lttng_ht_node_init_ulong(&channel->node, channel->key);
 
 	switch (consumer_data.type) {
@@ -753,9 +793,9 @@ end:
  *
  * Returns the number of fds in the structures.
  */
-int consumer_update_poll_array(
+static int consumer_update_poll_array(
 		struct lttng_consumer_local_data *ctx, struct pollfd **pollfd,
-		struct lttng_consumer_stream **local_stream)
+		struct lttng_consumer_stream **local_stream, struct lttng_ht *ht)
 {
 	int i = 0;
 	struct lttng_ht_iter iter;
@@ -763,8 +803,7 @@ int consumer_update_poll_array(
 
 	DBG("Updating poll fd array");
 	rcu_read_lock();
-	cds_lfht_for_each_entry(consumer_data.stream_ht->ht, &iter.iter, stream,
-			node.node) {
+	cds_lfht_for_each_entry(ht->ht, &iter.iter, stream, node.node) {
 		if (stream->state != LTTNG_CONSUMER_ACTIVE_STREAM) {
 			continue;
 		}
@@ -777,10 +816,10 @@ int consumer_update_poll_array(
 	rcu_read_unlock();
 
 	/*
-	 * Insert the consumer_poll_pipe at the end of the array and don't
+	 * Insert the consumer_data_pipe at the end of the array and don't
 	 * increment i so nb_fd is the number of real FD.
 	 */
-	(*pollfd)[i].fd = ctx->consumer_poll_pipe[0];
+	(*pollfd)[i].fd = ctx->consumer_data_pipe[0];
 	(*pollfd)[i].events = POLLIN | POLLPRI;
 	return i;
 }
@@ -802,7 +841,7 @@ restart:
 		if (errno == EINTR) {
 			goto restart;
 		}
-		perror("Poll error");
+		PERROR("Poll error");
 		goto exit;
 	}
 	if (consumer_sockpoll[0].revents & (POLLIN | POLLPRI)) {
@@ -859,17 +898,6 @@ void lttng_consumer_cleanup(void)
 
 	rcu_read_lock();
 
-	/*
-	 * close all outfd. Called when there are no more threads running (after
-	 * joining on the threads), no need to protect list iteration with mutex.
-	 */
-	cds_lfht_for_each_entry(consumer_data.stream_ht->ht, &iter.iter, node,
-			node) {
-		struct lttng_consumer_stream *stream =
-			caa_container_of(node, struct lttng_consumer_stream, node);
-		consumer_del_stream(stream);
-	}
-
 	cds_lfht_for_each_entry(consumer_data.channel_ht->ht, &iter.iter, node,
 			node) {
 		struct lttng_consumer_channel *channel =
@@ -879,7 +907,6 @@ void lttng_consumer_cleanup(void)
 
 	rcu_read_unlock();
 
-	lttng_ht_destroy(consumer_data.stream_ht);
 	lttng_ht_destroy(consumer_data.channel_ht);
 }
 
@@ -894,7 +921,7 @@ void lttng_consumer_should_exit(struct lttng_consumer_local_data *ctx)
 		ret = write(ctx->consumer_should_quit[1], "4", 1);
 	} while (ret < 0 && errno == EINTR);
 	if (ret < 0) {
-		perror("write consumer quit");
+		PERROR("write consumer quit");
 	}
 }
 
@@ -966,7 +993,7 @@ struct lttng_consumer_local_data *lttng_consumer_create(
 
 	ctx = zmalloc(sizeof(struct lttng_consumer_local_data));
 	if (ctx == NULL) {
-		perror("allocating context");
+		PERROR("allocating context");
 		goto error;
 	}
 
@@ -977,35 +1004,35 @@ struct lttng_consumer_local_data *lttng_consumer_create(
 	ctx->on_recv_stream = recv_stream;
 	ctx->on_update_stream = update_stream;
 
-	ret = pipe(ctx->consumer_poll_pipe);
+	ret = pipe(ctx->consumer_data_pipe);
 	if (ret < 0) {
-		perror("Error creating poll pipe");
+		PERROR("Error creating poll pipe");
 		goto error_poll_pipe;
 	}
 
 	/* set read end of the pipe to non-blocking */
-	ret = fcntl(ctx->consumer_poll_pipe[0], F_SETFL, O_NONBLOCK);
+	ret = fcntl(ctx->consumer_data_pipe[0], F_SETFL, O_NONBLOCK);
 	if (ret < 0) {
-		perror("fcntl O_NONBLOCK");
+		PERROR("fcntl O_NONBLOCK");
 		goto error_poll_fcntl;
 	}
 
 	/* set write end of the pipe to non-blocking */
-	ret = fcntl(ctx->consumer_poll_pipe[1], F_SETFL, O_NONBLOCK);
+	ret = fcntl(ctx->consumer_data_pipe[1], F_SETFL, O_NONBLOCK);
 	if (ret < 0) {
-		perror("fcntl O_NONBLOCK");
+		PERROR("fcntl O_NONBLOCK");
 		goto error_poll_fcntl;
 	}
 
 	ret = pipe(ctx->consumer_should_quit);
 	if (ret < 0) {
-		perror("Error creating recv pipe");
+		PERROR("Error creating recv pipe");
 		goto error_quit_pipe;
 	}
 
 	ret = pipe(ctx->consumer_thread_pipe);
 	if (ret < 0) {
-		perror("Error creating thread pipe");
+		PERROR("Error creating thread pipe");
 		goto error_thread_pipe;
 	}
 
@@ -1039,7 +1066,7 @@ error_quit_pipe:
 	for (i = 0; i < 2; i++) {
 		int err;
 
-		err = close(ctx->consumer_poll_pipe[i]);
+		err = close(ctx->consumer_data_pipe[i]);
 		if (err) {
 			PERROR("close");
 		}
@@ -1069,11 +1096,11 @@ void lttng_consumer_destroy(struct lttng_consumer_local_data *ctx)
 	if (ret) {
 		PERROR("close");
 	}
-	ret = close(ctx->consumer_poll_pipe[0]);
+	ret = close(ctx->consumer_data_pipe[0]);
 	if (ret) {
 		PERROR("close");
 	}
-	ret = close(ctx->consumer_poll_pipe[1]);
+	ret = close(ctx->consumer_data_pipe[1]);
 	if (ret) {
 		PERROR("close");
 	}
@@ -1141,6 +1168,8 @@ ssize_t lttng_consumer_on_read_subbuffer_mmap(
 
 	/* RCU lock for the relayd pointer */
 	rcu_read_lock();
+
+	pthread_mutex_lock(&stream->lock);
 
 	/* Flag that the current stream if set for network streaming. */
 	if (stream->net_seq_idx != -1) {
@@ -1237,6 +1266,7 @@ ssize_t lttng_consumer_on_read_subbuffer_mmap(
 	lttng_consumer_sync_trace_file(stream, orig_offset);
 
 end:
+	pthread_mutex_unlock(&stream->lock);
 	/* Unlock only if ctrl socket used */
 	if (relayd && stream->metadata_flag) {
 		pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
@@ -1279,6 +1309,8 @@ ssize_t lttng_consumer_on_read_subbuffer_splice(
 
 	/* RCU lock for the relayd pointer */
 	rcu_read_lock();
+
+	pthread_mutex_lock(&stream->lock);
 
 	/* Flag that the current stream if set for network streaming. */
 	if (stream->net_seq_idx != -1) {
@@ -1419,6 +1451,7 @@ splice_error:
 	}
 
 end:
+	pthread_mutex_unlock(&stream->lock);
 	if (relayd && stream->metadata_flag) {
 		pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
 	}
@@ -1489,9 +1522,36 @@ int lttng_consumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 }
 
 /*
- * Iterate over all stream element of the hashtable and free them. This is race
- * free since the hashtable received MUST be in a race free synchronization
- * state. It's the caller responsability to make sure of that.
+ * Iterate over all streams of the hashtable and free them properly.
+ *
+ * WARNING: *MUST* be used with data stream only.
+ */
+static void destroy_data_stream_ht(struct lttng_ht *ht)
+{
+	int ret;
+	struct lttng_ht_iter iter;
+	struct lttng_consumer_stream *stream;
+
+	if (ht == NULL) {
+		return;
+	}
+
+	rcu_read_lock();
+	cds_lfht_for_each_entry(ht->ht, &iter.iter, stream, node.node) {
+		ret = lttng_ht_del(ht, &iter);
+		assert(!ret);
+
+		call_rcu(&stream->node.head, consumer_free_stream);
+	}
+	rcu_read_unlock();
+
+	lttng_ht_destroy(ht);
+}
+
+/*
+ * Iterate over all streams of the hashtable and free them properly.
+ *
+ * XXX: Should not be only for metadata stream or else use an other name.
  */
 static void destroy_stream_ht(struct lttng_ht *ht)
 {
@@ -1503,12 +1563,14 @@ static void destroy_stream_ht(struct lttng_ht *ht)
 		return;
 	}
 
+	rcu_read_lock();
 	cds_lfht_for_each_entry(ht->ht, &iter.iter, stream, node.node) {
 		ret = lttng_ht_del(ht, &iter);
 		assert(!ret);
 
-		free(stream);
+		call_rcu(&stream->node.head, consumer_free_stream);
 	}
+	rcu_read_unlock();
 
 	lttng_ht_destroy(ht);
 }
@@ -1516,9 +1578,11 @@ static void destroy_stream_ht(struct lttng_ht *ht)
 /*
  * Clean up a metadata stream and free its memory.
  */
-static void consumer_del_metadata_stream(struct lttng_consumer_stream *stream)
+void consumer_del_metadata_stream(struct lttng_consumer_stream *stream,
+		struct lttng_ht *ht)
 {
 	int ret;
+	struct lttng_ht_iter iter;
 	struct lttng_consumer_channel *free_chan = NULL;
 	struct consumer_relayd_sock_pair *relayd;
 
@@ -1528,6 +1592,13 @@ static void consumer_del_metadata_stream(struct lttng_consumer_stream *stream)
 	 * metadata stream and this is crucial for data structure synchronization.
 	 */
 	assert(stream->metadata_flag);
+
+	DBG3("Consumer delete metadata stream %d", stream->wait_fd);
+
+	if (ht == NULL) {
+		/* Means the stream was allocated but not successfully added */
+		goto free_stream;
+	}
 
 	pthread_mutex_lock(&consumer_data.lock);
 	switch (consumer_data.type) {
@@ -1546,8 +1617,19 @@ static void consumer_del_metadata_stream(struct lttng_consumer_stream *stream)
 	default:
 		ERR("Unknown consumer_data type");
 		assert(0);
+		goto end;
 	}
-	pthread_mutex_unlock(&consumer_data.lock);
+
+	rcu_read_lock();
+	iter.iter.node = &stream->node.node;
+	ret = lttng_ht_del(ht, &iter);
+	assert(!ret);
+
+	/* Remove node session id from the consumer_data stream ht */
+	iter.iter.node = &stream->node_session_id.node;
+	ret = lttng_ht_del(consumer_data.stream_list_ht, &iter);
+	assert(!ret);
+	rcu_read_unlock();
 
 	if (stream->out_fd >= 0) {
 		ret = close(stream->out_fd);
@@ -1594,53 +1676,102 @@ static void consumer_del_metadata_stream(struct lttng_consumer_stream *stream)
 		/* Both conditions are met, we destroy the relayd. */
 		if (uatomic_read(&relayd->refcount) == 0 &&
 				uatomic_read(&relayd->destroy_flag)) {
-			consumer_destroy_relayd(relayd);
+			destroy_relayd(relayd);
 		}
 	}
 	rcu_read_unlock();
 
 	/* Atomically decrement channel refcount since other threads can use it. */
 	uatomic_dec(&stream->chan->refcount);
-	if (!uatomic_read(&stream->chan->refcount)) {
+	if (!uatomic_read(&stream->chan->refcount)
+			&& !uatomic_read(&stream->chan->nb_init_streams)) {
+		/* Go for channel deletion! */
 		free_chan = stream->chan;
 	}
+
+end:
+	pthread_mutex_unlock(&consumer_data.lock);
 
 	if (free_chan) {
 		consumer_del_channel(free_chan);
 	}
 
-	free(stream);
+free_stream:
+	call_rcu(&stream->node.head, consumer_free_stream);
 }
 
 /*
  * Action done with the metadata stream when adding it to the consumer internal
  * data structures to handle it.
  */
-static void consumer_add_metadata_stream(struct lttng_consumer_stream *stream)
+static int consumer_add_metadata_stream(struct lttng_consumer_stream *stream,
+		struct lttng_ht *ht)
 {
+	int ret = 0;
 	struct consumer_relayd_sock_pair *relayd;
 
-	/* Find relayd and, if one is found, increment refcount. */
+	assert(stream);
+	assert(ht);
+
+	DBG3("Adding metadata stream %d to hash table", stream->wait_fd);
+
+	pthread_mutex_lock(&consumer_data.lock);
+
+	/*
+	 * From here, refcounts are updated so be _careful_ when returning an error
+	 * after this point.
+	 */
+
 	rcu_read_lock();
+	/* Find relayd and, if one is found, increment refcount. */
 	relayd = consumer_find_relayd(stream->net_seq_idx);
 	if (relayd != NULL) {
 		uatomic_inc(&relayd->refcount);
 	}
+
+	/* Update channel refcount once added without error(s). */
+	uatomic_inc(&stream->chan->refcount);
+
+	/*
+	 * When nb_init_streams reaches 0, we don't need to trigger any action in
+	 * terms of destroying the associated channel, because the action that
+	 * causes the count to become 0 also causes a stream to be added. The
+	 * channel deletion will thus be triggered by the following removal of this
+	 * stream.
+	 */
+	if (uatomic_read(&stream->chan->nb_init_streams) > 0) {
+		uatomic_dec(&stream->chan->nb_init_streams);
+	}
+
+	/* Steal stream identifier to avoid having streams with the same key */
+	consumer_steal_stream_key(stream->key, ht);
+
+	lttng_ht_add_unique_ulong(ht, &stream->node);
+
+	/*
+	 * Add stream to the stream_list_ht of the consumer data. No need to steal
+	 * the key since the HT does not use it and we allow to add redundant keys
+	 * into this table.
+	 */
+	lttng_ht_add_ulong(consumer_data.stream_list_ht, &stream->node_session_id);
+
 	rcu_read_unlock();
+
+	pthread_mutex_unlock(&consumer_data.lock);
+	return ret;
 }
 
 /*
  * Thread polls on metadata file descriptor and write them on disk or on the
  * network.
  */
-void *lttng_consumer_thread_poll_metadata(void *data)
+void *consumer_thread_metadata_poll(void *data)
 {
 	int ret, i, pollfd;
 	uint32_t revents, nb_fd;
-	struct lttng_consumer_stream *stream;
+	struct lttng_consumer_stream *stream = NULL;
 	struct lttng_ht_iter iter;
 	struct lttng_ht_node_ulong *node;
-	struct lttng_ht *metadata_ht = NULL;
 	struct lttng_poll_event events;
 	struct lttng_consumer_local_data *ctx = data;
 	ssize_t len;
@@ -1648,11 +1779,6 @@ void *lttng_consumer_thread_poll_metadata(void *data)
 	rcu_register_thread();
 
 	DBG("Thread metadata poll started");
-
-	metadata_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
-	if (metadata_ht == NULL) {
-		goto end;
-	}
 
 	/* Size is set to 1 for the consumer_metadata pipe */
 	ret = lttng_poll_create(&events, 2, LTTNG_CLOEXEC);
@@ -1685,16 +1811,22 @@ restart:
 		DBG("Metadata event catched in thread");
 		if (ret < 0) {
 			if (errno == EINTR) {
+				ERR("Poll EINTR catched");
 				goto restart;
 			}
 			goto error;
 		}
 
+		/* From here, the event is a metadata wait fd */
 		for (i = 0; i < nb_fd; i++) {
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
-			/* Check the metadata pipe for incoming metadata. */
+			/* Just don't waste time if no returned events for the fd */
+			if (!revents) {
+				continue;
+			}
+
 			if (pollfd == ctx->consumer_metadata_pipe[0]) {
 				if (revents & (LPOLLERR | LPOLLHUP )) {
 					DBG("Metadata thread pipe hung up");
@@ -1706,20 +1838,13 @@ restart:
 					close(ctx->consumer_metadata_pipe[0]);
 					continue;
 				} else if (revents & LPOLLIN) {
-					stream = zmalloc(sizeof(struct lttng_consumer_stream));
-					if (stream == NULL) {
-						PERROR("zmalloc metadata consumer stream");
-						goto error;
-					}
-
 					do {
-						/* Get the stream and add it to the local hash table */
-						ret = read(pollfd, stream,
-								sizeof(struct lttng_consumer_stream));
+						/* Get the stream pointer received */
+						ret = read(pollfd, &stream, sizeof(stream));
 					} while (ret < 0 && errno == EINTR);
-					if (ret < 0 || ret < sizeof(struct lttng_consumer_stream)) {
+					if (ret < 0 ||
+							ret < sizeof(struct lttng_consumer_stream *)) {
 						PERROR("read metadata stream");
-						free(stream);
 						/*
 						 * Let's continue here and hope we can still work
 						 * without stopping the consumer. XXX: Should we?
@@ -1730,54 +1855,35 @@ restart:
 					DBG("Adding metadata stream %d to poll set",
 							stream->wait_fd);
 
-					/* The node should be init at this point */
-					lttng_ht_add_unique_ulong(metadata_ht,
-							&stream->waitfd_node);
+					ret = consumer_add_metadata_stream(stream, metadata_ht);
+					if (ret) {
+						ERR("Unable to add metadata stream");
+						/* Stream was not setup properly. Continuing. */
+						consumer_del_metadata_stream(stream, NULL);
+						continue;
+					}
 
 					/* Add metadata stream to the global poll events list */
 					lttng_poll_add(&events, stream->wait_fd,
 							LPOLLIN | LPOLLPRI);
-
-					consumer_add_metadata_stream(stream);
 				}
 
-				/* Metadata pipe handled. Continue handling the others */
+				/* Handle other stream */
 				continue;
 			}
 
-			/* From here, the event is a metadata wait fd */
-
+			rcu_read_lock();
 			lttng_ht_lookup(metadata_ht, (void *)((unsigned long) pollfd),
 					&iter);
 			node = lttng_ht_iter_get_node_ulong(&iter);
-			if (node == NULL) {
-				/* FD not found, continue loop */
-				continue;
-			}
+			assert(node);
 
 			stream = caa_container_of(node, struct lttng_consumer_stream,
-					waitfd_node);
+					node);
 
-			/* Get the data out of the metadata file descriptor */
-			if (revents & (LPOLLIN | LPOLLPRI)) {
-				DBG("Metadata available on fd %d", pollfd);
-				assert(stream->wait_fd == pollfd);
-
-				len = ctx->on_buffer_ready(stream, ctx);
-				/* It's ok to have an unavailable sub-buffer */
-				if (len < 0 && len != -EAGAIN) {
-					goto end;
-				} else if (len > 0) {
-					stream->data_read = 1;
-				}
-			}
-
-			/*
-			 * Remove the stream from the hash table since there is no data
-			 * left on the fd because we previously did a read on the buffer.
-			 */
+			/* Check for error event */
 			if (revents & (LPOLLERR | LPOLLHUP)) {
-				DBG("Metadata fd %d is hup|err|nval.", pollfd);
+				DBG("Metadata fd %d is hup|err.", pollfd);
 				if (!stream->hangup_flush_done
 						&& (consumer_data.type == LTTNG_CONSUMER32_UST
 							|| consumer_data.type == LTTNG_CONSUMER64_UST)) {
@@ -1785,18 +1891,40 @@ restart:
 					lttng_ustconsumer_on_stream_hangup(stream);
 
 					/* We just flushed the stream now read it. */
-					len = ctx->on_buffer_ready(stream, ctx);
-					/* It's ok to have an unavailable sub-buffer */
-					if (len < 0 && len != -EAGAIN) {
-						goto end;
-					}
+					do {
+						len = ctx->on_buffer_ready(stream, ctx);
+						/*
+						 * We don't check the return value here since if we get
+						 * a negative len, it means an error occured thus we
+						 * simply remove it from the poll set and free the
+						 * stream.
+						 */
+					} while (len > 0);
 				}
 
-				/* Removing it from hash table, poll set and free memory */
-				lttng_ht_del(metadata_ht, &iter);
 				lttng_poll_del(&events, stream->wait_fd);
-				consumer_del_metadata_stream(stream);
+				/*
+				 * This call update the channel states, closes file descriptors
+				 * and securely free the stream.
+				 */
+				consumer_del_metadata_stream(stream, metadata_ht);
+			} else if (revents & (LPOLLIN | LPOLLPRI)) {
+				/* Get the data out of the metadata file descriptor */
+				DBG("Metadata available on fd %d", pollfd);
+				assert(stream->wait_fd == pollfd);
+
+				len = ctx->on_buffer_ready(stream, ctx);
+				/* It's ok to have an unavailable sub-buffer */
+				if (len < 0 && len != -EAGAIN && len != -ENODATA) {
+					rcu_read_unlock();
+					goto end;
+				} else if (len > 0) {
+					stream->data_read = 1;
+				}
 			}
+
+			/* Release RCU lock for the stream looked up */
+			rcu_read_unlock();
 		}
 	}
 
@@ -1817,26 +1945,21 @@ end:
  * This thread polls the fds in the set to consume the data and write
  * it to tracefile if necessary.
  */
-void *lttng_consumer_thread_poll_fds(void *data)
+void *consumer_thread_data_poll(void *data)
 {
 	int num_rdy, num_hup, high_prio, ret, i;
 	struct pollfd *pollfd = NULL;
 	/* local view of the streams */
-	struct lttng_consumer_stream **local_stream = NULL;
+	struct lttng_consumer_stream **local_stream = NULL, *new_stream = NULL;
 	/* local view of consumer_data.fds_count */
 	int nb_fd = 0;
 	struct lttng_consumer_local_data *ctx = data;
 	ssize_t len;
-	pthread_t metadata_thread;
-	void *status;
 
 	rcu_register_thread();
 
-	/* Start metadata polling thread */
-	ret = pthread_create(&metadata_thread, NULL,
-			lttng_consumer_thread_poll_metadata, (void *) ctx);
-	if (ret < 0) {
-		PERROR("pthread_create metadata thread");
+	data_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
+	if (data_ht == NULL) {
 		goto end;
 	}
 
@@ -1861,23 +1984,24 @@ void *lttng_consumer_thread_poll_fds(void *data)
 				local_stream = NULL;
 			}
 
-			/* allocate for all fds + 1 for the consumer_poll_pipe */
+			/* allocate for all fds + 1 for the consumer_data_pipe */
 			pollfd = zmalloc((consumer_data.stream_count + 1) * sizeof(struct pollfd));
 			if (pollfd == NULL) {
-				perror("pollfd malloc");
+				PERROR("pollfd malloc");
 				pthread_mutex_unlock(&consumer_data.lock);
 				goto end;
 			}
 
-			/* allocate for all fds + 1 for the consumer_poll_pipe */
+			/* allocate for all fds + 1 for the consumer_data_pipe */
 			local_stream = zmalloc((consumer_data.stream_count + 1) *
 					sizeof(struct lttng_consumer_stream));
 			if (local_stream == NULL) {
-				perror("local_stream malloc");
+				PERROR("local_stream malloc");
 				pthread_mutex_unlock(&consumer_data.lock);
 				goto end;
 			}
-			ret = consumer_update_poll_array(ctx, &pollfd, local_stream);
+			ret = consumer_update_poll_array(ctx, &pollfd, local_stream,
+					data_ht);
 			if (ret < 0) {
 				ERR("Error in allocating pollfd or local_outfds");
 				lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_POLL_ERROR);
@@ -1905,7 +2029,7 @@ void *lttng_consumer_thread_poll_fds(void *data)
 			if (errno == EINTR) {
 				goto restart;
 			}
-			perror("Poll error");
+			PERROR("Poll error");
 			lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_POLL_ERROR);
 			goto end;
 		} else if (num_rdy == 0) {
@@ -1914,19 +2038,41 @@ void *lttng_consumer_thread_poll_fds(void *data)
 		}
 
 		/*
-		 * If the consumer_poll_pipe triggered poll go directly to the
+		 * If the consumer_data_pipe triggered poll go directly to the
 		 * beginning of the loop to update the array. We want to prioritize
 		 * array update over low-priority reads.
 		 */
 		if (pollfd[nb_fd].revents & (POLLIN | POLLPRI)) {
 			size_t pipe_readlen;
-			char tmp;
 
-			DBG("consumer_poll_pipe wake up");
+			DBG("consumer_data_pipe wake up");
 			/* Consume 1 byte of pipe data */
 			do {
-				pipe_readlen = read(ctx->consumer_poll_pipe[0], &tmp, 1);
+				pipe_readlen = read(ctx->consumer_data_pipe[0], &new_stream,
+						sizeof(new_stream));
 			} while (pipe_readlen == -1 && errno == EINTR);
+
+			/*
+			 * If the stream is NULL, just ignore it. It's also possible that
+			 * the sessiond poll thread changed the consumer_quit state and is
+			 * waking us up to test it.
+			 */
+			if (new_stream == NULL) {
+				continue;
+			}
+
+			ret = consumer_add_stream(new_stream, data_ht);
+			if (ret) {
+				ERR("Consumer add stream %d failed. Continuing",
+						new_stream->key);
+				/*
+				 * At this point, if the add_stream fails, it is not in the
+				 * hash table thus passing the NULL value here.
+				 */
+				consumer_del_stream(new_stream, NULL);
+			}
+
+			/* Continue to update the local streams and handle prio ones */
 			continue;
 		}
 
@@ -1937,7 +2083,7 @@ void *lttng_consumer_thread_poll_fds(void *data)
 				high_prio = 1;
 				len = ctx->on_buffer_ready(local_stream[i], ctx);
 				/* it's ok to have an unavailable sub-buffer */
-				if (len < 0 && len != -EAGAIN) {
+				if (len < 0 && len != -EAGAIN && len != -ENODATA) {
 					goto end;
 				} else if (len > 0) {
 					local_stream[i]->data_read = 1;
@@ -1960,7 +2106,7 @@ void *lttng_consumer_thread_poll_fds(void *data)
 				DBG("Normal read on fd %d", pollfd[i].fd);
 				len = ctx->on_buffer_ready(local_stream[i], ctx);
 				/* it's ok to have an unavailable sub-buffer */
-				if (len < 0 && len != -EAGAIN) {
+				if (len < 0 && len != -EAGAIN && len != -ENODATA) {
 					goto end;
 				} else if (len > 0) {
 					local_stream[i]->data_read = 1;
@@ -1988,19 +2134,19 @@ void *lttng_consumer_thread_poll_fds(void *data)
 			if ((pollfd[i].revents & POLLHUP)) {
 				DBG("Polling fd %d tells it has hung up.", pollfd[i].fd);
 				if (!local_stream[i]->data_read) {
-					consumer_del_stream(local_stream[i]);
+					consumer_del_stream(local_stream[i], data_ht);
 					num_hup++;
 				}
 			} else if (pollfd[i].revents & POLLERR) {
 				ERR("Error returned in polling fd %d.", pollfd[i].fd);
 				if (!local_stream[i]->data_read) {
-					consumer_del_stream(local_stream[i]);
+					consumer_del_stream(local_stream[i], data_ht);
 					num_hup++;
 				}
 			} else if (pollfd[i].revents & POLLNVAL) {
 				ERR("Polling fd %d tells fd is not open.", pollfd[i].fd);
 				if (!local_stream[i]->data_read) {
-					consumer_del_stream(local_stream[i]);
+					consumer_del_stream(local_stream[i], data_ht);
 					num_hup++;
 				}
 			}
@@ -2020,18 +2166,16 @@ end:
 
 	/*
 	 * Close the write side of the pipe so epoll_wait() in
-	 * lttng_consumer_thread_poll_metadata can catch it. The thread is
-	 * monitoring the read side of the pipe. If we close them both, epoll_wait
-	 * strangely does not return and could create a endless wait period if the
-	 * pipe is the only tracked fd in the poll set. The thread will take care
-	 * of closing the read side.
+	 * consumer_thread_metadata_poll can catch it. The thread is monitoring the
+	 * read side of the pipe. If we close them both, epoll_wait strangely does
+	 * not return and could create a endless wait period if the pipe is the
+	 * only tracked fd in the poll set. The thread will take care of closing
+	 * the read side.
 	 */
 	close(ctx->consumer_metadata_pipe[1]);
-	if (ret) {
-		ret = pthread_join(metadata_thread, &status);
-		if (ret < 0) {
-			PERROR("pthread_join metadata thread");
-		}
+
+	if (data_ht) {
+		destroy_data_stream_ht(data_ht);
 	}
 
 	rcu_unregister_thread();
@@ -2042,7 +2186,7 @@ end:
  * This thread listens on the consumerd socket and receives the file
  * descriptors from the session daemon.
  */
-void *lttng_consumer_thread_receive_fds(void *data)
+void *consumer_thread_sessiond_poll(void *data)
 {
 	int sock, client_socket, ret;
 	/*
@@ -2077,7 +2221,7 @@ void *lttng_consumer_thread_receive_fds(void *data)
 
 	ret = fcntl(client_socket, F_SETFL, O_NONBLOCK);
 	if (ret < 0) {
-		perror("fcntl O_NONBLOCK");
+		PERROR("fcntl O_NONBLOCK");
 		goto end;
 	}
 
@@ -2100,7 +2244,7 @@ void *lttng_consumer_thread_receive_fds(void *data)
 	}
 	ret = fcntl(sock, F_SETFL, O_NONBLOCK);
 	if (ret < 0) {
-		perror("fcntl O_NONBLOCK");
+		PERROR("fcntl O_NONBLOCK");
 		goto end;
 	}
 
@@ -2149,19 +2293,16 @@ end:
 	consumer_poll_timeout = LTTNG_CONSUMER_POLL_TIMEOUT;
 
 	/*
-	 * Wake-up the other end by writing a null byte in the pipe
-	 * (non-blocking). Important note: Because writing into the
-	 * pipe is non-blocking (and therefore we allow dropping wakeup
-	 * data, as long as there is wakeup data present in the pipe
-	 * buffer to wake up the other end), the other end should
-	 * perform the following sequence for waiting:
-	 * 1) empty the pipe (reads).
-	 * 2) perform update operation.
-	 * 3) wait on the pipe (poll).
+	 * Notify the data poll thread to poll back again and test the
+	 * consumer_quit state to quit gracefully.
 	 */
 	do {
-		ret = write(ctx->consumer_poll_pipe[1], "", 1);
+		struct lttng_consumer_stream *null_stream = NULL;
+
+		ret = write(ctx->consumer_data_pipe[1], &null_stream,
+				sizeof(null_stream));
 	} while (ret < 0 && errno == EINTR);
+
 	rcu_unregister_thread();
 	return NULL;
 }
@@ -2202,9 +2343,14 @@ int lttng_consumer_on_recv_stream(struct lttng_consumer_stream *stream)
  */
 void lttng_consumer_init(void)
 {
-	consumer_data.stream_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
 	consumer_data.channel_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
 	consumer_data.relayd_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
+	consumer_data.stream_list_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
+
+	metadata_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
+	assert(metadata_ht);
+	data_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
+	assert(data_ht);
 }
 
 /*
@@ -2290,11 +2436,97 @@ int consumer_add_relayd_socket(int net_seq_idx, int sock_type,
 	 * Add relayd socket pair to consumer data hashtable. If object already
 	 * exists or on error, the function gracefully returns.
 	 */
-	consumer_add_relayd(relayd);
+	add_relayd(relayd);
 
 	/* All good! */
 	ret = 0;
 
 error:
 	return ret;
+}
+
+/*
+ * Check if for a given session id there is still data needed to be extract
+ * from the buffers.
+ *
+ * Return 1 if data is in fact available to be read or else 0.
+ */
+int consumer_data_available(uint64_t id)
+{
+	int ret;
+	struct lttng_ht_iter iter;
+	struct lttng_ht *ht;
+	struct lttng_consumer_stream *stream;
+	struct consumer_relayd_sock_pair *relayd;
+	int (*data_available)(struct lttng_consumer_stream *);
+
+	DBG("Consumer data available command on session id %" PRIu64, id);
+
+	pthread_mutex_lock(&consumer_data.lock);
+
+	switch (consumer_data.type) {
+	case LTTNG_CONSUMER_KERNEL:
+		data_available = lttng_kconsumer_data_available;
+		break;
+	case LTTNG_CONSUMER32_UST:
+	case LTTNG_CONSUMER64_UST:
+		data_available = lttng_ustconsumer_data_available;
+		break;
+	default:
+		ERR("Unknown consumer data type");
+		assert(0);
+	}
+
+	rcu_read_lock();
+
+	/* Ease our life a bit */
+	ht = consumer_data.stream_list_ht;
+
+	cds_lfht_for_each_entry_duplicate(ht->ht,
+			ht->hash_fct((void *)((unsigned long) id), 0x42UL),
+			ht->match_fct, (void *)((unsigned long) id),
+			&iter.iter, stream, node_session_id.node) {
+		/* Check the stream for data. */
+		ret = data_available(stream);
+		if (ret == 0) {
+			goto data_not_available;
+		}
+
+		if (stream->net_seq_idx != -1) {
+			relayd = consumer_find_relayd(stream->net_seq_idx);
+			assert(relayd);
+
+			pthread_mutex_lock(&stream->lock);
+			pthread_mutex_lock(&relayd->ctrl_sock_mutex);
+			if (stream->metadata_flag) {
+				ret = relayd_quiescent_control(&relayd->control_sock);
+			} else {
+				ret = relayd_data_available(&relayd->control_sock,
+						stream->relayd_stream_id, stream->next_net_seq_num);
+			}
+			pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
+			pthread_mutex_unlock(&stream->lock);
+			if (ret == 0) {
+				goto data_not_available;
+			}
+		}
+	}
+
+	/*
+	 * Finding _no_ node in the hash table means that the stream(s) have been
+	 * removed thus data is guaranteed to be available for analysis from the
+	 * trace files. This is *only* true for local consumer and not network
+	 * streaming.
+	 */
+
+	/* Data is available to be read by a viewer. */
+	pthread_mutex_unlock(&consumer_data.lock);
+	rcu_read_unlock();
+	return 1;
+
+data_not_available:
+	/* Data is still being extracted from buffers. */
+	pthread_mutex_unlock(&consumer_data.lock);
+	rcu_read_unlock();
+	return 0;
 }

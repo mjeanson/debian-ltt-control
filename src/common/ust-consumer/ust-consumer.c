@@ -150,7 +150,8 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		new_channel = consumer_allocate_channel(msg.u.channel.channel_key,
 				fds[0], -1,
 				msg.u.channel.mmap_len,
-				msg.u.channel.max_sb_size);
+				msg.u.channel.max_sb_size,
+				msg.u.channel.nb_init_streams);
 		if (new_channel == NULL) {
 			lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_OUTFD_ERROR);
 			goto end_nosignal;
@@ -170,9 +171,10 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 	case LTTNG_CONSUMER_ADD_STREAM:
 	{
 		struct lttng_consumer_stream *new_stream;
-		int fds[2];
+		int fds[2], stream_pipe;
 		size_t nb_fd = 2;
 		struct consumer_relayd_sock_pair *relayd = NULL;
+		int alloc_ret = 0;
 
 		DBG("UST Consumer adding stream");
 
@@ -188,9 +190,8 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 			return ret;
 		}
 
-		DBG("consumer_add_stream chan %d stream %d",
-				msg.u.stream.channel_key,
-				msg.u.stream.stream_key);
+		DBG("Consumer command ADD_STREAM chan %d stream %d",
+				msg.u.stream.channel_key, msg.u.stream.stream_key);
 
 		assert(msg.u.stream.output == LTTNG_EVENT_MMAP);
 		new_stream = consumer_allocate_stream(msg.u.stream.channel_key,
@@ -203,9 +204,24 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 				msg.u.stream.uid,
 				msg.u.stream.gid,
 				msg.u.stream.net_index,
-				msg.u.stream.metadata_flag);
+				msg.u.stream.metadata_flag,
+				msg.u.stream.session_id,
+				&alloc_ret);
 		if (new_stream == NULL) {
-			lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_OUTFD_ERROR);
+			switch (alloc_ret) {
+			case -ENOMEM:
+			case -EINVAL:
+			default:
+				lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_OUTFD_ERROR);
+				break;
+			case -ENOENT:
+				/*
+				 * We could not find the channel. Can happen if cpu hotplug
+				 * happens while tearing down.
+				 */
+				DBG3("Could not find channel");
+				break;
+			}
 			goto end_nosignal;
 		}
 
@@ -219,42 +235,44 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 					&new_stream->relayd_stream_id);
 			pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
 			if (ret < 0) {
+				consumer_del_stream(new_stream, NULL);
 				goto end_nosignal;
 			}
 		} else if (msg.u.stream.net_index != -1) {
 			ERR("Network sequence index %d unknown. Not adding stream.",
 					msg.u.stream.net_index);
-			free(new_stream);
+			consumer_del_stream(new_stream, NULL);
 			goto end_nosignal;
 		}
 
-		/* Send stream to the metadata thread */
-		if (new_stream->metadata_flag) {
-			if (ctx->on_recv_stream) {
-				ret = ctx->on_recv_stream(new_stream);
-				if (ret < 0) {
-					goto end_nosignal;
-				}
-			}
-
-			do {
-				ret = write(ctx->consumer_metadata_pipe[1], new_stream,
-						sizeof(struct lttng_consumer_stream));
-			} while (ret < 0 && errno == EINTR);
+		/* Do actions once stream has been received. */
+		if (ctx->on_recv_stream) {
+			ret = ctx->on_recv_stream(new_stream);
 			if (ret < 0) {
-				PERROR("write metadata pipe");
+				consumer_del_stream(new_stream, NULL);
+				goto end_nosignal;
 			}
-		} else {
-			if (ctx->on_recv_stream) {
-				ret = ctx->on_recv_stream(new_stream);
-				if (ret < 0) {
-					goto end_nosignal;
-				}
-			}
-			consumer_add_stream(new_stream);
 		}
 
-		DBG("UST consumer_add_stream %s (%d,%d) with relayd id %" PRIu64,
+		/* Get the right pipe where the stream will be sent. */
+		if (new_stream->metadata_flag) {
+			stream_pipe = ctx->consumer_metadata_pipe[1];
+		} else {
+			stream_pipe = ctx->consumer_data_pipe[1];
+		}
+
+		do {
+			ret = write(stream_pipe, &new_stream, sizeof(new_stream));
+		} while (ret < 0 && errno == EINTR);
+		if (ret < 0) {
+			PERROR("Consumer write %s stream to pipe %d",
+					new_stream->metadata_flag ? "metadata" : "data",
+					stream_pipe);
+			consumer_del_stream(new_stream, NULL);
+			goto end_nosignal;
+		}
+
+		DBG("UST consumer ADD_STREAM %s (%d,%d) with relayd id %" PRIu64,
 				msg.u.stream.path_name, fds[0], fds[1],
 				new_stream->relayd_stream_id);
 		break;
@@ -291,39 +309,27 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 	{
 		rcu_read_unlock();
 		return -ENOSYS;
-#if 0
-		if (ctx->on_update_stream != NULL) {
-			ret = ctx->on_update_stream(msg.u.stream.stream_key, msg.u.stream.state);
-			if (ret == 0) {
-				consumer_change_stream_state(msg.u.stream.stream_key, msg.u.stream.state);
-			} else if (ret < 0) {
-				goto end;
-			}
-		} else {
-			consumer_change_stream_state(msg.u.stream.stream_key,
-				msg.u.stream.state);
+	}
+	case LTTNG_CONSUMER_DATA_AVAILABLE:
+	{
+		int32_t ret;
+		uint64_t id = msg.u.data_available.session_id;
+
+		DBG("UST consumer data available command for id %" PRIu64, id);
+
+		ret = consumer_data_available(id);
+
+		/* Send back returned value to session daemon */
+		ret = lttcomm_send_unix_sock(sock, &ret, sizeof(ret));
+		if (ret < 0) {
+			PERROR("send data available ret code");
 		}
 		break;
-#endif
 	}
 	default:
 		break;
 	}
 
-	/*
-	 * Wake-up the other end by writing a null byte in the pipe (non-blocking).
-	 * Important note: Because writing into the pipe is non-blocking (and
-	 * therefore we allow dropping wakeup data, as long as there is wakeup data
-	 * present in the pipe buffer to wake up the other end), the other end
-	 * should perform the following sequence for waiting:
-	 *
-	 * 1) empty the pipe (reads).
-	 * 2) perform update operation.
-	 * 3) wait on the pipe (poll).
-	 */
-	do {
-		ret = write(ctx->consumer_poll_pipe[1], "", 1);
-	} while (ret < 0 && errno == EINTR);
 end_nosignal:
 	rcu_read_unlock();
 
@@ -363,7 +369,7 @@ void lttng_ustconsumer_del_channel(struct lttng_consumer_channel *chan)
 	ustctl_unmap_channel(chan->handle);
 }
 
-int lttng_ustconsumer_allocate_stream(struct lttng_consumer_stream *stream)
+int lttng_ustconsumer_add_stream(struct lttng_consumer_stream *stream)
 {
 	struct lttng_ust_object_data obj;
 	int ret;
@@ -373,21 +379,35 @@ int lttng_ustconsumer_allocate_stream(struct lttng_consumer_stream *stream)
 	obj.wait_fd = stream->wait_fd;
 	obj.memory_map_size = stream->mmap_len;
 	ret = ustctl_add_stream(stream->chan->handle, &obj);
-	if (ret)
-		return ret;
+	if (ret) {
+		ERR("UST ctl add_stream failed with ret %d", ret);
+		goto error;
+	}
+
 	stream->buf = ustctl_open_stream_read(stream->chan->handle, stream->cpu);
-	if (!stream->buf)
-		return -EBUSY;
+	if (!stream->buf) {
+		ERR("UST ctl open_stream_read failed");
+		ret = -EBUSY;
+		goto error;
+	}
+
 	/* ustctl_open_stream_read has closed the shm fd. */
 	stream->wait_fd_is_copy = 1;
 	stream->shm_fd = -1;
 
 	stream->mmap_base = ustctl_get_mmap_base(stream->chan->handle, stream->buf);
 	if (!stream->mmap_base) {
-		return -EINVAL;
+		ERR("UST ctl get_mmap_base failed");
+		ret = -EINVAL;
+		goto mmap_error;
 	}
 
 	return 0;
+
+mmap_error:
+	ustctl_close_stream_read(stream->chan->handle, stream->buf);
+error:
+	return ret;
 }
 
 void lttng_ustconsumer_del_stream(struct lttng_consumer_stream *stream)
@@ -465,7 +485,6 @@ int lttng_ustconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
 		ERR("Error writing to tracefile "
 				"(ret: %zd != len: %lu != subbuf_size: %lu)",
 				ret, len, subbuf_size);
-
 	}
 	err = ustctl_put_next_subbuf(handle, buf);
 	assert(err == 0);
@@ -491,9 +510,58 @@ int lttng_ustconsumer_on_recv_stream(struct lttng_consumer_stream *stream)
 		stream->out_fd = ret;
 	}
 
+	ret = lttng_ustconsumer_add_stream(stream);
+	if (ret) {
+		consumer_del_stream(stream, NULL);
+		ret = -1;
+		goto error;
+	}
+
 	/* we return 0 to let the library handle the FD internally */
 	return 0;
 
 error:
 	return ret;
+}
+
+/*
+ * Check if data is still being extracted from the buffers for a specific
+ * stream. Consumer data lock MUST be acquired before calling this function.
+ *
+ * Return 0 if the traced data are still getting read else 1 meaning that the
+ * data is available for trace viewer reading.
+ */
+int lttng_ustconsumer_data_available(struct lttng_consumer_stream *stream)
+{
+	int ret;
+
+	assert(stream);
+
+	DBG("UST consumer checking data availability");
+
+	/*
+	 * Try to lock the stream mutex. On failure, we know that the stream is
+	 * being used else where hence there is data still being extracted.
+	 */
+	ret = pthread_mutex_trylock(&stream->lock);
+	if (ret == EBUSY) {
+		goto data_not_available;
+	}
+	/* The stream is now locked so we can do our ustctl calls */
+
+	ret = ustctl_get_next_subbuf(stream->chan->handle, stream->buf);
+	if (ret == 0) {
+		/* There is still data so let's put back this subbuffer. */
+		ret = ustctl_put_subbuf(stream->chan->handle, stream->buf);
+		assert(ret == 0);
+		pthread_mutex_unlock(&stream->lock);
+		goto data_not_available;
+	}
+
+	/* Data is available to be read for this stream. */
+	pthread_mutex_unlock(&stream->lock);
+	return 1;
+
+data_not_available:
+	return 0;
 }

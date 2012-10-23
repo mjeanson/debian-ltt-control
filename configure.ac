@@ -1,4 +1,4 @@
-AC_INIT([lttng-tools],[2.1.0-rc4],[dgoulet@efficios.com],[],[http://lttng.org])
+AC_INIT([lttng-tools],[2.1.0-rc5],[dgoulet@efficios.com],[],[http://lttng.org])
 AC_CONFIG_AUX_DIR([config])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
@@ -275,6 +275,7 @@ AC_CONFIG_FILES([
 	src/common/sessiond-comm/Makefile
 	src/common/compat/Makefile
 	src/common/relayd/Makefile
+	src/common/testpoint/Makefile
 	src/lib/Makefile
 	src/lib/lttng-ctl/Makefile
 	src/lib/lttng-ctl/filter/Makefile
@@ -287,6 +288,8 @@ AC_CONFIG_FILES([
 	tests/kernel/Makefile
 	tests/tools/Makefile
 	tests/tools/streaming/Makefile
+	tests/tools/filtering/Makefile
+	tests/tools/health/Makefile
 	tests/ust/Makefile
 	tests/ust/nprocesses/Makefile
 	tests/ust/high-throughput/Makefile
