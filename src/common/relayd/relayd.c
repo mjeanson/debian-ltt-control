@@ -70,7 +70,7 @@ static int send_command(struct lttcomm_sock *sock,
 		goto error;
 	}
 
-	DBG3("Relayd sending command %d", cmd);
+	DBG3("Relayd sending command %d of size %" PRIu64, cmd, buf_size);
 
 error:
 	free(buf);
@@ -86,7 +86,7 @@ static int recv_reply(struct lttcomm_sock *sock, void *data, size_t size)
 {
 	int ret;
 
-	DBG3("Relayd waiting for reply...");
+	DBG3("Relayd waiting for reply of size %ld", size);
 
 	ret = sock->ops->recvmsg(sock, data, size, 0);
 	if (ret < 0) {
@@ -125,7 +125,7 @@ int relayd_add_stream(struct lttcomm_sock *sock, const char *channel_name,
 		goto error;
 	}
 
-	/* Recevie response */
+	/* Waiting for reply */
 	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
@@ -228,7 +228,7 @@ int relayd_send_metadata(struct lttcomm_sock *sock, size_t len)
 	/*
 	 * After that call, the metadata data MUST be sent to the relayd so the
 	 * receive size on the other end matches the len of the metadata packet
-	 * header.
+	 * header. This is why we don't wait for a reply here.
 	 */
 
 error:
@@ -273,7 +273,7 @@ int relayd_send_data_hdr(struct lttcomm_sock *sock,
 	assert(sock);
 	assert(hdr);
 
-	DBG3("Relayd sending data header...");
+	DBG3("Relayd sending data header of size %ld", size);
 
 	/* Again, safety net */
 	if (size == 0) {
@@ -337,6 +337,98 @@ int relayd_send_close_stream(struct lttcomm_sock *sock, uint64_t stream_id,
 	}
 
 	DBG("Relayd close stream id %" PRIu64 " successfully", stream_id);
+
+error:
+	return ret;
+}
+
+/*
+ * Check for data availability for a given stream id.
+ *
+ * Return 0 if NOT available, 1 if so and a negative value on error.
+ */
+int relayd_data_available(struct lttcomm_sock *sock, uint64_t stream_id,
+		uint64_t last_net_seq_num)
+{
+	int ret;
+	struct lttcomm_relayd_data_available msg;
+	struct lttcomm_relayd_generic_reply reply;
+
+	/* Code flow error. Safety net. */
+	assert(sock);
+
+	DBG("Relayd data available for stream id %" PRIu64, stream_id);
+
+	msg.stream_id = htobe64(stream_id);
+	msg.last_net_seq_num = htobe64(last_net_seq_num);
+
+	/* Send command */
+	ret = send_command(sock, RELAYD_DATA_AVAILABLE, (void *) &msg,
+			sizeof(msg), 0);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Recevie response */
+	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	if (ret < 0) {
+		goto error;
+	}
+
+	reply.ret_code = be32toh(reply.ret_code);
+
+	/* Return session id or negative ret code. */
+	if (reply.ret_code >= LTTNG_OK) {
+		ret = -reply.ret_code;
+		ERR("Relayd data available replied error %d", ret);
+	}
+
+	/* At this point, the ret code is either 1 or 0 */
+	ret = reply.ret_code;
+
+	DBG("Relayd data is %s available for stream id %" PRIu64,
+			ret == 1 ? "" : "NOT", stream_id);
+
+error:
+	return ret;
+}
+
+/*
+ * Check on the relayd side for a quiescent state on the control socket.
+ */
+int relayd_quiescent_control(struct lttcomm_sock *sock)
+{
+	int ret;
+	struct lttcomm_relayd_generic_reply reply;
+
+	/* Code flow error. Safety net. */
+	assert(sock);
+
+	DBG("Relayd checking quiescent control state");
+
+	/* Send command */
+	ret = send_command(sock, RELAYD_QUIESCENT_CONTROL, NULL, 0, 0);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Recevie response */
+	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	if (ret < 0) {
+		goto error;
+	}
+
+	reply.ret_code = be32toh(reply.ret_code);
+
+	/* Return session id or negative ret code. */
+	if (reply.ret_code != LTTNG_OK) {
+		ret = -reply.ret_code;
+		ERR("Relayd quiescent control replied error %d", ret);
+		goto error;
+	}
+
+	/* Control socket is quiescent */
+	return 1;
 
 error:
 	return ret;

@@ -262,7 +262,8 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-AM_CPPFLAGS = -DINSTALL_BIN_PATH=\""$(lttnglibexecdir)"\" \
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src \
+			  -DINSTALL_BIN_PATH=\""$(lttnglibexecdir)"\" \
 			  -DINSTALL_LIB_PATH=\""$(libdir)"\"
 
 AM_CFLAGS = -fno-strict-aliasing

@@ -265,7 +265,9 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-AM_CPPFLAGS = -DINSTALL_BIN_PATH=\""$(bindir)"\"
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src \
+			  -DINSTALL_BIN_PATH=\""$(bindir)"\"
+
 lttng_SOURCES = command.h conf.c conf.h commands/start.c \
 				commands/list.c commands/create.c commands/destroy.c \
 				commands/stop.c commands/enable_events.c \

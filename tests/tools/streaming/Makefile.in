@@ -270,7 +270,7 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-AM_CFLAGS = -I. -O2 -g -I../../
+AM_CFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src -I$(top_srcdir)/tests -I$(srcdir) -O2 -g
 AM_LDFLAGS = $(am__append_1) $(am__append_2)
 
 #UTILS=../../utils.h

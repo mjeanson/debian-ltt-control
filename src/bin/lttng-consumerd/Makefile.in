@@ -262,7 +262,7 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-AM_CPPFLAGS = 
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
 lttng_consumerd_SOURCES = lttng-consumerd.c lttng-consumerd.h
 lttng_consumerd_LDADD = $(top_builddir)/src/common/libconsumer.la \
 	$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \

@@ -112,7 +112,8 @@ struct consumer_net {
 	struct lttng_uri data;
 
 	/* Flag if network sockets were sent to the consumer. */
-	unsigned int relayd_socks_sent;
+	unsigned int control_sock_sent;
+	unsigned int data_sock_sent;
 };
 
 /*
@@ -189,12 +190,16 @@ void consumer_init_stream_comm_msg(struct lttcomm_consumer_msg *msg,
 		int net_index,
 		unsigned int metadata_flag,
 		const char *name,
-		const char *pathname);
+		const char *pathname,
+		unsigned int session_id);
 void consumer_init_channel_comm_msg(struct lttcomm_consumer_msg *msg,
 		enum lttng_consumer_command cmd,
 		int channel_key,
 		uint64_t max_sb_size,
 		uint64_t mmap_len,
-		const char *name);
+		const char *name,
+		unsigned int nb_init_streams);
+int consumer_is_data_available(unsigned int id,
+		struct consumer_output *consumer);
 
 #endif /* _CONSUMER_H */

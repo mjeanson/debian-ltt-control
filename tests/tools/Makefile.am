@@ -1,6 +1,6 @@
-SUBDIRS = streaming
+SUBDIRS = streaming filtering health
 
-AM_CFLAGS = -g -Wall -I../
+AM_CFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src -I$(top_srcdir)/tests -g -Wall
 AM_LDFLAGS = -lurcu -lurcu-cds
 
 EXTRA_DIST = runall.sh

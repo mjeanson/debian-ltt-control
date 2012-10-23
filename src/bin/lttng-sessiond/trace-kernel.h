@@ -22,6 +22,7 @@
 
 #include <lttng/lttng.h>
 #include <common/lttng-kernel.h>
+#include <common/lttng-kernel-old.h>
 
 #include "consumer.h"
 
@@ -106,6 +107,8 @@ struct ltt_kernel_session {
 	 */
 	struct consumer_output *consumer;
 	struct consumer_output *tmp_consumer;
+	/* Tracing session id */
+	unsigned int id;
 };
 
 /*

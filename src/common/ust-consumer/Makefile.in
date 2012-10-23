@@ -258,6 +258,7 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
+@HAVE_LIBLTTNG_UST_CTL_TRUE@AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
 @HAVE_LIBLTTNG_UST_CTL_TRUE@noinst_LTLIBRARIES = libust-consumer.la
 @HAVE_LIBLTTNG_UST_CTL_TRUE@libust_consumer_la_SOURCES = ust-consumer.c ust-consumer.h
 @HAVE_LIBLTTNG_UST_CTL_TRUE@libust_consumer_la_LIBADD = \

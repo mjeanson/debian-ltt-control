@@ -49,7 +49,7 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 
 extern int lttng_ustconsumer_allocate_channel(struct lttng_consumer_channel *chan);
 extern void lttng_ustconsumer_del_channel(struct lttng_consumer_channel *chan);
-extern int lttng_ustconsumer_allocate_stream(struct lttng_consumer_stream *stream);
+extern int lttng_ustconsumer_add_stream(struct lttng_consumer_stream *stream);
 extern void lttng_ustconsumer_del_stream(struct lttng_consumer_stream *stream);
 
 int lttng_ustconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
@@ -61,6 +61,7 @@ void lttng_ustconsumer_on_stream_hangup(struct lttng_consumer_stream *stream);
 extern int lttng_ustctl_get_mmap_read_offset(
 		struct lttng_ust_shm_handle *handle,
 		struct lttng_ust_lib_ring_buffer *buf, unsigned long *off);
+int lttng_ustconsumer_data_available(struct lttng_consumer_stream *stream);
 
 #else /* HAVE_LIBLTTNG_UST_CTL */
 
@@ -117,7 +118,7 @@ void lttng_ustconsumer_del_channel(struct lttng_consumer_channel *chan)
 }
 
 static inline
-int lttng_ustconsumer_allocate_stream(struct lttng_consumer_stream *stream)
+int lttng_ustconsumer_add_stream(struct lttng_consumer_stream *stream)
 {
 	return -ENOSYS;
 }
@@ -148,6 +149,11 @@ void lttng_ustconsumer_on_stream_hangup(struct lttng_consumer_stream *stream)
 static inline
 int lttng_ustctl_get_mmap_read_offset(struct lttng_ust_shm_handle *handle,
 		struct lttng_ust_lib_ring_buffer *buf, unsigned long *off)
+{
+	return -ENOSYS;
+}
+static inline
+int lttng_ustconsumer_data_available(struct lttng_consumer_stream *stream)
 {
 	return -ENOSYS;
 }

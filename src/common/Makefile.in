@@ -307,16 +307,22 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-AM_CPPFLAGS = 
-SUBDIRS = compat hashtable kernel-ctl sessiond-comm relayd kernel-consumer ust-consumer
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
+SUBDIRS = compat hashtable kernel-ctl sessiond-comm relayd \
+		  kernel-consumer ust-consumer testpoint
+
 AM_CFLAGS = -fno-strict-aliasing
-noinst_HEADERS = lttng-kernel.h defaults.h macros.h error.h futex.h uri.h utils.h
+noinst_HEADERS = lttng-kernel.h defaults.h macros.h error.h futex.h \
+				 uri.h utils.h lttng-kernel-old.h
+
 
 # Common library
 
 # Consumer library
 noinst_LTLIBRARIES = libcommon.la libconsumer.la
-libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h common.h futex.c futex.h uri.c uri.h
+libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
+                       common.h futex.c futex.h uri.c uri.h
+
 libconsumer_la_SOURCES = consumer.c consumer.h
 libconsumer_la_LIBADD =  \
 	$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \

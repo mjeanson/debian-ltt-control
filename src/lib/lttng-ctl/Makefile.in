@@ -325,6 +325,7 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src -I$(builddir)
 SUBDIRS = filter
 lib_LTLIBRARIES = liblttng-ctl.la
 liblttng_ctl_la_SOURCES = lttng-ctl.c

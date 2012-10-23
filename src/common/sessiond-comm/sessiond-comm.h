@@ -85,8 +85,11 @@ enum lttcomm_sessiond_command {
 	RELAYD_VERSION,
 	RELAYD_SEND_METADATA,
 	RELAYD_CLOSE_STREAM,
+	RELAYD_DATA_AVAILABLE,
+	RELAYD_QUIESCENT_CONTROL,
 	LTTNG_SET_FILTER,
 	LTTNG_HEALTH_CHECK,
+	LTTNG_DATA_AVAILABLE,
 };
 
 /*
@@ -167,12 +170,12 @@ struct lttcomm_session_msg {
 	struct lttng_domain domain;
 	union {
 		struct {
-			char channel_name[NAME_MAX];
+			char channel_name[LTTNG_SYMBOL_NAME_LEN];
 			char name[NAME_MAX];
 		} disable;
 		/* Event data */
 		struct {
-			char channel_name[NAME_MAX];
+			char channel_name[LTTNG_SYMBOL_NAME_LEN];
 			struct lttng_event event;
 		} enable;
 		/* Create channel */
@@ -181,8 +184,8 @@ struct lttcomm_session_msg {
 		} channel;
 		/* Context */
 		struct {
-			char channel_name[NAME_MAX];
-			char event_name[NAME_MAX];
+			char channel_name[LTTNG_SYMBOL_NAME_LEN];
+			char event_name[LTTNG_SYMBOL_NAME_LEN];
 			struct lttng_event_context ctx;
 		} context;
 		/* Use by register_consumer */
@@ -191,7 +194,7 @@ struct lttcomm_session_msg {
 		} reg;
 		/* List */
 		struct {
-			char channel_name[NAME_MAX];
+			char channel_name[LTTNG_SYMBOL_NAME_LEN];
 		} list;
 		struct lttng_calibrate calibrate;
 		/* Used by the set_consumer_url and used by create_session also call */
@@ -200,8 +203,8 @@ struct lttcomm_session_msg {
 			uint32_t size;
 		} uri;
 		struct {
-			char channel_name[NAME_MAX];
-			char event_name[NAME_MAX];
+			char channel_name[LTTNG_SYMBOL_NAME_LEN];
+			char event_name[LTTNG_SYMBOL_NAME_LEN];
 			/* Length of following bytecode */
 			uint32_t bytecode_len;
 		} filter;
@@ -255,6 +258,8 @@ struct lttcomm_consumer_msg {
 			uint64_t max_sb_size; /* the subbuffer size for this channel */
 			/* shm_fd and wait_fd are sent as ancillary data */
 			uint64_t mmap_len;
+			/* nb_init_streams is the number of streams open initially. */
+			unsigned int nb_init_streams;
 			char name[LTTNG_SYMBOL_NAME_LEN];
 		} channel;
 		struct {
@@ -270,6 +275,7 @@ struct lttcomm_consumer_msg {
 			int net_index;
 			unsigned int metadata_flag;
 			char name[LTTNG_SYMBOL_NAME_LEN];  /* Name string of the stream */
+			uint64_t session_id;   /* Tracing session id of the stream */
 		} stream;
 		struct {
 			int net_index;
@@ -280,6 +286,9 @@ struct lttcomm_consumer_msg {
 		struct {
 			uint64_t net_seq_idx;
 		} destroy_relayd;
+		struct {
+			uint64_t session_id;
+		} data_available;
 	} u;
 };
 
