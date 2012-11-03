@@ -584,7 +584,7 @@ close_sock:
 static int send_consumer_relayd_sockets(int domain,
 		struct ltt_session *session, struct consumer_output *consumer, int fd)
 {
-	int ret;
+	int ret = LTTNG_OK;
 
 	assert(session);
 	assert(consumer);
@@ -640,7 +640,7 @@ static int setup_relayd(struct ltt_session *session)
 			assert(socket->fd >= 0);
 
 			pthread_mutex_lock(socket->lock);
-			send_consumer_relayd_sockets(LTTNG_DOMAIN_UST, session,
+			ret = send_consumer_relayd_sockets(LTTNG_DOMAIN_UST, session,
 					usess->consumer, socket->fd);
 			pthread_mutex_unlock(socket->lock);
 			if (ret != LTTNG_OK) {
@@ -657,7 +657,7 @@ static int setup_relayd(struct ltt_session *session)
 			assert(socket->fd >= 0);
 
 			pthread_mutex_lock(socket->lock);
-			send_consumer_relayd_sockets(LTTNG_DOMAIN_KERNEL, session,
+			ret = send_consumer_relayd_sockets(LTTNG_DOMAIN_KERNEL, session,
 					ksess->consumer, socket->fd);
 			pthread_mutex_unlock(socket->lock);
 			if (ret != LTTNG_OK) {
@@ -1528,11 +1528,6 @@ int cmd_set_consumer_uri(int domain, struct ltt_session *session,
 		goto error;
 	}
 
-	if (!session->start_consumer) {
-		ret = LTTNG_ERR_NO_CONSUMER;
-		goto error;
-	}
-
 	/*
 	 * This case switch makes sure the domain session has a temporary consumer
 	 * so the URL can be set.
@@ -2142,11 +2137,6 @@ int cmd_enable_consumer(int domain, struct ltt_session *session)
 		goto error;
 	}
 
-	if (!session->start_consumer) {
-		ret = LTTNG_ERR_NO_CONSUMER;
-		goto error;
-	}
-
 	switch (domain) {
 	case 0:
 		assert(session->consumer);
@@ -2213,11 +2203,6 @@ int cmd_enable_consumer(int domain, struct ltt_session *session)
 			break;
 		}
 
-		/* Append default kernel trace dir to subdir */
-		strncat(ksess->consumer->subdir, DEFAULT_KERNEL_TRACE_DIR,
-				sizeof(ksess->consumer->subdir) -
-				strlen(ksess->consumer->subdir) - 1);
-
 		/*
 		 * @session-lock
 		 * This is race free for now since the session lock is acquired before
@@ -2226,6 +2211,7 @@ int cmd_enable_consumer(int domain, struct ltt_session *session)
 		 * is valid.
 		 */
 		rcu_read_lock();
+		/* Destroy current consumer. We are about to replace it */
 		consumer_destroy_output(ksess->consumer);
 		rcu_read_unlock();
 		ksess->consumer = consumer;
@@ -2299,11 +2285,6 @@ int cmd_enable_consumer(int domain, struct ltt_session *session)
 			break;
 		}
 
-		/* Append default kernel trace dir to subdir */
-		strncat(usess->consumer->subdir, DEFAULT_UST_TRACE_DIR,
-				sizeof(usess->consumer->subdir) -
-				strlen(usess->consumer->subdir) - 1);
-
 		/*
 		 * @session-lock
 		 * This is race free for now since the session lock is acquired before
@@ -2312,6 +2293,7 @@ int cmd_enable_consumer(int domain, struct ltt_session *session)
 		 * is valid.
 		 */
 		rcu_read_lock();
+		/* Destroy current consumer. We are about to replace it */
 		consumer_destroy_output(usess->consumer);
 		rcu_read_unlock();
 		usess->consumer = consumer;
@@ -2319,6 +2301,8 @@ int cmd_enable_consumer(int domain, struct ltt_session *session)
 
 		break;
 	}
+
+	session->start_consumer = 1;
 
 	/* Enable it */
 	if (consumer) {
@@ -2335,10 +2319,10 @@ error:
 }
 
 /*
- * Command LTTNG_DATA_AVAILABLE returning 0 if the data is NOT ready to be read
- * or else 1 if the data is available for trace analysis.
+ * Command LTTNG_DATA_PENDING returning 0 if the data is NOT pending meaning
+ * ready for trace analysis (or anykind of reader) or else 1 for pending data.
  */
-int cmd_data_available(struct ltt_session *session)
+int cmd_data_pending(struct ltt_session *session)
 {
 	int ret;
 	struct ltt_kernel_session *ksess = session->kernel_session;
@@ -2353,23 +2337,23 @@ int cmd_data_available(struct ltt_session *session)
 	}
 
 	if (ksess && ksess->consumer) {
-		ret = consumer_is_data_available(ksess->id, ksess->consumer);
-		if (ret == 0) {
+		ret = consumer_is_data_pending(ksess->id, ksess->consumer);
+		if (ret == 1) {
 			/* Data is still being extracted for the kernel. */
 			goto error;
 		}
 	}
 
 	if (usess && usess->consumer) {
-		ret = consumer_is_data_available(usess->id, usess->consumer);
-		if (ret == 0) {
+		ret = consumer_is_data_pending(usess->id, usess->consumer);
+		if (ret == 1) {
 			/* Data is still being extracted for the kernel. */
 			goto error;
 		}
 	}
 
 	/* Data is ready to be read by a viewer */
-	ret = 1;
+	ret = 0;
 
 error:
 	return ret;

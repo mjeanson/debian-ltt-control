@@ -976,9 +976,10 @@ static struct ust_app_session *create_ust_app_session(
 		ret = ustctl_create_session(app->sock);
 		if (ret < 0) {
 			ERR("Creating session for app pid %d", app->pid);
+			delete_ust_app_session(-1, ua_sess);
 			/* This means that the tracer is gone... */
 			ua_sess = (void*) -1UL;
-			goto error;
+			goto end;
 		}
 
 		ua_sess->handle = ret;
@@ -993,11 +994,6 @@ static struct ust_app_session *create_ust_app_session(
 end:
 	health_code_update(&health_thread_cmd);
 	return ua_sess;
-
-error:
-	delete_ust_app_session(-1, ua_sess);
-	health_code_update(&health_thread_cmd);
-	return NULL;
 }
 
 /*
@@ -1510,8 +1506,16 @@ void ust_app_unregister(int sock)
 	/* Assign second node for deletion */
 	iter.iter.node = &lta->pid_n.node;
 
+	/*
+	 * Ignore return value since the node might have been removed before by an
+	 * add replace during app registration because the PID can be reassigned by
+	 * the OS.
+	 */
 	ret = lttng_ht_del(ust_app_ht, &iter);
-	assert(!ret);
+	if (ret) {
+		DBG3("Unregister app by PID %d failed. This can happen on pid reuse",
+				lta->pid);
+	}
 
 	/* Free memory */
 	call_rcu(&lta->pid_n.head, delete_ust_app_rcu);
@@ -1579,12 +1583,15 @@ int ust_app_list_events(struct lttng_event **events)
 						&uiter)) != -ENOENT) {
 			health_code_update(&health_thread_cmd);
 			if (count >= nbmem) {
+				/* In case the realloc fails, we free the memory */
+				void *tmp_ptr = (void *) tmp;
 				DBG2("Reallocating event list from %zu to %zu entries", nbmem,
 						2 * nbmem);
 				nbmem *= 2;
 				tmp = realloc(tmp, nbmem * sizeof(struct lttng_event));
 				if (tmp == NULL) {
 					PERROR("realloc ust app events");
+					free(tmp_ptr);
 					ret = -ENOMEM;
 					goto rcu_error;
 				}
@@ -1654,12 +1661,15 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 						&uiter)) != -ENOENT) {
 			health_code_update(&health_thread_cmd);
 			if (count >= nbmem) {
+				/* In case the realloc fails, we free the memory */
+				void *tmp_ptr = (void *) tmp;
 				DBG2("Reallocating event field list from %zu to %zu entries", nbmem,
 						2 * nbmem);
 				nbmem *= 2;
 				tmp = realloc(tmp, nbmem * sizeof(struct lttng_event_field));
 				if (tmp == NULL) {
 					PERROR("realloc ust app event fields");
+					free(tmp_ptr);
 					ret = -ENOMEM;
 					goto rcu_error;
 				}
@@ -1696,21 +1706,22 @@ error:
 void ust_app_clean_list(void)
 {
 	int ret;
+	struct ust_app *app;
 	struct lttng_ht_iter iter;
-	struct lttng_ht_node_ulong *node;
 
 	DBG2("UST app cleaning registered apps hash table");
 
 	rcu_read_lock();
 
-	cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, node, node) {
+	cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, app, pid_n.node) {
 		ret = lttng_ht_del(ust_app_ht, &iter);
 		assert(!ret);
-		call_rcu(&node->head, delete_ust_app_rcu);
+		call_rcu(&app->pid_n.head, delete_ust_app_rcu);
 	}
 
 	/* Cleanup socket hash table */
-	cds_lfht_for_each_entry(ust_app_ht_by_sock->ht, &iter.iter, node, node) {
+	cds_lfht_for_each_entry(ust_app_ht_by_sock->ht, &iter.iter, app,
+			sock_n.node) {
 		ret = lttng_ht_del(ust_app_ht_by_sock, &iter);
 		assert(!ret);
 	}
@@ -2552,7 +2563,8 @@ void ust_app_global_update(struct ltt_ust_session *usess, int sock)
 	}
 
 	ua_sess = create_ust_app_session(usess, app);
-	if (ua_sess == NULL) {
+	if (ua_sess == NULL || ua_sess == (void *) -1UL) {
+		/* Tracer is gone for this session and has been freed */
 		goto error;
 	}
 
