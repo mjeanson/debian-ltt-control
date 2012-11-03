@@ -1,3 +1,9 @@
+ltt-control (2.1.0~rc6-1) unstable; urgency=low
+
+  * [4908348] New upstream version 2.1.0~rc6
+
+ -- Jon Bernard <jbernard@debian.org>  Sat, 03 Nov 2012 10:20:14 -0400
+
 ltt-control (2.1.0~rc5-1) unstable; urgency=low
 
   * [44313ad] New upstream version 2.1.0~rc5
