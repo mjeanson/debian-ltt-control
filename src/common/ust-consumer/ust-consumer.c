@@ -310,19 +310,19 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		rcu_read_unlock();
 		return -ENOSYS;
 	}
-	case LTTNG_CONSUMER_DATA_AVAILABLE:
+	case LTTNG_CONSUMER_DATA_PENDING:
 	{
 		int32_t ret;
-		uint64_t id = msg.u.data_available.session_id;
+		uint64_t id = msg.u.data_pending.session_id;
 
-		DBG("UST consumer data available command for id %" PRIu64, id);
+		DBG("UST consumer data pending command for id %" PRIu64, id);
 
-		ret = consumer_data_available(id);
+		ret = consumer_data_pending(id);
 
 		/* Send back returned value to session daemon */
 		ret = lttcomm_send_unix_sock(sock, &ret, sizeof(ret));
 		if (ret < 0) {
-			PERROR("send data available ret code");
+			PERROR("send data pending ret code");
 		}
 		break;
 	}
@@ -526,42 +526,32 @@ error:
 
 /*
  * Check if data is still being extracted from the buffers for a specific
- * stream. Consumer data lock MUST be acquired before calling this function.
+ * stream. Consumer data lock MUST be acquired before calling this function
+ * and the stream lock.
  *
- * Return 0 if the traced data are still getting read else 1 meaning that the
+ * Return 1 if the traced data are still getting read else 0 meaning that the
  * data is available for trace viewer reading.
  */
-int lttng_ustconsumer_data_available(struct lttng_consumer_stream *stream)
+int lttng_ustconsumer_data_pending(struct lttng_consumer_stream *stream)
 {
 	int ret;
 
 	assert(stream);
 
-	DBG("UST consumer checking data availability");
-
-	/*
-	 * Try to lock the stream mutex. On failure, we know that the stream is
-	 * being used else where hence there is data still being extracted.
-	 */
-	ret = pthread_mutex_trylock(&stream->lock);
-	if (ret == EBUSY) {
-		goto data_not_available;
-	}
-	/* The stream is now locked so we can do our ustctl calls */
+	DBG("UST consumer checking data pending");
 
 	ret = ustctl_get_next_subbuf(stream->chan->handle, stream->buf);
 	if (ret == 0) {
 		/* There is still data so let's put back this subbuffer. */
 		ret = ustctl_put_subbuf(stream->chan->handle, stream->buf);
 		assert(ret == 0);
-		pthread_mutex_unlock(&stream->lock);
-		goto data_not_available;
+		ret = 1;  /* Data is pending */
+		goto end;
 	}
 
-	/* Data is available to be read for this stream. */
-	pthread_mutex_unlock(&stream->lock);
-	return 1;
+	/* Data is NOT pending so ready to be read. */
+	ret = 0;
 
-data_not_available:
-	return 0;
+end:
+	return ret;
 }

@@ -57,7 +57,7 @@ enum lttng_consumer_command {
 	/* Inform the consumer to kill a specific relayd connection */
 	LTTNG_CONSUMER_DESTROY_RELAYD,
 	/* Return to the sessiond if there is data pending for a session */
-	LTTNG_CONSUMER_DATA_AVAILABLE,
+	LTTNG_CONSUMER_DATA_PENDING,
 };
 
 /* State of each fd in consumer */
@@ -72,6 +72,11 @@ enum lttng_consumer_type {
 	LTTNG_CONSUMER_KERNEL,
 	LTTNG_CONSUMER64_UST,
 	LTTNG_CONSUMER32_UST,
+};
+
+enum consumer_endpoint_status {
+	CONSUMER_ENDPOINT_ACTIVE,
+	CONSUMER_ENDPOINT_INACTIVE,
 };
 
 struct lttng_consumer_channel {
@@ -141,10 +146,22 @@ struct lttng_consumer_stream {
 	uint64_t relayd_stream_id;
 	/* Next sequence number to use for trace packet */
 	uint64_t next_net_seq_num;
-	/* Lock to use the stream FDs since they are used between threads. */
+	/*
+	 * Lock to use the stream FDs since they are used between threads. Using
+	 * this lock with network streaming, when using the control mutex of a
+	 * consumer_relayd_sock_pair, make sure to acquire this lock BEFORE locking
+	 * it and releasing it AFTER the control mutex unlock.
+	 */
 	pthread_mutex_t lock;
 	/* Tracing session id */
 	uint64_t session_id;
+	/*
+	 * Indicates if the stream end point is still active or not (network
+	 * streaming or local file system). The thread "owning" the stream is
+	 * handling this status and can be notified of a state change through the
+	 * consumer data appropriate pipe.
+	 */
+	enum consumer_endpoint_status endpoint_status;
 };
 
 /*
@@ -414,6 +431,6 @@ int consumer_add_relayd_socket(int net_seq_idx, int sock_type,
 		struct pollfd *consumer_sockpoll, struct lttcomm_sock *relayd_sock);
 void consumer_flag_relayd_for_destroy(
 		struct consumer_relayd_sock_pair *relayd);
-int consumer_data_available(uint64_t id);
+int consumer_data_pending(uint64_t id);
 
 #endif /* LIB_CONSUMER_H */

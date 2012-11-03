@@ -412,6 +412,7 @@ static void cleanup(void)
 		ERR("Unable to clean %s", rundir);
 	}
 	free(cmd);
+	free(rundir);
 
 	DBG("Cleaning up all sessions");
 
@@ -836,6 +837,25 @@ static void *thread_manage_consumer(void *data)
 	struct consumer_data *consumer_data = data;
 
 	DBG("[thread] Manage consumer started");
+
+	/*
+	 * Since the consumer thread can be spawned at any moment in time, we init
+	 * the health to a poll status (1, which is a valid health over time).
+	 * When the thread starts, we update here the health to a "code" path being
+	 * an even value so this thread, when reaching a poll wait, does not
+	 * trigger an error with an even value.
+	 *
+	 * Here is the use case we avoid.
+	 *
+	 * +1: the first poll update during initialization (main())
+	 * +2 * x: multiple code update once in this thread.
+	 * +1: poll wait in this thread (being a good health state).
+	 * == even number which after the wait period shows as a bad health.
+	 *
+	 * In a nutshell, the following poll update to the health state brings back
+	 * the state to an even value meaning a code path.
+	 */
+	health_poll_update(&consumer_data->health);
 
 	health_code_update(&consumer_data->health);
 
@@ -1926,6 +1946,15 @@ static int copy_session_consumer(int domain, struct ltt_session *session)
 	switch (domain) {
 	case LTTNG_DOMAIN_KERNEL:
 		DBG3("Copying tracing session consumer output in kernel session");
+		/*
+		 * XXX: We should audit the session creation and what this function
+		 * does "extra" in order to avoid a destroy since this function is used
+		 * in the domain session creation (kernel and ust) only. Same for UST
+		 * domain.
+		 */
+		if (session->kernel_session->consumer) {
+			consumer_destroy_output(session->kernel_session->consumer);
+		}
 		session->kernel_session->consumer =
 			consumer_copy_output(session->consumer);
 		/* Ease our life a bit for the next part */
@@ -1934,6 +1963,9 @@ static int copy_session_consumer(int domain, struct ltt_session *session)
 		break;
 	case LTTNG_DOMAIN_UST:
 		DBG3("Copying tracing session consumer output in UST session");
+		if (session->ust_session->consumer) {
+			consumer_destroy_output(session->ust_session->consumer);
+		}
 		session->ust_session->consumer =
 			consumer_copy_output(session->consumer);
 		/* Ease our life a bit for the next part */
@@ -2102,7 +2134,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 	case LTTNG_LIST_DOMAINS:
 	case LTTNG_START_TRACE:
 	case LTTNG_STOP_TRACE:
-	case LTTNG_DATA_AVAILABLE:
+	case LTTNG_DATA_PENDING:
 		need_domain = 0;
 		break;
 	default:
@@ -2541,12 +2573,14 @@ skip_domain:
 			DBG("No URIs received from client... continuing");
 			*sock_error = 1;
 			ret = LTTNG_ERR_SESSION_FAIL;
+			free(uris);
 			goto error;
 		}
 
 		ret = cmd_set_consumer_uri(cmd_ctx->lsm->domain.type, cmd_ctx->session,
 				nb_uri, uris);
 		if (ret != LTTNG_OK) {
+			free(uris);
 			goto error;
 		}
 
@@ -2566,6 +2600,8 @@ skip_domain:
 						cmd_ctx->session, nb_uri, uris);
 			}
 		}
+
+		free(uris);
 
 		break;
 	}
@@ -2601,18 +2637,22 @@ skip_domain:
 				DBG("No URIs received from client... continuing");
 				*sock_error = 1;
 				ret = LTTNG_ERR_SESSION_FAIL;
+				free(uris);
 				goto error;
 			}
 
 			if (nb_uri == 1 && uris[0].dtype != LTTNG_DST_PATH) {
 				DBG("Creating session with ONE network URI is a bad call");
 				ret = LTTNG_ERR_SESSION_FAIL;
+				free(uris);
 				goto error;
 			}
 		}
 
 		ret = cmd_create_session_uri(cmd_ctx->lsm->session.name, uris, nb_uri,
 			&cmd_ctx->creds);
+
+		free(uris);
 
 		break;
 	}
@@ -2789,9 +2829,9 @@ skip_domain:
 				bytecode);
 		break;
 	}
-	case LTTNG_DATA_AVAILABLE:
+	case LTTNG_DATA_PENDING:
 	{
-		ret = cmd_data_available(cmd_ctx->session);
+		ret = cmd_data_pending(cmd_ctx->session);
 		break;
 	}
 	default:
@@ -3956,7 +3996,9 @@ int main(int argc, char **argv)
 	/*
 	 * Init health counters of the consumer thread. We do a quick hack here to
 	 * the state of the consumer health is fine even if the thread is not
-	 * started.  This is simply to ease our life and has no cost what so ever.
+	 * started. Once the thread starts, the health state is updated with a poll
+	 * value to set a health code path. This is simply to ease our life and has
+	 * no cost what so ever.
 	 */
 	health_init(&kconsumer_data.health);
 	health_poll_update(&kconsumer_data.health);
@@ -4053,7 +4095,25 @@ exit_dispatch:
 		goto error;	/* join error, exit without cleanup */
 	}
 
+	ret = join_consumer_thread(&ustconsumer32_data);
+	if (ret != 0) {
+		PERROR("join_consumer ust32");
+		goto error;	/* join error, exit without cleanup */
+	}
+
+	ret = join_consumer_thread(&ustconsumer64_data);
+	if (ret != 0) {
+		PERROR("join_consumer ust64");
+		goto error;	/* join error, exit without cleanup */
+	}
+
 exit_client:
+	ret = pthread_join(health_thread, &status);
+	if (ret != 0) {
+		PERROR("pthread_join health thread");
+		goto error;	/* join error, exit without cleanup */
+	}
+
 exit_health:
 exit:
 	/*
