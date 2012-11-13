@@ -16,7 +16,6 @@
 @SET_MAKE@
 
 
-
 VPATH = @srcdir@
 am__make_dryrun = \
   { \
@@ -56,7 +55,7 @@ host_triplet = @host@
 target_triplet = @target@
 @LTTNG_TOOLS_BUILD_WITH_LIBDL_TRUE@am__append_1 = -ldl
 @LTTNG_TOOLS_BUILD_WITH_LIBC_DL_TRUE@am__append_2 = -lc
-noinst_PROGRAMS = health_check$(EXEEXT)
+@NO_SHARED_FALSE@noinst_PROGRAMS = health_check$(EXEEXT)
 subdir = tests/tools/health
 DIST_COMMON = $(srcdir)/Makefile.am $(srcdir)/Makefile.in
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
@@ -73,37 +72,10 @@ mkinstalldirs = $(install_sh) -d
 CONFIG_HEADER = $(top_builddir)/include/config.h
 CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
-am__vpath_adj_setup = srcdirstrip=`echo "$(srcdir)" | sed 's|.|.|g'`;
-am__vpath_adj = case $$p in \
-    $(srcdir)/*) f=`echo "$$p" | sed "s|^$$srcdirstrip/||"`;; \
-    *) f=$$p;; \
-  esac;
-am__strip_dir = f=`echo $$p | sed -e 's|^.*/||'`;
-am__install_max = 40
-am__nobase_strip_setup = \
-  srcdirstrip=`echo "$(srcdir)" | sed 's/[].[^$$\\*|]/\\\\&/g'`
-am__nobase_strip = \
-  for p in $$list; do echo "$$p"; done | sed -e "s|$$srcdirstrip/||"
-am__nobase_list = $(am__nobase_strip_setup); \
-  for p in $$list; do echo "$$p $$p"; done | \
-  sed "s| $$srcdirstrip/| |;"' / .*\//!s/ .*/ ./; s,\( .*\)/[^/]*$$,\1,' | \
-  $(AWK) 'BEGIN { files["."] = "" } { files[$$2] = files[$$2] " " $$1; \
-    if (++n[$$2] == $(am__install_max)) \
-      { print $$2, files[$$2]; n[$$2] = 0; files[$$2] = "" } } \
-    END { for (dir in files) print dir, files[dir] }'
-am__base_list = \
-  sed '$$!N;$$!N;$$!N;$$!N;$$!N;$$!N;$$!N;s/\n/ /g' | \
-  sed '$$!N;$$!N;$$!N;$$!N;s/\n/ /g'
-am__uninstall_files_from_dir = { \
-  test -z "$$files" \
-    || { test ! -d "$$dir" && test ! -f "$$dir" && test ! -r "$$dir"; } \
-    || { echo " ( cd '$$dir' && rm -f" $$files ")"; \
-         $(am__cd) "$$dir" && rm -f $$files; }; \
-  }
-am__installdirs = "$(DESTDIR)$(libdir)"
-LTLIBRARIES = $(lib_LTLIBRARIES)
+LTLIBRARIES = $(noinst_LTLIBRARIES)
 libhealthexit_la_LIBADD =
-am_libhealthexit_la_OBJECTS = health_exit.lo
+am__libhealthexit_la_SOURCES_DIST = health_exit.c
+@NO_SHARED_FALSE@am_libhealthexit_la_OBJECTS = health_exit.lo
 libhealthexit_la_OBJECTS = $(am_libhealthexit_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
@@ -112,21 +84,22 @@ libhealthexit_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
 	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(CCLD) \
 	$(AM_CFLAGS) $(CFLAGS) $(libhealthexit_la_LDFLAGS) $(LDFLAGS) \
 	-o $@
+@NO_SHARED_FALSE@am_libhealthexit_la_rpath =
 libhealthstall_la_LIBADD =
-am_libhealthstall_la_OBJECTS = health_stall.lo
+am__libhealthstall_la_SOURCES_DIST = health_stall.c
+@NO_SHARED_FALSE@am_libhealthstall_la_OBJECTS = health_stall.lo
 libhealthstall_la_OBJECTS = $(am_libhealthstall_la_OBJECTS)
 libhealthstall_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
 	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(CCLD) \
 	$(AM_CFLAGS) $(CFLAGS) $(libhealthstall_la_LDFLAGS) $(LDFLAGS) \
 	-o $@
+@NO_SHARED_FALSE@am_libhealthstall_la_rpath =
 PROGRAMS = $(noinst_PROGRAMS)
-am__objects_1 =
-am_health_check_OBJECTS = health_check.$(OBJEXT) $(am__objects_1)
+am__health_check_SOURCES_DIST = health_check.c
+@NO_SHARED_FALSE@am_health_check_OBJECTS = health_check.$(OBJEXT)
 health_check_OBJECTS = $(am_health_check_OBJECTS)
-health_check_DEPENDENCIES =  \
-	$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
-	$(top_builddir)/src/common/libcommon.la
-SCRIPTS = $(noinst_SCRIPTS)
+@NO_SHARED_FALSE@health_check_DEPENDENCIES = $(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
+@NO_SHARED_FALSE@	$(top_builddir)/src/common/libcommon.la
 depcomp = $(SHELL) $(top_srcdir)/config/depcomp
 am__depfiles_maybe = depfiles
 am__mv = mv -f
@@ -154,8 +127,9 @@ am__v_GEN_ = $(am__v_GEN_@AM_DEFAULT_V@)
 am__v_GEN_0 = @echo "  GEN   " $@;
 SOURCES = $(libhealthexit_la_SOURCES) $(libhealthstall_la_SOURCES) \
 	$(health_check_SOURCES)
-DIST_SOURCES = $(libhealthexit_la_SOURCES) \
-	$(libhealthstall_la_SOURCES) $(health_check_SOURCES)
+DIST_SOURCES = $(am__libhealthexit_la_SOURCES_DIST) \
+	$(am__libhealthstall_la_SOURCES_DIST) \
+	$(am__health_check_SOURCES_DIST)
 am__can_run_installinfo = \
   case $$AM_UPDATE_INFO_DIR in \
     n|no|NO) false;; \
@@ -311,22 +285,27 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AM_CFLAGS = -I. -O2 -g -I../../../include
 AM_LDFLAGS = $(am__append_1) $(am__append_2)
-UTILS = 
-lib_LTLIBRARIES = libhealthexit.la libhealthstall.la
+
+# Do not build this test if shared libraries support was
+# explicitly disabled.
+# In order to test the health check feature, the libhealth* libs
+# must be built as .so to be able to LD_PRELOAD them.
+@NO_SHARED_FALSE@FORCE_SHARED_LIB_OPTIONS = -module -shared -avoid-version \
+@NO_SHARED_FALSE@			   -rpath $(abs_builddir)
+
 
 # Health thread exit ld_preloaded test lib
-libhealthexit_la_SOURCES = health_exit.c
-libhealthexit_la_LDFLAGS = -module
+@NO_SHARED_FALSE@libhealthexit_la_SOURCES = health_exit.c
+@NO_SHARED_FALSE@libhealthexit_la_LDFLAGS = $(FORCE_SHARED_LIB_OPTIONS)
 
 # Health thread stall ld_preloaded test lib
-libhealthstall_la_SOURCES = health_stall.c
-libhealthstall_la_LDFLAGS = -module
-health_check_SOURCES = health_check.c $(UTILS)
-health_check_LDADD = $(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
-		     $(top_builddir)/src/common/libcommon.la
+@NO_SHARED_FALSE@libhealthstall_la_SOURCES = health_stall.c
+@NO_SHARED_FALSE@libhealthstall_la_LDFLAGS = $(FORCE_SHARED_LIB_OPTIONS)
+@NO_SHARED_FALSE@noinst_LTLIBRARIES = libhealthexit.la libhealthstall.la
+@NO_SHARED_FALSE@health_check_SOURCES = health_check.c $(UTILS)
+@NO_SHARED_FALSE@health_check_LDADD = $(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
+@NO_SHARED_FALSE@		     $(top_builddir)/src/common/libcommon.la
 
-noinst_SCRIPTS = 
-EXTRA_DIST = 
 all: all-am
 
 .SUFFIXES:
@@ -361,42 +340,19 @@ $(top_srcdir)/configure:  $(am__configure_deps)
 $(ACLOCAL_M4):  $(am__aclocal_m4_deps)
 	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
 $(am__aclocal_m4_deps):
-install-libLTLIBRARIES: $(lib_LTLIBRARIES)
-	@$(NORMAL_INSTALL)
-	@list='$(lib_LTLIBRARIES)'; test -n "$(libdir)" || list=; \
-	list2=; for p in $$list; do \
-	  if test -f $$p; then \
-	    list2="$$list2 $$p"; \
-	  else :; fi; \
-	done; \
-	test -z "$$list2" || { \
-	  echo " $(MKDIR_P) '$(DESTDIR)$(libdir)'"; \
-	  $(MKDIR_P) "$(DESTDIR)$(libdir)" || exit 1; \
-	  echo " $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=install $(INSTALL) $(INSTALL_STRIP_FLAG) $$list2 '$(DESTDIR)$(libdir)'"; \
-	  $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=install $(INSTALL) $(INSTALL_STRIP_FLAG) $$list2 "$(DESTDIR)$(libdir)"; \
-	}
 
-uninstall-libLTLIBRARIES:
-	@$(NORMAL_UNINSTALL)
-	@list='$(lib_LTLIBRARIES)'; test -n "$(libdir)" || list=; \
-	for p in $$list; do \
-	  $(am__strip_dir) \
-	  echo " $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=uninstall rm -f '$(DESTDIR)$(libdir)/$$f'"; \
-	  $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=uninstall rm -f "$(DESTDIR)$(libdir)/$$f"; \
-	done
-
-clean-libLTLIBRARIES:
-	-test -z "$(lib_LTLIBRARIES)" || rm -f $(lib_LTLIBRARIES)
-	@list='$(lib_LTLIBRARIES)'; for p in $$list; do \
+clean-noinstLTLIBRARIES:
+	-test -z "$(noinst_LTLIBRARIES)" || rm -f $(noinst_LTLIBRARIES)
+	@list='$(noinst_LTLIBRARIES)'; for p in $$list; do \
 	  dir="`echo $$p | sed -e 's|/[^/]*$$||'`"; \
 	  test "$$dir" != "$$p" || dir=.; \
 	  echo "rm -f \"$${dir}/so_locations\""; \
 	  rm -f "$${dir}/so_locations"; \
 	done
 libhealthexit.la: $(libhealthexit_la_OBJECTS) $(libhealthexit_la_DEPENDENCIES) $(EXTRA_libhealthexit_la_DEPENDENCIES) 
-	$(AM_V_CCLD)$(libhealthexit_la_LINK) -rpath $(libdir) $(libhealthexit_la_OBJECTS) $(libhealthexit_la_LIBADD) $(LIBS)
+	$(AM_V_CCLD)$(libhealthexit_la_LINK) $(am_libhealthexit_la_rpath) $(libhealthexit_la_OBJECTS) $(libhealthexit_la_LIBADD) $(LIBS)
 libhealthstall.la: $(libhealthstall_la_OBJECTS) $(libhealthstall_la_DEPENDENCIES) $(EXTRA_libhealthstall_la_DEPENDENCIES) 
-	$(AM_V_CCLD)$(libhealthstall_la_LINK) -rpath $(libdir) $(libhealthstall_la_OBJECTS) $(libhealthstall_la_LIBADD) $(LIBS)
+	$(AM_V_CCLD)$(libhealthstall_la_LINK) $(am_libhealthstall_la_rpath) $(libhealthstall_la_OBJECTS) $(libhealthstall_la_LIBADD) $(LIBS)
 
 clean-noinstPROGRAMS:
 	@list='$(noinst_PROGRAMS)'; test -n "$$list" || exit 0; \
@@ -531,11 +487,8 @@ distdir: $(DISTFILES)
 	done
 check-am: all-am
 check: check-am
-all-am: Makefile $(LTLIBRARIES) $(PROGRAMS) $(SCRIPTS)
+all-am: Makefile $(LTLIBRARIES) $(PROGRAMS)
 installdirs:
-	for dir in "$(DESTDIR)$(libdir)"; do \
-	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
-	done
 install: install-am
 install-exec: install-exec-am
 install-data: install-data-am
@@ -568,7 +521,7 @@ maintainer-clean-generic:
 	@echo "it deletes files that may require special tools to rebuild."
 clean: clean-am
 
-clean-am: clean-generic clean-libLTLIBRARIES clean-libtool \
+clean-am: clean-generic clean-libtool clean-noinstLTLIBRARIES \
 	clean-noinstPROGRAMS mostlyclean-am
 
 distclean: distclean-am
@@ -595,7 +548,7 @@ install-dvi: install-dvi-am
 
 install-dvi-am:
 
-install-exec-am: install-libLTLIBRARIES
+install-exec-am:
 
 install-html: install-html-am
 
@@ -635,23 +588,23 @@ ps: ps-am
 
 ps-am:
 
-uninstall-am: uninstall-libLTLIBRARIES
+uninstall-am:
 
 .MAKE: install-am install-strip
 
 .PHONY: CTAGS GTAGS all all-am check check-am clean clean-generic \
-	clean-libLTLIBRARIES clean-libtool clean-noinstPROGRAMS ctags \
-	distclean distclean-compile distclean-generic \
+	clean-libtool clean-noinstLTLIBRARIES clean-noinstPROGRAMS \
+	ctags distclean distclean-compile distclean-generic \
 	distclean-libtool distclean-tags distdir dvi dvi-am html \
 	html-am info info-am install install-am install-data \
 	install-data-am install-dvi install-dvi-am install-exec \
 	install-exec-am install-html install-html-am install-info \
-	install-info-am install-libLTLIBRARIES install-man install-pdf \
-	install-pdf-am install-ps install-ps-am install-strip \
-	installcheck installcheck-am installdirs maintainer-clean \
+	install-info-am install-man install-pdf install-pdf-am \
+	install-ps install-ps-am install-strip installcheck \
+	installcheck-am installdirs maintainer-clean \
 	maintainer-clean-generic mostlyclean mostlyclean-compile \
 	mostlyclean-generic mostlyclean-libtool pdf pdf-am ps ps-am \
-	tags uninstall uninstall-am uninstall-libLTLIBRARIES
+	tags uninstall uninstall-am
 
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.

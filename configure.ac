@@ -1,4 +1,4 @@
-AC_INIT([lttng-tools],[2.1.0-rc6],[dgoulet@efficios.com],[],[http://lttng.org])
+AC_INIT([lttng-tools],[2.1.0-rc7],[dgoulet@efficios.com],[],[http://lttng.org])
 AC_CONFIG_AUX_DIR([config])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
@@ -38,6 +38,8 @@ AS_IF([test "x$libtool_fixup" = "xyes"],
 		  AC_MSG_RESULT([none])
 		  ])
 	    ])
+
+AM_CONDITIONAL([NO_SHARED], [test x$enable_shared = xno])
 
 AC_CHECK_HEADERS([ \
 	sys/types.h unistd.h fcntl.h string.h pthread.h limits.h \
@@ -144,7 +146,7 @@ AS_IF([test "x$lttng_ust_support" = "xyes"], [
 			lttng_ust_ctl_found=yes
 		],
 		[AC_MSG_ERROR([Cannot find LTTng-UST. Use [LDFLAGS]=-Ldir to specify its location, or specify --disable-lttng-ust to build lttng-tools without LTTng-UST support.])],
-		[-lurcu-common -lurcu-bp -lurcu-cds]
+		[-lurcu-common -lurcu-bp -lurcu-cds -lrt]
 	)
 ])
 AM_CONDITIONAL([HAVE_LIBLTTNG_UST_CTL], [test "x$lttng_ust_ctl_found" = xyes])

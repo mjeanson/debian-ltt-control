@@ -101,11 +101,22 @@ static int build_network_session_path(char *dst, size_t size,
 		goto error;
 	}
 
+	/*
+	 * Do we have a UST url set. If yes, this means we have both kernel and UST
+	 * to print.
+	 */
 	if (strlen(tmp_uurl) > 0) {
 		ret = snprintf(dst, size, "[K]: %s [data: %d] -- [U]: %s [data: %d]",
 				tmp_urls, kdata_port, tmp_uurl, udata_port);
 	} else {
-		ret = snprintf(dst, size, "%s [data: %d]", tmp_urls, kdata_port);
+		int dport;
+		if (kuri) {
+			dport = kdata_port;
+		} else {
+			/* No kernel URI, use the UST port. */
+			dport = udata_port;
+		}
+		ret = snprintf(dst, size, "%s [data: %d]", tmp_urls, dport);
 	}
 
 error:
@@ -671,6 +682,71 @@ error:
 }
 
 /*
+ * Start a kernel session by opening all necessary streams.
+ */
+static int start_kernel_session(struct ltt_kernel_session *ksess, int wpipe)
+{
+	int ret;
+	struct ltt_kernel_channel *kchan;
+
+	/* Open kernel metadata */
+	if (ksess->metadata == NULL) {
+		ret = kernel_open_metadata(ksess);
+		if (ret < 0) {
+			ret = LTTNG_ERR_KERN_META_FAIL;
+			goto error;
+		}
+	}
+
+	/* Open kernel metadata stream */
+	if (ksess->metadata_stream_fd < 0) {
+		ret = kernel_open_metadata_stream(ksess);
+		if (ret < 0) {
+			ERR("Kernel create metadata stream failed");
+			ret = LTTNG_ERR_KERN_STREAM_FAIL;
+			goto error;
+		}
+	}
+
+	/* For each channel */
+	cds_list_for_each_entry(kchan, &ksess->channel_list.head, list) {
+		if (kchan->stream_count == 0) {
+			ret = kernel_open_channel_stream(kchan);
+			if (ret < 0) {
+				ret = LTTNG_ERR_KERN_STREAM_FAIL;
+				goto error;
+			}
+			/* Update the stream global counter */
+			ksess->stream_count_global += ret;
+		}
+	}
+
+	/* Setup kernel consumer socket and send fds to it */
+	ret = init_kernel_tracing(ksess);
+	if (ret < 0) {
+		ret = LTTNG_ERR_KERN_START_FAIL;
+		goto error;
+	}
+
+	/* This start the kernel tracing */
+	ret = kernel_start_session(ksess);
+	if (ret < 0) {
+		ret = LTTNG_ERR_KERN_START_FAIL;
+		goto error;
+	}
+
+	/* Quiescent wait after starting trace */
+	kernel_wait_quiescent(kernel_tracer_fd);
+
+	ksess->started = 1;
+
+	ret = LTTNG_OK;
+
+error:
+	return ret;
+}
+
+/*
  * Command LTTNG_DISABLE_CHANNEL processed by the client thread.
  */
 int cmd_disable_channel(struct ltt_session *session, int domain,
@@ -750,9 +826,6 @@ int cmd_enable_channel(struct ltt_session *session,
 	{
 		struct ltt_kernel_channel *kchan;
 
-		/* Mandatory for a kernel channel. */
-		assert(wpipe > 0);
-
 		kchan = trace_kernel_get_channel_by_name(attr->name,
 				session->kernel_session);
 		if (kchan == NULL) {
@@ -766,6 +839,18 @@ int cmd_enable_channel(struct ltt_session *session,
 		}
 
 		kernel_wait_quiescent(kernel_tracer_fd);
+
+		/*
+		 * If the session was previously started, start as well this newly
+		 * created kernel session so the events/channels enabled *after* the
+		 * start actually work.
+		 */
+		if (session->started && !session->kernel_session->started) {
+			ret = start_kernel_session(session->kernel_session, wpipe);
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
+		}
 		break;
 	}
 	case LTTNG_DOMAIN_UST:
@@ -779,6 +864,17 @@ int cmd_enable_channel(struct ltt_session *session,
 			ret = channel_ust_create(usess, domain, attr);
 		} else {
 			ret = channel_ust_enable(usess, domain, uchan);
+		}
+
+		/* Start the UST session if the session was already started. */
+		if (session->started && !usess->start_trace) {
+			ret = ust_app_start_trace_all(usess);
+			if (ret < 0) {
+				ret = LTTNG_ERR_UST_START_FAIL;
+				goto error;
+			}
+			ret = LTTNG_OK;
+			usess->start_trace = 1;
 		}
 		break;
 	}
@@ -939,12 +1035,23 @@ error:
  * Command LTTNG_ADD_CONTEXT processed by the client thread.
  */
 int cmd_add_context(struct ltt_session *session, int domain,
-		char *channel_name, char *event_name, struct lttng_event_context *ctx)
+		char *channel_name, char *event_name, struct lttng_event_context *ctx,
+		int kwpipe)
 {
 	int ret;
 
 	switch (domain) {
 	case LTTNG_DOMAIN_KERNEL:
+		assert(session->kernel_session);
+
+		if (session->kernel_session->channel_count == 0) {
+			/* Create default channel */
+			ret = channel_kernel_create(session->kernel_session, NULL, kwpipe);
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
+		}
+
 		/* Add kernel context to kernel tracer */
 		ret = context_kernel_add(session->kernel_session, ctx,
 				event_name, channel_name);
@@ -955,8 +1062,27 @@ int cmd_add_context(struct ltt_session *session, int domain,
 	case LTTNG_DOMAIN_UST:
 	{
 		struct ltt_ust_session *usess = session->ust_session;
-
 		assert(usess);
+
+		unsigned int chan_count =
+			lttng_ht_get_count(usess->domain_global.channels);
+		if (chan_count == 0) {
+			struct lttng_channel *attr;
+			/* Create default channel */
+			attr = channel_new_default_attr(domain);
+			if (attr == NULL) {
+				ret = LTTNG_ERR_FATAL;
+				goto error;
+			}
+
+			ret = channel_ust_create(usess, domain, attr);
+			if (ret != LTTNG_OK) {
+				free(attr);
+				goto error;
+			}
+			free(attr);
+		}
+
 
 		ret = context_ust_add(usess, domain, ctx, event_name, channel_name);
 		if (ret != LTTNG_OK) {
@@ -1348,7 +1474,6 @@ int cmd_start_trace(struct ltt_session *session)
 	int ret;
 	struct ltt_kernel_session *ksession;
 	struct ltt_ust_session *usess;
-	struct ltt_kernel_channel *kchan;
 
 	assert(session);
 
@@ -1372,54 +1497,10 @@ int cmd_start_trace(struct ltt_session *session)
 
 	/* Kernel tracing */
 	if (ksession != NULL) {
-		/* Open kernel metadata */
-		if (ksession->metadata == NULL) {
-			ret = kernel_open_metadata(ksession);
-			if (ret < 0) {
-				ret = LTTNG_ERR_KERN_META_FAIL;
-				goto error;
-			}
-		}
-
-		/* Open kernel metadata stream */
-		if (ksession->metadata_stream_fd < 0) {
-			ret = kernel_open_metadata_stream(ksession);
-			if (ret < 0) {
-				ERR("Kernel create metadata stream failed");
-				ret = LTTNG_ERR_KERN_STREAM_FAIL;
-				goto error;
-			}
-		}
-
-		/* For each channel */
-		cds_list_for_each_entry(kchan, &ksession->channel_list.head, list) {
-			if (kchan->stream_count == 0) {
-				ret = kernel_open_channel_stream(kchan);
-				if (ret < 0) {
-					ret = LTTNG_ERR_KERN_STREAM_FAIL;
-					goto error;
-				}
-				/* Update the stream global counter */
-				ksession->stream_count_global += ret;
-			}
-		}
-
-		/* Setup kernel consumer socket and send fds to it */
-		ret = init_kernel_tracing(ksession);
-		if (ret < 0) {
-			ret = LTTNG_ERR_KERN_START_FAIL;
+		ret = start_kernel_session(ksession, kernel_tracer_fd);
+		if (ret != LTTNG_OK) {
 			goto error;
 		}
-
-		/* This start the kernel tracing */
-		ret = kernel_start_session(ksession);
-		if (ret < 0) {
-			ret = LTTNG_ERR_KERN_START_FAIL;
-			goto error;
-		}
-
-		/* Quiescent wait after starting trace */
-		kernel_wait_quiescent(kernel_tracer_fd);
 	}
 
 	/* Flag session that trace should start automatically */
@@ -1432,6 +1513,8 @@ int cmd_start_trace(struct ltt_session *session)
 			goto error;
 		}
 	}
+
+	session->started = 1;
 
 	ret = LTTNG_OK;
 
@@ -1489,6 +1572,8 @@ int cmd_stop_trace(struct ltt_session *session)
 		}
 
 		kernel_wait_quiescent(kernel_tracer_fd);
+
+		ksession->started = 0;
 	}
 
 	if (usess) {
@@ -1500,6 +1585,8 @@ int cmd_stop_trace(struct ltt_session *session)
 			goto error;
 		}
 	}
+
+	session->started = 0;
 
 	ret = LTTNG_OK;
 

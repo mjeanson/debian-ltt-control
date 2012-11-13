@@ -25,6 +25,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <urcu/compiler.h>
+#include <lttng/ust-error.h>
 
 #include <common/common.h>
 #include <common/sessiond-comm/sessiond-comm.h>
@@ -711,10 +712,6 @@ int create_ust_event(struct ust_app *app, struct ust_app_session *ua_sess,
 	ret = ustctl_create_event(app->sock, &ua_event->attr, ua_chan->obj,
 			&ua_event->obj);
 	if (ret < 0) {
-		if (ret == -EEXIST || ret == -EPERM) {
-			ret = 0;
-			goto error;
-		}
 		ERR("Error ustctl create event %s for app pid: %d with ret %d",
 				ua_event->attr.name, app->pid, ret);
 		goto error;
@@ -737,10 +734,10 @@ int create_ust_event(struct ust_app *app, struct ust_app_session *ua_sess,
 			 * just created it.
 			 */
 			switch (ret) {
-			case -EPERM:
+			case -LTTNG_UST_ERR_PERM:
 				/* Code flow problem */
 				assert(0);
-			case -EEXIST:
+			case -LTTNG_UST_ERR_EXIST:
 				/* It's OK for our use case. */
 				ret = 0;
 				break;
@@ -1226,7 +1223,7 @@ static struct ust_app_channel *create_ust_app_channel(
 	ret = create_ust_channel(app, ua_sess, ua_chan);
 	if (ret < 0) {
 		/* Not found previously means that it does not exist on the tracer */
-		assert(ret != -EEXIST);
+		assert(ret != -LTTNG_UST_ERR_EXIST);
 		goto error;
 	}
 
@@ -1277,7 +1274,7 @@ int create_ust_app_event(struct ust_app_session *ua_sess,
 	ret = create_ust_event(app, ua_sess, ua_chan, ua_event);
 	if (ret < 0) {
 		/* Not found previously means that it does not exist on the tracer */
-		assert(ret != -EEXIST);
+		assert(ret == -LTTNG_UST_ERR_EXIST);
 		goto error;
 	}
 
@@ -1580,7 +1577,7 @@ int ust_app_list_events(struct lttng_event **events)
 		}
 
 		while ((ret = ustctl_tracepoint_list_get(app->sock, handle,
-						&uiter)) != -ENOENT) {
+					&uiter)) != -LTTNG_UST_ERR_NOENT) {
 			health_code_update(&health_thread_cmd);
 			if (count >= nbmem) {
 				/* In case the realloc fails, we free the memory */
@@ -1658,7 +1655,7 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 		}
 
 		while ((ret = ustctl_tracepoint_field_list_get(app->sock, handle,
-						&uiter)) != -ENOENT) {
+					&uiter)) != -LTTNG_UST_ERR_NOENT) {
 			health_code_update(&health_thread_cmd);
 			if (count >= nbmem) {
 				/* In case the realloc fails, we free the memory */
@@ -1983,6 +1980,7 @@ int ust_app_disable_all_event_glb(struct ltt_ust_session *usess,
 int ust_app_create_channel_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan)
 {
+	int ret = 0;
 	struct lttng_ht_iter iter;
 	struct ust_app *app;
 	struct ust_app_session *ua_sess;
@@ -2014,9 +2012,11 @@ int ust_app_create_channel_glb(struct ltt_ust_session *usess,
 		ua_sess = create_ust_app_session(usess, app);
 		if (ua_sess == NULL) {
 			/* The malloc() failed. */
+			ret = -1;
 			goto error;
 		} else if (ua_sess == (void *) -1UL) {
 			/* The application's socket is not valid. Contiuing */
+			ret = -1;
 			continue;
 		}
 
@@ -2024,16 +2024,15 @@ int ust_app_create_channel_glb(struct ltt_ust_session *usess,
 		ua_chan = create_ust_app_channel(ua_sess, uchan, app);
 		if (ua_chan == NULL) {
 			/* Major problem here and it's maybe the tracer or malloc() */
+			ret = -1;
 			goto error;
 		}
 	}
 
 	rcu_read_unlock();
 
-	return 0;
-
 error:
-	return -1;
+	return ret;
 }
 
 /*
@@ -2144,7 +2143,7 @@ int ust_app_create_event_glb(struct ltt_ust_session *usess,
 
 		ret = create_ust_app_event(ua_sess, ua_chan, uevent, app);
 		if (ret < 0) {
-			if (ret != -EEXIST) {
+			if (ret != -LTTNG_UST_ERR_EXIST) {
 				/* Possible value at this point: -ENOMEM. If so, we stop! */
 				break;
 			}
