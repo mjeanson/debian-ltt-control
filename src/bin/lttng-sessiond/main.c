@@ -228,6 +228,11 @@ struct health_state health_thread_app_manage;
 struct health_state health_thread_app_reg;
 struct health_state health_thread_kernel;
 
+/*
+ * Socket timeout for receiving and sending in seconds.
+ */
+static int app_socket_timeout;
+
 static
 void setup_consumerd_path(void)
 {
@@ -392,7 +397,7 @@ static void stop_threads(void)
 static void cleanup(void)
 {
 	int ret;
-	char *cmd;
+	char *cmd = NULL;
 	struct ltt_session *sess, *stmp;
 
 	DBG("Cleaning up");
@@ -441,9 +446,6 @@ static void cleanup(void)
 		DBG("Unloading kernel modules");
 		modprobe_remove_lttng_all();
 	}
-
-	utils_close_pipe(kernel_poll_pipe);
-	utils_close_pipe(apps_cmd_pipe);
 
 	/* <fun> */
 	DBG("%c[%d;%dm*** assert failed :-) *** ==> %c[%dm%c[%d;%dm"
@@ -793,9 +795,13 @@ exit:
 error:
 	lttng_poll_clean(&events);
 error_poll_create:
+	utils_close_pipe(kernel_poll_pipe);
+	kernel_poll_pipe[0] = kernel_poll_pipe[1] = -1;
 	if (err) {
 		health_error(&health_thread_kernel);
 		ERR("Health error occurred in %s", __func__);
+		WARN("Kernel thread died unexpectedly. "
+				"Kernel tracing can continue but CPU hotplug is disabled.");
 	}
 	health_exit(&health_thread_kernel);
 	DBG("Kernel thread dying");
@@ -857,13 +863,6 @@ static void *thread_manage_consumer(void *data)
 	 */
 	health_poll_update(&consumer_data->health);
 
-	health_code_update(&consumer_data->health);
-
-	ret = lttcomm_listen_unix_sock(consumer_data->err_sock);
-	if (ret < 0) {
-		goto error_listen;
-	}
-
 	/*
 	 * Pass 2 as size here for the thread quit pipe and kconsumerd_err_sock.
 	 * Nothing more will be added to this poll set.
@@ -873,6 +872,11 @@ static void *thread_manage_consumer(void *data)
 		goto error_poll;
 	}
 
+	/*
+	 * The error socket here is already in a listening state which was done
+	 * just before spawning this thread to avoid a race between the consumer
+	 * daemon exec trying to connect and the listen() call.
+	 */
 	ret = lttng_poll_add(&events, consumer_data->err_sock, LPOLLIN | LPOLLRDHUP);
 	if (ret < 0) {
 		goto error;
@@ -927,6 +931,12 @@ restart:
 	if (sock < 0) {
 		goto error;
 	}
+
+	/*
+	 * Set the CLOEXEC flag. Return code is useless because either way, the
+	 * show must go on.
+	 */
+	(void) utils_set_fd_cloexec(sock);
 
 	health_code_update(&consumer_data->health);
 
@@ -1062,7 +1072,6 @@ error:
 
 	lttng_poll_clean(&events);
 error_poll:
-error_listen:
 	if (err) {
 		health_error(&consumer_data->health);
 		ERR("Health error occurred in %s", __func__);
@@ -1192,15 +1201,21 @@ static void *thread_manage_apps(void *data)
 						ust_app_unregister(ust_cmd.sock);
 					} else {
 						/*
-						 * We just need here to monitor the close of the UST
-						 * socket and poll set monitor those by default.
-						 * Listen on POLLIN (even if we never expect any
-						 * data) to ensure that hangup wakes us.
+						 * We only monitor the error events of the socket. This
+						 * thread does not handle any incoming data from UST
+						 * (POLLIN).
 						 */
-						ret = lttng_poll_add(&events, ust_cmd.sock, LPOLLIN);
+						ret = lttng_poll_add(&events, ust_cmd.sock,
+								LPOLLERR & LPOLLHUP & LPOLLRDHUP);
 						if (ret < 0) {
 							goto error;
 						}
+
+						/* Set socket timeout for both receiving and ending */
+						(void) lttcomm_setsockopt_rcv_timeout(ust_cmd.sock,
+								app_socket_timeout);
+						(void) lttcomm_setsockopt_snd_timeout(ust_cmd.sock,
+								app_socket_timeout);
 
 						DBG("Apps with sock %d added to poll set",
 								ust_cmd.sock);
@@ -1236,6 +1251,15 @@ exit:
 error:
 	lttng_poll_clean(&events);
 error_poll_create:
+	utils_close_pipe(apps_cmd_pipe);
+	apps_cmd_pipe[0] = apps_cmd_pipe[1] = -1;
+
+	/*
+	 * We don't clean the UST app hash table here since already registered
+	 * applications can still be controlled so let them be until the session
+	 * daemon dies or the applications stop.
+	 */
+
 	if (err) {
 		health_error(&health_thread_app_manage);
 		ERR("Health error occurred in %s", __func__);
@@ -1285,18 +1309,26 @@ static void *thread_dispatch_ust_registration(void *data)
 			 * call is blocking so we can be assured that the data will be read
 			 * at some point in time or wait to the end of the world :)
 			 */
-			ret = write(apps_cmd_pipe[1], ust_cmd,
-					sizeof(struct ust_command));
-			if (ret < 0) {
-				PERROR("write apps cmd pipe");
-				if (errno == EBADF) {
-					/*
-					 * We can't inform the application thread to process
-					 * registration. We will exit or else application
-					 * registration will not occur and tracing will never
-					 * start.
-					 */
-					goto error;
+			if (apps_cmd_pipe[1] >= 0) {
+				ret = write(apps_cmd_pipe[1], ust_cmd,
+						sizeof(struct ust_command));
+				if (ret < 0) {
+					PERROR("write apps cmd pipe");
+					if (errno == EBADF) {
+						/*
+						 * We can't inform the application thread to process
+						 * registration. We will exit or else application
+						 * registration will not occur and tracing will never
+						 * start.
+						 */
+						goto error;
+					}
+				}
+			} else {
+				/* Application manager thread is not available. */
+				ret = close(ust_cmd->sock);
+				if (ret < 0) {
+					PERROR("close ust_cmd sock");
 				}
 			}
 			free(ust_cmd);
@@ -1401,6 +1433,12 @@ static void *thread_registration_apps(void *data)
 					if (sock < 0) {
 						goto error;
 					}
+
+					/*
+					 * Set the CLOEXEC flag. Return code is useless because
+					 * either way, the show must go on.
+					 */
+					(void) utils_set_fd_cloexec(sock);
 
 					/* Create UST registration command for enqueuing */
 					ust_cmd = zmalloc(sizeof(struct ust_command));
@@ -1814,7 +1852,17 @@ error:
  */
 static int start_consumerd(struct consumer_data *consumer_data)
 {
-	int ret;
+	int ret, err;
+
+	/*
+	 * Set the listen() state on the socket since there is a possible race
+	 * between the exec() of the consumer daemon and this call if place in the
+	 * consumer thread. See bug #366 for more details.
+	 */
+	ret = lttcomm_listen_unix_sock(consumer_data->err_sock);
+	if (ret < 0) {
+		goto error;
+	}
 
 	pthread_mutex_lock(&consumer_data->pid_mutex);
 	if (consumer_data->pid != 0) {
@@ -1845,6 +1893,13 @@ end:
 	return 0;
 
 error:
+	/* Cleanup already created socket on error. */
+	if (consumer_data->err_sock >= 0) {
+		err = close(consumer_data->err_sock);
+		if (err < 0) {
+			PERROR("close consumer data error socket");
+		}
+	}
 	return ret;
 }
 
@@ -2408,7 +2463,7 @@ skip_domain:
 		ret = cmd_add_context(cmd_ctx->session, cmd_ctx->lsm->domain.type,
 				cmd_ctx->lsm->u.context.channel_name,
 				cmd_ctx->lsm->u.context.event_name,
-				&cmd_ctx->lsm->u.context.ctx);
+				&cmd_ctx->lsm->u.context.ctx, kernel_poll_pipe[1]);
 		break;
 	}
 	case LTTNG_DISABLE_CHANNEL:
@@ -2882,6 +2937,12 @@ static void *thread_manage_health(void *data)
 		goto error;
 	}
 
+	/*
+	 * Set the CLOEXEC flag. Return code is useless because either way, the
+	 * show must go on.
+	 */
+	(void) utils_set_fd_cloexec(sock);
+
 	ret = lttcomm_listen_unix_sock(sock);
 	if (ret < 0) {
 		goto error;
@@ -2945,6 +3006,12 @@ restart:
 		if (new_sock < 0) {
 			goto error;
 		}
+
+		/*
+		 * Set the CLOEXEC flag. Return code is useless because either way, the
+		 * show must go on.
+		 */
+		(void) utils_set_fd_cloexec(new_sock);
 
 		DBG("Receiving data from client for health...");
 		ret = lttcomm_recv_unix_sock(new_sock, (void *)&msg, sizeof(msg));
@@ -3062,7 +3129,7 @@ static void *thread_manage_clients(void *data)
 
 	ret = lttcomm_listen_unix_sock(client_sock);
 	if (ret < 0) {
-		goto error;
+		goto error_listen;
 	}
 
 	/*
@@ -3071,7 +3138,7 @@ static void *thread_manage_clients(void *data)
 	 */
 	ret = create_thread_poll_set(&events, 2);
 	if (ret < 0) {
-		goto error;
+		goto error_create_poll;
 	}
 
 	/* Add the application registration socket */
@@ -3142,6 +3209,12 @@ static void *thread_manage_clients(void *data)
 		if (sock < 0) {
 			goto error;
 		}
+
+		/*
+		 * Set the CLOEXEC flag. Return code is useless because either way, the
+		 * show must go on.
+		 */
+		(void) utils_set_fd_cloexec(sock);
 
 		/* Set socket option for credentials retrieval */
 		ret = lttcomm_setsockopt_creds_unix_sock(sock);
@@ -3244,20 +3317,6 @@ static void *thread_manage_clients(void *data)
 
 exit:
 error:
-	if (err) {
-		health_error(&health_thread_cmd);
-		ERR("Health error occurred in %s", __func__);
-	}
-	health_exit(&health_thread_cmd);
-
-	DBG("Client thread dying");
-	unlink(client_unix_sock_path);
-	if (client_sock >= 0) {
-		ret = close(client_sock);
-		if (ret) {
-			PERROR("close");
-		}
-	}
 	if (sock >= 0) {
 		ret = close(sock);
 		if (ret) {
@@ -3267,6 +3326,25 @@ error:
 
 	lttng_poll_clean(&events);
 	clean_command_ctx(&cmd_ctx);
+
+error_listen:
+error_create_poll:
+	unlink(client_unix_sock_path);
+	if (client_sock >= 0) {
+		ret = close(client_sock);
+		if (ret) {
+			PERROR("close");
+		}
+	}
+
+	if (err) {
+		health_error(&health_thread_cmd);
+		ERR("Health error occurred in %s", __func__);
+	}
+
+	health_exit(&health_thread_cmd);
+
+	DBG("Client thread dying");
 
 	rcu_unregister_thread();
 	return NULL;
@@ -3443,6 +3521,14 @@ static int init_daemon_socket(void)
 		goto end;
 	}
 
+	/* Set the cloexec flag */
+	ret = utils_set_fd_cloexec(client_sock);
+	if (ret < 0) {
+		ERR("Unable to set CLOEXEC flag to the client Unix socket (fd: %d). "
+				"Continuing but note that the consumer daemon will have a "
+				"reference to this socket on exec()", client_sock);
+	}
+
 	/* File permission MUST be 660 */
 	ret = chmod(client_unix_sock_path, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 	if (ret < 0) {
@@ -3459,6 +3545,14 @@ static int init_daemon_socket(void)
 		goto end;
 	}
 
+	/* Set the cloexec flag */
+	ret = utils_set_fd_cloexec(apps_sock);
+	if (ret < 0) {
+		ERR("Unable to set CLOEXEC flag to the app Unix socket (fd: %d). "
+				"Continuing but note that the consumer daemon will have a "
+				"reference to this socket on exec()", apps_sock);
+	}
+
 	/* File permission MUST be 666 */
 	ret = chmod(apps_unix_sock_path,
 			S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
@@ -3467,6 +3561,9 @@ static int init_daemon_socket(void)
 		PERROR("chmod");
 		goto end;
 	}
+
+	DBG3("Session daemon client socket %d and application socket %d created",
+			client_sock, apps_sock);
 
 end:
 	umask(old_umask);
@@ -3727,7 +3824,7 @@ int main(int argc, char **argv)
 {
 	int ret = 0;
 	void *status;
-	const char *home_path;
+	const char *home_path, *env_app_timeout;
 
 	init_kernel_workarounds();
 
@@ -3964,8 +4061,10 @@ int main(int argc, char **argv)
 	}
 
 	/* Setup the kernel pipe for waking up the kernel thread */
-	if ((ret = utils_create_pipe_cloexec(kernel_poll_pipe)) < 0) {
-		goto exit;
+	if (is_root && !opt_no_kernel) {
+		if ((ret = utils_create_pipe_cloexec(kernel_poll_pipe)) < 0) {
+			goto exit;
+		}
 	}
 
 	/* Setup the thread apps communication pipe. */
@@ -4007,6 +4106,14 @@ int main(int argc, char **argv)
 	health_init(&ustconsumer64_data.health);
 	health_poll_update(&ustconsumer64_data.health);
 
+	/* Check for the application socket timeout env variable. */
+	env_app_timeout = getenv(DEFAULT_APP_SOCKET_TIMEOUT_ENV);
+	if (env_app_timeout) {
+		app_socket_timeout = atoi(env_app_timeout);
+	} else {
+		app_socket_timeout = DEFAULT_APP_SOCKET_RW_TIMEOUT;
+	}
+
 	/* Create thread to manage the client socket */
 	ret = pthread_create(&health_thread, NULL,
 			thread_manage_health, (void *) NULL);
@@ -4047,18 +4154,21 @@ int main(int argc, char **argv)
 		goto exit_apps;
 	}
 
-	/* Create kernel thread to manage kernel event */
-	ret = pthread_create(&kernel_thread, NULL,
-			thread_manage_kernel, (void *) NULL);
-	if (ret != 0) {
-		PERROR("pthread_create kernel");
-		goto exit_kernel;
-	}
+	/* Don't start this thread if kernel tracing is not requested nor root */
+	if (is_root && !opt_no_kernel) {
+		/* Create kernel thread to manage kernel event */
+		ret = pthread_create(&kernel_thread, NULL,
+				thread_manage_kernel, (void *) NULL);
+		if (ret != 0) {
+			PERROR("pthread_create kernel");
+			goto exit_kernel;
+		}
 
-	ret = pthread_join(kernel_thread, &status);
-	if (ret != 0) {
-		PERROR("pthread_join");
-		goto error;	/* join error, exit without cleanup */
+		ret = pthread_join(kernel_thread, &status);
+		if (ret != 0) {
+			PERROR("pthread_join");
+			goto error;	/* join error, exit without cleanup */
+		}
 	}
 
 exit_kernel:

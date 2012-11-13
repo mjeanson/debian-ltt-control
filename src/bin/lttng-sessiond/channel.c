@@ -203,7 +203,7 @@ int channel_ust_enable(struct ltt_ust_session *usess, int domain,
 	}
 
 	if (ret < 0) {
-		if (ret != -EEXIST) {
+		if (ret != -LTTNG_UST_ERR_EXIST) {
 			ret = LTTNG_ERR_UST_CHAN_ENABLE_FAIL;
 			goto error;
 		} else {
@@ -254,6 +254,11 @@ int channel_ust_create(struct ltt_ust_session *usess, int domain,
 		goto error;
 	}
 
+	if (attr->attr.output != LTTNG_EVENT_MMAP) {
+		ret = LTTNG_ERR_NOT_SUPPORTED;
+		goto error;
+	}
+
 	/* Create UST channel */
 	uchan = trace_ust_create_channel(attr, usess->pathname);
 	if (uchan == NULL) {
@@ -279,7 +284,7 @@ int channel_ust_create(struct ltt_ust_session *usess, int domain,
 		goto error_free_chan;
 	}
 
-	if (ret < 0 && ret != -EEXIST) {
+	if (ret < 0 && ret != -LTTNG_UST_ERR_EXIST) {
 		ret = LTTNG_ERR_UST_CHAN_FAIL;
 		goto error_free_chan;
 	}
@@ -336,7 +341,7 @@ int channel_ust_disable(struct ltt_ust_session *usess, int domain,
 		goto error;
 	}
 
-	if (ret < 0 && ret != -EEXIST) {
+	if (ret < 0 && ret != -LTTNG_UST_ERR_EXIST) {
 		ret = LTTNG_ERR_UST_CHAN_DISABLE_FAIL;
 		goto error;
 	}

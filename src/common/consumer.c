@@ -47,9 +47,6 @@ struct lttng_consumer_global_data consumer_data = {
 	.type = LTTNG_CONSUMER_UNKNOWN,
 };
 
-/* timeout parameter, to control the polling thread grace period. */
-int consumer_poll_timeout = -1;
-
 /*
  * Flag to inform the polling thread to quit when all fd hung up. Updated by
  * the consumer_thread_receive_fds when it notices that all fds has hung up.
@@ -1559,7 +1556,7 @@ ssize_t lttng_consumer_on_read_subbuffer_splice(
 				written = ret_splice;
 			}
 			/* Socket operation failed. We consider the relayd dead */
-			if (errno == EBADF) {
+			if (errno == EBADF || errno == EPIPE) {
 				WARN("Remote relayd disconnected. Stopping");
 				relayd_hang_up = 1;
 				goto write_error;
@@ -2250,7 +2247,7 @@ void *consumer_thread_data_poll(void *data)
 		/* poll on the array of fds */
 	restart:
 		DBG("polling on %d fd", nb_fd + 1);
-		num_rdy = poll(pollfd, nb_fd + 1, consumer_poll_timeout);
+		num_rdy = poll(pollfd, nb_fd + 1, -1);
 		DBG("poll num_rdy : %d", num_rdy);
 		if (num_rdy == -1) {
 			/*
@@ -2535,13 +2532,6 @@ end:
 	consumer_quit = 1;
 
 	/*
-	 * 2s of grace period, if no polling events occur during
-	 * this period, the polling thread will exit even if there
-	 * are still open FDs (should not happen, but safety mechanism).
-	 */
-	consumer_poll_timeout = LTTNG_CONSUMER_POLL_TIMEOUT;
-
-	/*
 	 * Notify the data poll thread to poll back again and test the
 	 * consumer_quit state that we just set so to quit gracefully.
 	 */
@@ -2754,7 +2744,7 @@ int consumer_data_pending(uint64_t id)
 	ht = consumer_data.stream_list_ht;
 
 	cds_lfht_for_each_entry_duplicate(ht->ht,
-			ht->hash_fct((void *)((unsigned long) id), 0x42UL),
+			ht->hash_fct((void *)((unsigned long) id), lttng_ht_seed),
 			ht->match_fct, (void *)((unsigned long) id),
 			&iter.iter, stream, node_session_id.node) {
 		/* If this call fails, the stream is being used hence data pending. */
