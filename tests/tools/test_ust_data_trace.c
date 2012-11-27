@@ -107,7 +107,7 @@ static void create_ust_metadata(void)
 	assert(metadata->attr.overwrite
 			== DEFAULT_CHANNEL_OVERWRITE);
 	assert(metadata->attr.subbuf_size
-			== DEFAULT_METADATA_SUBBUF_SIZE);
+			== default_get_metadata_subbuf_size());
 	assert(metadata->attr.num_subbuf
 			== DEFAULT_METADATA_SUBBUF_NUM);
 	assert(metadata->attr.switch_timer_interval
@@ -158,13 +158,12 @@ static void create_ust_event(void)
 	ev.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
 
 	printf("Creating UST event: ");
-	event = trace_ust_create_event(&ev);
+	event = trace_ust_create_event(&ev, NULL);
 	assert(event != NULL);
 	PRINT_OK();
 
 	printf("Validating UST event: ");
 	assert(event->enabled == 0);
-	assert(event->ctx != NULL);
 	assert(event->attr.instrumentation == LTTNG_UST_TRACEPOINT);
 	assert(strcmp(event->attr.name, ev.name) == 0);
 	assert(event->attr.name[LTTNG_UST_SYM_NAME_LEN - 1] == '\0');

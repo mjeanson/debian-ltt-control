@@ -88,7 +88,7 @@ enum lttcomm_sessiond_command {
 	RELAYD_CLOSE_STREAM,
 	RELAYD_DATA_PENDING,
 	RELAYD_QUIESCENT_CONTROL,
-	LTTNG_SET_FILTER,
+	LTTNG_ENABLE_EVENT_WITH_FILTER,
 	LTTNG_HEALTH_CHECK,
 	LTTNG_DATA_PENDING,
 };
@@ -178,6 +178,8 @@ struct lttcomm_session_msg {
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];
 			struct lttng_event event;
+			/* Length of following bytecode for filter. */
+			uint32_t bytecode_len;
 		} enable;
 		/* Create channel */
 		struct {
@@ -186,7 +188,6 @@ struct lttcomm_session_msg {
 		/* Context */
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];
-			char event_name[LTTNG_SYMBOL_NAME_LEN];
 			struct lttng_event_context ctx;
 		} context;
 		/* Use by register_consumer */
@@ -203,12 +204,6 @@ struct lttcomm_session_msg {
 			/* Number of lttng_uri following */
 			uint32_t size;
 		} uri;
-		struct {
-			char channel_name[LTTNG_SYMBOL_NAME_LEN];
-			char event_name[LTTNG_SYMBOL_NAME_LEN];
-			/* Length of following bytecode */
-			uint32_t bytecode_len;
-		} filter;
 	} u;
 };
 
@@ -222,6 +217,7 @@ struct lttcomm_session_msg {
 struct lttng_filter_bytecode {
 	uint32_t len;	/* len of data */
 	uint32_t reloc_table_offset;
+	uint64_t seqnum;
 	char data[0];
 };
 

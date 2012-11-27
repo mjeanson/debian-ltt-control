@@ -80,7 +80,8 @@ am__objects_2 = trace-kernel.$(OBJEXT) consumer.$(OBJEXT) \
 am_test_kernel_data_trace_OBJECTS = test_kernel_data_trace.$(OBJEXT) \
 	$(am__objects_1) $(am__objects_2)
 test_kernel_data_trace_OBJECTS = $(am_test_kernel_data_trace_OBJECTS)
-test_kernel_data_trace_DEPENDENCIES = $(SESSIOND_COMM) $(HASHTABLE)
+test_kernel_data_trace_DEPENDENCIES = $(COMMON) $(SESSIOND_COMM) \
+	$(HASHTABLE)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
@@ -352,7 +353,7 @@ test_sessions_LDADD = $(COMMON) $(HASHTABLE) $(SESSIOND_COMM)
 
 # Kernel trace data unit tests
 test_kernel_data_trace_SOURCES = test_kernel_data_trace.c $(UTILS) $(KERN_DATA_TRACE)
-test_kernel_data_trace_LDADD = $(SESSIOND_COMM) $(HASHTABLE)
+test_kernel_data_trace_LDADD = $(COMMON) $(SESSIOND_COMM) $(HASHTABLE)
 @HAVE_LIBLTTNG_UST_CTL_TRUE@UST_DATA_TRACE = $(top_srcdir)/src/bin/lttng-sessiond/trace-ust.c \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@			   $(top_srcdir)/src/bin/lttng-sessiond/consumer.c \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@			   $(top_srcdir)/src/common/uri.c \

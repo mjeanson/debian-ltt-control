@@ -27,6 +27,95 @@
 #include "trace-ust.h"
 
 /*
+ * Match function for the events hash table lookup.
+ *
+ * Matches by name only. Used by the disable command.
+ */
+int trace_ust_ht_match_event_by_name(struct cds_lfht_node *node,
+		const void *_key)
+{
+	struct ltt_ust_event *event;
+	const char *name;
+
+	assert(node);
+	assert(_key);
+
+	event = caa_container_of(node, struct ltt_ust_event, node.node);
+	name = _key;
+
+	/* Event name */
+	if (strncmp(event->attr.name, name, sizeof(event->attr.name)) != 0) {
+		goto no_match;
+	}
+
+	/* Match */
+	return 1;
+
+no_match:
+	return 0;
+}
+
+/*
+ * Match function for the hash table lookup.
+ *
+ * It matches an ust event based on three attributes which are the event name,
+ * the filter bytecode and the loglevel.
+ */
+int trace_ust_ht_match_event(struct cds_lfht_node *node, const void *_key)
+{
+	struct ltt_ust_event *event;
+	const struct ltt_ust_ht_key *key;
+
+	assert(node);
+	assert(_key);
+
+	event = caa_container_of(node, struct ltt_ust_event, node.node);
+	key = _key;
+
+	/* Match the 3 elements of the key: name, filter and loglevel. */
+
+	/* Event name */
+	if (strncmp(event->attr.name, key->name, sizeof(event->attr.name)) != 0) {
+		goto no_match;
+	}
+
+	/* Event loglevel. */
+	if (event->attr.loglevel != key->loglevel) {
+		if (event->attr.loglevel_type == LTTNG_UST_LOGLEVEL_ALL
+				&& key->loglevel == 0 && event->attr.loglevel == -1) {
+			/*
+			 * Match is accepted. This is because on event creation, the
+			 * loglevel is set to -1 if the event loglevel type is ALL so 0 and
+			 * -1 are accepted for this loglevel type since 0 is the one set by
+			 * the API when receiving an enable event.
+			 */
+		} else {
+			goto no_match;
+		}
+	}
+
+	/* Only one of the filters is NULL, fail. */
+	if ((key->filter && !event->filter) || (!key->filter && event->filter)) {
+		goto no_match;
+	}
+
+	if (key->filter && event->filter) {
+		/* Both filters exists, check length followed by the bytecode. */
+		if (event->filter->len != key->filter->len ||
+				memcmp(event->filter->data, key->filter->data,
+					event->filter->len) != 0) {
+			goto no_match;
+		}
+	}
+
+	/* Match. */
+	return 1;
+
+no_match:
+	return 0;
+}
+
+/*
  * Find the channel in the hashtable.
  */
 struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
@@ -56,27 +145,33 @@ error:
 /*
  * Find the event in the hashtable.
  */
-struct ltt_ust_event *trace_ust_find_event_by_name(struct lttng_ht *ht,
-		char *name)
+struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
+		char *name, struct lttng_filter_bytecode *filter, int loglevel)
 {
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
+	struct ltt_ust_ht_key key;
 
-	rcu_read_lock();
-	lttng_ht_lookup(ht, (void *) name, &iter);
+	assert(name);
+	assert(ht);
+
+	key.name = name;
+	key.filter = filter;
+	key.loglevel = loglevel;
+
+	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
+			trace_ust_ht_match_event, &key, &iter.iter);
 	node = lttng_ht_iter_get_node_str(&iter);
 	if (node == NULL) {
-		rcu_read_unlock();
 		goto error;
 	}
-	rcu_read_unlock();
 
-	DBG2("Trace UST event found by name %s", name);
+	DBG2("Trace UST event %s found", key.name);
 
 	return caa_container_of(node, struct ltt_ust_event, node);
 
 error:
-	DBG2("Trace UST event NOT found by name %s", name);
+	DBG2("Trace UST event %s NOT found", key.name);
 	return NULL;
 }
 
@@ -221,7 +316,8 @@ error:
  *
  * Return pointer to structure or NULL.
  */
-struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev)
+struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
+		struct lttng_filter_bytecode *filter)
 {
 	struct ltt_ust_event *lue;
 
@@ -271,15 +367,11 @@ struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev)
 		goto error_free_event;
 	}
 
+	/* Same layout. */
+	lue->filter = (struct lttng_ust_filter_bytecode *) filter;
 
 	/* Init node */
 	lttng_ht_node_init_str(&lue->node, lue->attr.name);
-	/* Alloc context hash tables */
-	lue->ctx = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
-	if (lue->ctx == NULL) {
-		ERR("Unable to create context hash table for event %s", ev->name);
-		goto error_free_event;
-	}
 
 	DBG2("Trace UST event %s, loglevel (%d,%d) created",
 		lue->attr.name, lue->attr.loglevel_type,
@@ -311,7 +403,7 @@ struct ltt_ust_metadata *trace_ust_create_metadata(char *path)
 
 	/* Set default attributes */
 	lum->attr.overwrite = DEFAULT_CHANNEL_OVERWRITE;
-	lum->attr.subbuf_size = DEFAULT_METADATA_SUBBUF_SIZE;
+	lum->attr.subbuf_size = default_get_metadata_subbuf_size();
 	lum->attr.num_subbuf = DEFAULT_METADATA_SUBBUF_NUM;
 	lum->attr.switch_timer_interval = DEFAULT_CHANNEL_SWITCH_TIMER;
 	lum->attr.read_timer_interval = DEFAULT_CHANNEL_READ_TIMER;
@@ -415,7 +507,6 @@ static void destroy_contexts(struct lttng_ht *ht)
 void trace_ust_destroy_event(struct ltt_ust_event *event)
 {
 	DBG2("Trace destroy UST event %s", event->attr.name);
-	destroy_contexts(event->ctx);
 	free(event->filter);
 	free(event);
 }
