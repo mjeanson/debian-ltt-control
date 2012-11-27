@@ -749,10 +749,10 @@ int lttng_stop_tracing_no_wait(const char *session_name)
 }
 
 /*
- * Add context to event and/or channel.
- * If event_name is NULL, the context is applied to all events of the channel.
- * If channel_name is NULL, a lookup of the event's channel is done.
- * If both are NULL, the context is applied to all events of all channels.
+ * Add context to a channel.
+ *
+ * If the given channel is NULL, add the contexts to all channels.
+ * The event_name param is ignored.
  *
  * Returns the size of the returned payload data or a negative error code.
  */
@@ -774,9 +774,6 @@ int lttng_add_context(struct lttng_handle *handle,
 	/* Copy channel name */
 	copy_string(lsm.u.context.channel_name, channel_name,
 			sizeof(lsm.u.context.channel_name));
-	/* Copy event name */
-	copy_string(lsm.u.context.event_name, event_name,
-			sizeof(lsm.u.context.event_name));
 
 	copy_lttng_domain(&lsm.domain, &handle->domain);
 
@@ -830,13 +827,13 @@ int lttng_enable_event(struct lttng_handle *handle,
 }
 
 /*
- * set filter for an event
+ * Create or enable an event with a filter expression.
+ *
  * Return negative error value on error.
  * Return size of returned session payload data if OK.
  */
-
-int lttng_set_event_filter(struct lttng_handle *handle,
-		const char *event_name, const char *channel_name,
+int lttng_enable_event_with_filter(struct lttng_handle *handle,
+		struct lttng_event *event, const char *channel_name,
 		const char *filter_expression)
 {
 	struct lttcomm_session_msg lsm;
@@ -845,12 +842,8 @@ int lttng_set_event_filter(struct lttng_handle *handle,
 	int ret = 0;
 
 	/* Safety check. */
-	if (handle == NULL) {
+	if (handle == NULL || !filter_expression) {
 		return -LTTNG_ERR_INVALID;
-	}
-
-	if (!filter_expression) {
-		return 0;
 	}
 
 	/*
@@ -924,15 +917,17 @@ int lttng_set_event_filter(struct lttng_handle *handle,
 
 	memset(&lsm, 0, sizeof(lsm));
 
-	lsm.cmd_type = LTTNG_SET_FILTER;
+	lsm.cmd_type = LTTNG_ENABLE_EVENT_WITH_FILTER;
 
 	/* Copy channel name */
-	copy_string(lsm.u.filter.channel_name, channel_name,
-			sizeof(lsm.u.filter.channel_name));
+	copy_string(lsm.u.enable.channel_name, channel_name,
+			sizeof(lsm.u.enable.channel_name));
 	/* Copy event name */
-	copy_string(lsm.u.filter.event_name, event_name,
-			sizeof(lsm.u.filter.event_name));
-	lsm.u.filter.bytecode_len = sizeof(ctx->bytecode->b)
+	if (event) {
+		memcpy(&lsm.u.enable.event, event, sizeof(lsm.u.enable.event));
+	}
+
+	lsm.u.enable.bytecode_len = sizeof(ctx->bytecode->b)
 			+ bytecode_get_len(&ctx->bytecode->b);
 
 	copy_lttng_domain(&lsm.domain, &handle->domain);
@@ -941,7 +936,7 @@ int lttng_set_event_filter(struct lttng_handle *handle,
 			sizeof(lsm.session.name));
 
 	ret = ask_sessiond_varlen(&lsm, &ctx->bytecode->b,
-				lsm.u.filter.bytecode_len, NULL);
+				lsm.u.enable.bytecode_len, NULL);
 
 	filter_bytecode_free(ctx);
 	filter_ir_free(ctx);
@@ -1344,7 +1339,7 @@ void lttng_channel_set_default_attr(struct lttng_domain *domain,
 		attr->switch_timer_interval = DEFAULT_CHANNEL_SWITCH_TIMER;
 		attr->read_timer_interval = DEFAULT_CHANNEL_READ_TIMER;
 
-		attr->subbuf_size = DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE;
+		attr->subbuf_size = default_get_kernel_channel_subbuf_size();
 		attr->num_subbuf = DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM;
 		attr->output = DEFAULT_KERNEL_CHANNEL_OUTPUT;
 		break;
@@ -1358,7 +1353,7 @@ void lttng_channel_set_default_attr(struct lttng_domain *domain,
 		attr->switch_timer_interval = DEFAULT_CHANNEL_SWITCH_TIMER;
 		attr->read_timer_interval = DEFAULT_CHANNEL_READ_TIMER;
 
-		attr->subbuf_size = DEFAULT_UST_CHANNEL_SUBBUF_SIZE;
+		attr->subbuf_size = default_get_ust_channel_subbuf_size();
 		attr->num_subbuf = DEFAULT_UST_CHANNEL_SUBBUF_NUM;
 		attr->output = DEFAULT_UST_CHANNEL_OUTPUT;
 		break;

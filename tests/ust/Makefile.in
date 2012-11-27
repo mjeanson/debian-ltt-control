@@ -152,7 +152,7 @@ AM_RECURSIVE_TARGETS = $(RECURSIVE_TARGETS:-recursive=) \
 ETAGS = etags
 CTAGS = ctags
 DIST_SUBDIRS = nprocesses high-throughput low-throughput before-after \
-	multi-session
+	multi-session overlap
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 am__relativize = \
   dir0=`pwd`; \
@@ -324,7 +324,9 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-@HAVE_LIBLTTNG_UST_CTL_TRUE@SUBDIRS = nprocesses high-throughput low-throughput before-after multi-session
+@HAVE_LIBLTTNG_UST_CTL_TRUE@SUBDIRS = nprocesses high-throughput low-throughput before-after multi-session \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		  overlap
+
 @HAVE_LIBLTTNG_UST_CTL_TRUE@AM_CFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/tests -I$(top_srcdir)/src -g -Wall 
 @HAVE_LIBLTTNG_UST_CTL_TRUE@AM_LDFLAGS = -lurcu -lurcu-cds
 @HAVE_LIBLTTNG_UST_CTL_TRUE@EXTRA_DIST = runall.sh run-ust-global-tests.sh

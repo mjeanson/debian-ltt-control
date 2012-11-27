@@ -33,6 +33,12 @@ struct lttng_ust_filter_bytecode;
 
 extern int ust_consumerd64_fd, ust_consumerd32_fd;
 
+struct ust_app_ht_key {
+	const char *name;
+	const struct lttng_ust_filter_bytecode *filter;
+	enum lttng_ust_loglevel_type loglevel;
+};
+
 /*
  * Application registration data structure.
  */
@@ -72,7 +78,6 @@ struct ust_app_event {
 	struct lttng_ust_object_data *obj;
 	struct lttng_ust_event attr;
 	char name[LTTNG_UST_SYM_NAME_LEN];
-	struct lttng_ht *ctx;
 	struct lttng_ht_node_str node;
 	struct lttng_ust_filter_bytecode *filter;
 };
@@ -167,14 +172,8 @@ int ust_app_enable_all_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan);
 int ust_app_disable_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent);
-int ust_app_add_ctx_event_glb(struct ltt_ust_session *usess,
-		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent,
-		struct ltt_ust_context *uctx);
 int ust_app_add_ctx_channel_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_context *uctx);
-int ust_app_set_filter_event_glb(struct ltt_ust_session *usess,
-                struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent,
-		struct lttng_filter_bytecode *bytecode);
 void ust_app_global_update(struct ltt_ust_session *usess, int sock);
 
 void ust_app_clean_list(void);
@@ -317,13 +316,6 @@ int ust_app_enable_event_glb(struct ltt_ust_session *usess,
 	return 0;
 }
 static inline
-int ust_app_add_ctx_event_glb(struct ltt_ust_session *usess,
-		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent,
-		struct ltt_ust_context *uctx)
-{
-	return 0;
-}
-static inline
 int ust_app_add_ctx_channel_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_context *uctx)
 {
@@ -350,13 +342,6 @@ int ust_app_validate_version(int sock)
 }
 static inline
 int ust_app_calibrate_glb(struct lttng_ust_calibrate *calibrate)
-{
-	return 0;
-}
-static inline
-int ust_app_set_filter_event_glb(struct ltt_ust_session *usess,
-		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent,
-		struct lttng_filter_bytecode *bytecode)
 {
 	return 0;
 }

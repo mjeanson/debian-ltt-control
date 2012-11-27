@@ -79,9 +79,9 @@ am__lttng_sessiond_SOURCES_DIST = utils.c utils.h trace-kernel.c \
 	event.h shm.c shm.h consumer.c consumer.h session.c session.h \
 	modprobe.c modprobe.h kern-modules.h lttng-ust-ctl.h \
 	lttng-ust-abi.h fd-limit.c fd-limit.h kernel-consumer.c \
-	kernel-consumer.h filter.c filter.h health.c health.h cmd.c \
-	cmd.h testpoint.h trace-ust.c ust-app.c ust-consumer.c \
-	ust-consumer.h lttng-sessiond.h main.c
+	kernel-consumer.h health.c health.h cmd.c cmd.h testpoint.h \
+	trace-ust.c ust-app.c ust-consumer.c ust-consumer.h \
+	lttng-sessiond.h main.c
 @HAVE_LIBLTTNG_UST_CTL_TRUE@am__objects_1 = trace-ust.$(OBJEXT) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@	ust-app.$(OBJEXT) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@	ust-consumer.$(OBJEXT)
@@ -89,8 +89,8 @@ am_lttng_sessiond_OBJECTS = utils.$(OBJEXT) trace-kernel.$(OBJEXT) \
 	kernel.$(OBJEXT) context.$(OBJEXT) channel.$(OBJEXT) \
 	event.$(OBJEXT) shm.$(OBJEXT) consumer.$(OBJEXT) \
 	session.$(OBJEXT) modprobe.$(OBJEXT) fd-limit.$(OBJEXT) \
-	kernel-consumer.$(OBJEXT) filter.$(OBJEXT) health.$(OBJEXT) \
-	cmd.$(OBJEXT) $(am__objects_1) main.$(OBJEXT)
+	kernel-consumer.$(OBJEXT) health.$(OBJEXT) cmd.$(OBJEXT) \
+	$(am__objects_1) main.$(OBJEXT)
 lttng_sessiond_OBJECTS = $(am_lttng_sessiond_OBJECTS)
 am__DEPENDENCIES_1 =
 lttng_sessiond_DEPENDENCIES =  \
@@ -299,8 +299,8 @@ lttng_sessiond_SOURCES = utils.c utils.h trace-kernel.c trace-kernel.h \
 	consumer.c consumer.h session.c session.h modprobe.c \
 	modprobe.h kern-modules.h lttng-ust-ctl.h lttng-ust-abi.h \
 	fd-limit.c fd-limit.h kernel-consumer.c kernel-consumer.h \
-	consumer.h filter.c filter.h health.c health.h cmd.c cmd.h \
-	testpoint.h $(am__append_1) lttng-sessiond.h main.c
+	consumer.h health.c health.h cmd.c cmd.h testpoint.h \
+	$(am__append_1) lttng-sessiond.h main.c
 
 # link on liblttngctl for check if sessiond is already alive.
 lttng_sessiond_LDADD = -lrt -lurcu-common -lurcu \
@@ -409,7 +409,6 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/context.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/event.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/fd-limit.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/filter.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/health.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/kernel-consumer.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/kernel.Po@am__quote@

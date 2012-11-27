@@ -37,6 +37,90 @@
 #include "ust-ctl.h"
 
 /*
+ * Match function for the hash table lookup.
+ *
+ * It matches an ust app event based on three attributes which are the event
+ * name, the filter bytecode and the loglevel.
+ */
+static int ht_match_ust_app_event(struct cds_lfht_node *node, const void *_key)
+{
+	struct ust_app_event *event;
+	const struct ust_app_ht_key *key;
+
+	assert(node);
+	assert(_key);
+
+	event = caa_container_of(node, struct ust_app_event, node.node);
+	key = _key;
+
+	/* Match the 3 elements of the key: name, filter and loglevel. */
+
+	/* Event name */
+	if (strncmp(event->attr.name, key->name, sizeof(event->attr.name)) != 0) {
+		goto no_match;
+	}
+
+	/* Event loglevel. */
+	if (event->attr.loglevel != key->loglevel) {
+		if (event->attr.loglevel_type == LTTNG_UST_LOGLEVEL_ALL
+				&& key->loglevel == 0 && event->attr.loglevel == -1) {
+			/*
+			 * Match is accepted. This is because on event creation, the
+			 * loglevel is set to -1 if the event loglevel type is ALL so 0 and
+			 * -1 are accepted for this loglevel type since 0 is the one set by
+			 * the API when receiving an enable event.
+			 */
+		} else {
+			goto no_match;
+		}
+	}
+
+	/* One of the filters is NULL, fail. */
+	if ((key->filter && !event->filter) || (!key->filter && event->filter)) {
+		goto no_match;
+	}
+
+	if (key->filter && event->filter) {
+		/* Both filters exists, check length followed by the bytecode. */
+		if (event->filter->len != key->filter->len ||
+				memcmp(event->filter->data, key->filter->data,
+					event->filter->len) != 0) {
+			goto no_match;
+		}
+	}
+
+	/* Match. */
+	return 1;
+
+no_match:
+	return 0;
+}
+
+/*
+ * Unique add of an ust app event in the given ht. This uses the custom
+ * ht_match_ust_app_event match function and the event name as hash.
+ */
+static void add_unique_ust_app_event(struct lttng_ht *ht,
+		struct ust_app_event *event)
+{
+	struct cds_lfht_node *node_ptr;
+	struct ust_app_ht_key key;
+
+	assert(ht);
+	assert(ht->ht);
+	assert(event);
+
+	key.name = event->attr.name;
+	key.filter = event->filter;
+	key.loglevel = event->attr.loglevel;
+
+	node_ptr = cds_lfht_add_unique(ht->ht,
+			ht->hash_fct(event->node.key, lttng_ht_seed),
+			ht_match_ust_app_event, &key, &event->node.node);
+	assert(node_ptr == &event->node.node);
+}
+
+/*
  * Delete ust context safely. RCU read lock must be held before calling
  * this function.
  */
@@ -57,19 +141,7 @@ void delete_ust_app_ctx(int sock, struct ust_app_ctx *ua_ctx)
 static
 void delete_ust_app_event(int sock, struct ust_app_event *ua_event)
 {
-	int ret;
-	struct lttng_ht_iter iter;
-	struct ust_app_ctx *ua_ctx;
-
-	/* Destroy each context of event */
-	cds_lfht_for_each_entry(ua_event->ctx->ht, &iter.iter, ua_ctx,
-			node.node) {
-		ret = lttng_ht_del(ua_event->ctx, &iter);
-		assert(!ret);
-		delete_ust_app_ctx(sock, ua_ctx);
-	}
 	free(ua_event->filter);
-	lttng_ht_destroy(ua_event->ctx);
 
 	if (ua_event->obj != NULL) {
 		ustctl_release_object(sock, ua_event->obj);
@@ -326,7 +398,6 @@ struct ust_app_event *alloc_ust_app_event(char *name,
 	ua_event->enabled = 1;
 	strncpy(ua_event->name, name, sizeof(ua_event->name));
 	ua_event->name[sizeof(ua_event->name) - 1] = '\0';
-	ua_event->ctx = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
 	lttng_ht_node_init_str(&ua_event->node, ua_event->name);
 
 	/* Copy attributes */
@@ -366,6 +437,29 @@ error:
 }
 
 /*
+ * Allocate a filter and copy the given original filter.
+ *
+ * Return allocated filter or NULL on error.
+ */
+static struct lttng_ust_filter_bytecode *alloc_copy_ust_app_filter(
+		struct lttng_ust_filter_bytecode *orig_f)
+{
+	struct lttng_ust_filter_bytecode *filter = NULL;
+
+	/* Copy filter bytecode */
+	filter = zmalloc(sizeof(*filter) + orig_f->len);
+	if (!filter) {
+		PERROR("zmalloc alloc ust app filter");
+		goto error;
+	}
+
+	memcpy(filter, orig_f, sizeof(*filter) + orig_f->len);
+
+error:
+	return filter;
+}
+
+/*
  * Find an ust_app using the sock and return it. RCU read side lock must be
  * held before calling this helper function.
  */
@@ -389,6 +483,42 @@ error:
 }
 
 /*
+ * Lookup for an ust app event based on event name, filter bytecode and the
+ * event loglevel.
+ *
+ * Return an ust_app_event object or NULL on error.
+ */
+static struct ust_app_event *find_ust_app_event(struct lttng_ht *ht,
+		char *name, struct lttng_ust_filter_bytecode *filter, int loglevel)
+{
+	struct lttng_ht_iter iter;
+	struct lttng_ht_node_str *node;
+	struct ust_app_event *event = NULL;
+	struct ust_app_ht_key key;
+
+	assert(name);
+	assert(ht);
+
+	/* Setup key for event lookup. */
+	key.name = name;
+	key.filter = filter;
+	key.loglevel = loglevel;
+
+	/* Lookup using the event name as hash and a custom match fct. */
+	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
+			ht_match_ust_app_event, &key, &iter.iter);
+	node = lttng_ht_iter_get_node_str(&iter);
+	if (node == NULL) {
+		goto end;
+	}
+
+	event = caa_container_of(node, struct ust_app_event, node);
+
+end:
+	return event;
+}
+
+/*
  * Create the channel context on the tracer.
  */
 static
@@ -408,32 +538,6 @@ int create_ust_channel_context(struct ust_app_channel *ua_chan,
 	ua_ctx->handle = ua_ctx->obj->handle;
 
 	DBG2("UST app context created successfully for channel %s", ua_chan->name);
-
-error:
-	health_code_update(&health_thread_cmd);
-	return ret;
-}
-
-/*
- * Create the event context on the tracer.
- */
-static
-int create_ust_event_context(struct ust_app_event *ua_event,
-		struct ust_app_ctx *ua_ctx, struct ust_app *app)
-{
-	int ret;
-
-	health_code_update(&health_thread_cmd);
-
-	ret = ustctl_add_context(app->sock, &ua_ctx->ctx,
-			ua_event->obj, &ua_ctx->obj);
-	if (ret < 0) {
-		goto error;
-	}
-
-	ua_ctx->handle = ua_ctx->obj->handle;
-
-	DBG2("UST app context created successfully for event %s", ua_event->name);
 
 error:
 	health_code_update(&health_thread_cmd);
@@ -724,6 +828,14 @@ int create_ust_event(struct ust_app *app, struct ust_app_session *ua_sess,
 
 	health_code_update(&health_thread_cmd);
 
+	/* Set filter if one is present. */
+	if (ua_event->filter) {
+		ret = set_ust_event_filter(ua_event, app);
+		if (ret < 0) {
+			goto error;
+		}
+	}
+
 	/* If event not enabled, disable it on the tracer */
 	if (ua_event->enabled == 0) {
 		ret = disable_ust_event(app, ua_sess, ua_event);
@@ -759,10 +871,6 @@ error:
 static void shadow_copy_event(struct ust_app_event *ua_event,
 		struct ltt_ust_event *uevent)
 {
-	struct lttng_ht_iter iter;
-	struct ltt_ust_context *uctx;
-	struct ust_app_ctx *ua_ctx;
-
 	strncpy(ua_event->name, uevent->attr.name, sizeof(ua_event->name));
 	ua_event->name[sizeof(ua_event->name) - 1] = '\0';
 
@@ -773,24 +881,8 @@ static void shadow_copy_event(struct ust_app_event *ua_event,
 
 	/* Copy filter bytecode */
 	if (uevent->filter) {
-		ua_event->filter = zmalloc(sizeof(*ua_event->filter) +
-			uevent->filter->len);
-		if (!ua_event->filter) {
-			return;
-		}
-		memcpy(ua_event->filter, uevent->filter,
-			sizeof(*ua_event->filter) + uevent->filter->len);
-	}
-	cds_lfht_for_each_entry(uevent->ctx->ht, &iter.iter, uctx, node.node) {
-		ua_ctx = alloc_ust_app_ctx(&uctx->ctx);
-		if (ua_ctx == NULL) {
-			/* malloc() failed. We should simply stop */
-			return;
-		}
-
-		lttng_ht_node_init_ulong(&ua_ctx->node,
-				(unsigned long) ua_ctx->ctx.ctx);
-		lttng_ht_add_unique_ulong(ua_event->ctx, &ua_ctx->node);
+		ua_event->filter = alloc_copy_ust_app_filter(uevent->filter);
+		/* Filter might be NULL here in case of ENONEM. */
 	}
 }
 
@@ -801,7 +893,6 @@ static void shadow_copy_channel(struct ust_app_channel *ua_chan,
 		struct ltt_ust_channel *uchan)
 {
 	struct lttng_ht_iter iter;
-	struct lttng_ht_node_str *ua_event_node;
 	struct ltt_ust_event *uevent;
 	struct ltt_ust_context *uctx;
 	struct ust_app_event *ua_event;
@@ -828,11 +919,9 @@ static void shadow_copy_channel(struct ust_app_channel *ua_chan,
 
 	/* Copy all events from ltt ust channel to ust app channel */
 	cds_lfht_for_each_entry(uchan->events->ht, &iter.iter, uevent, node.node) {
-		struct lttng_ht_iter uiter;
-
-		lttng_ht_lookup(ua_chan->events, (void *) uevent->attr.name, &uiter);
-		ua_event_node = lttng_ht_iter_get_node_str(&uiter);
-		if (ua_event_node == NULL) {
+		ua_event = find_ust_app_event(ua_chan->events, uevent->attr.name,
+				uevent->filter, uevent->attr.loglevel);
+		if (ua_event == NULL) {
 			DBG2("UST event %s not found on shadow copy channel",
 					uevent->attr.name);
 			ua_event = alloc_ust_app_event(uevent->attr.name, &uevent->attr);
@@ -840,7 +929,7 @@ static void shadow_copy_channel(struct ust_app_channel *ua_chan,
 				continue;
 			}
 			shadow_copy_event(ua_event, uevent);
-			lttng_ht_add_unique_str(ua_chan->events, &ua_event->node);
+			add_unique_ust_app_event(ua_chan->events, ua_event);
 		}
 	}
 
@@ -1035,76 +1124,6 @@ error:
 }
 
 /*
- * Create an UST context and enable it for the event on the tracer.
- */
-static
-int create_ust_app_event_context(struct ust_app_session *ua_sess,
-		struct ust_app_event *ua_event, struct lttng_ust_context *uctx,
-		struct ust_app *app)
-{
-	int ret = 0;
-	struct lttng_ht_iter iter;
-	struct lttng_ht_node_ulong *node;
-	struct ust_app_ctx *ua_ctx;
-
-	DBG2("UST app adding context to event %s", ua_event->name);
-
-	lttng_ht_lookup(ua_event->ctx, (void *)((unsigned long)uctx->ctx), &iter);
-	node = lttng_ht_iter_get_node_ulong(&iter);
-	if (node != NULL) {
-		ret = -EEXIST;
-		goto error;
-	}
-
-	ua_ctx = alloc_ust_app_ctx(uctx);
-	if (ua_ctx == NULL) {
-		/* malloc failed */
-		ret = -1;
-		goto error;
-	}
-
-	lttng_ht_node_init_ulong(&ua_ctx->node, (unsigned long) ua_ctx->ctx.ctx);
-	lttng_ht_add_unique_ulong(ua_event->ctx, &ua_ctx->node);
-
-	ret = create_ust_event_context(ua_event, ua_ctx, app);
-	if (ret < 0) {
-		goto error;
-	}
-
-error:
-	return ret;
-}
-
-/*
- * Set UST filter for the event on the tracer.
- */
-static
-int set_ust_app_event_filter(struct ust_app_session *ua_sess,
-		struct ust_app_event *ua_event,
-		struct lttng_filter_bytecode *bytecode,
-		struct ust_app *app)
-{
-	int ret = 0;
-
-	DBG2("UST app adding context to event %s", ua_event->name);
-
-	/* Copy filter bytecode */
-	ua_event->filter = zmalloc(sizeof(*ua_event->filter) + bytecode->len);
-	if (!ua_event->filter) {
-		return -ENOMEM;
-	}
-	memcpy(ua_event->filter, bytecode,
-		sizeof(*ua_event->filter) + bytecode->len);
-	ret = set_ust_event_filter(ua_event, app);
-	if (ret < 0) {
-		goto error;
-	}
-
-error:
-	return ret;
-}
-
-/*
  * Enable on the tracer side a ust app event for the session and channel.
  */
 static
@@ -1249,14 +1268,12 @@ int create_ust_app_event(struct ust_app_session *ua_sess,
 		struct ust_app *app)
 {
 	int ret = 0;
-	struct lttng_ht_iter iter;
-	struct lttng_ht_node_str *ua_event_node;
 	struct ust_app_event *ua_event;
 
 	/* Get event node */
-	lttng_ht_lookup(ua_chan->events, (void *)uevent->attr.name, &iter);
-	ua_event_node = lttng_ht_iter_get_node_str(&iter);
-	if (ua_event_node != NULL) {
+	ua_event = find_ust_app_event(ua_chan->events, uevent->attr.name,
+			uevent->filter, uevent->attr.loglevel);
+	if (ua_event != NULL) {
 		ret = -EEXIST;
 		goto end;
 	}
@@ -1274,11 +1291,11 @@ int create_ust_app_event(struct ust_app_session *ua_sess,
 	ret = create_ust_event(app, ua_sess, ua_chan, ua_event);
 	if (ret < 0) {
 		/* Not found previously means that it does not exist on the tracer */
-		assert(ret == -LTTNG_UST_ERR_EXIST);
+		assert(ret != -LTTNG_UST_ERR_EXIST);
 		goto error;
 	}
 
-	lttng_ht_add_unique_str(ua_chan->events, &ua_event->node);
+	add_unique_ust_app_event(ua_chan->events, ua_event);
 
 	DBG2("UST app create event %s for PID %d completed", ua_event->name,
 			app->pid);
@@ -2043,7 +2060,7 @@ int ust_app_enable_event_glb(struct ltt_ust_session *usess,
 {
 	int ret = 0;
 	struct lttng_ht_iter iter, uiter;
-	struct lttng_ht_node_str *ua_chan_node, *ua_event_node;
+	struct lttng_ht_node_str *ua_chan_node;
 	struct ust_app *app;
 	struct ust_app_session *ua_sess;
 	struct ust_app_channel *ua_chan;
@@ -2081,14 +2098,14 @@ int ust_app_enable_event_glb(struct ltt_ust_session *usess,
 
 		ua_chan = caa_container_of(ua_chan_node, struct ust_app_channel, node);
 
-		lttng_ht_lookup(ua_chan->events, (void*)uevent->attr.name, &uiter);
-		ua_event_node = lttng_ht_iter_get_node_str(&uiter);
-		if (ua_event_node == NULL) {
+		/* Get event node */
+		ua_event = find_ust_app_event(ua_chan->events, uevent->attr.name,
+				uevent->filter, uevent->attr.loglevel);
+		if (ua_event == NULL) {
 			DBG3("UST app enable event %s not found for app PID %d."
 					"Skipping app", uevent->attr.name, app->pid);
 			continue;
 		}
-		ua_event = caa_container_of(ua_event_node, struct ust_app_event, node);
 
 		ret = enable_ust_app_event(ua_sess, ua_event, app);
 		if (ret < 0) {
@@ -2599,15 +2616,6 @@ void ust_app_global_update(struct ltt_ust_session *usess, int sock)
 				continue;
 			}
 
-			/* Add context on events. */
-			cds_lfht_for_each_entry(ua_event->ctx->ht, &iter_ctx.iter,
-					ua_ctx, node.node) {
-				ret = create_ust_event_context(ua_event, ua_ctx, app);
-				if (ret < 0) {
-					/* FIXME: Should we quit here or continue... */
-					continue;
-				}
-			}
 			ret = set_ust_event_filter(ua_event, app);
 			if (ret < 0) {
 				/* FIXME: Should we quit here or continue... */
@@ -2678,120 +2686,6 @@ int ust_app_add_ctx_channel_glb(struct ltt_ust_session *usess,
 }
 
 /*
- * Add context to a specific event in a channel for global UST domain.
- */
-int ust_app_add_ctx_event_glb(struct ltt_ust_session *usess,
-		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent,
-		struct ltt_ust_context *uctx)
-{
-	int ret = 0;
-	struct lttng_ht_node_str *ua_chan_node, *ua_event_node;
-	struct lttng_ht_iter iter, uiter;
-	struct ust_app_session *ua_sess;
-	struct ust_app_event *ua_event;
-	struct ust_app_channel *ua_chan = NULL;
-	struct ust_app *app;
-
-	rcu_read_lock();
-
-	cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, app, pid_n.node) {
-		if (!app->compatible) {
-			/*
-			 * TODO: In time, we should notice the caller of this error by
-			 * telling him that this is a version error.
-			 */
-			continue;
-		}
-		ua_sess = lookup_session_by_app(usess, app);
-		if (ua_sess == NULL) {
-			continue;
-		}
-
-		/* Lookup channel in the ust app session */
-		lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &uiter);
-		ua_chan_node = lttng_ht_iter_get_node_str(&uiter);
-		if (ua_chan_node == NULL) {
-			continue;
-		}
-		ua_chan = caa_container_of(ua_chan_node, struct ust_app_channel,
-				node);
-
-		lttng_ht_lookup(ua_chan->events, (void *)uevent->attr.name, &uiter);
-		ua_event_node = lttng_ht_iter_get_node_str(&uiter);
-		if (ua_event_node == NULL) {
-			continue;
-		}
-		ua_event = caa_container_of(ua_event_node, struct ust_app_event,
-				node);
-
-		ret = create_ust_app_event_context(ua_sess, ua_event, &uctx->ctx, app);
-		if (ret < 0) {
-			continue;
-		}
-	}
-
-	rcu_read_unlock();
-	return ret;
-}
-
-/*
- * Add context to a specific event in a channel for global UST domain.
- */
-int ust_app_set_filter_event_glb(struct ltt_ust_session *usess,
-		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent,
-		struct lttng_filter_bytecode *bytecode)
-{
-	int ret = 0;
-	struct lttng_ht_node_str *ua_chan_node, *ua_event_node;
-	struct lttng_ht_iter iter, uiter;
-	struct ust_app_session *ua_sess;
-	struct ust_app_event *ua_event;
-	struct ust_app_channel *ua_chan = NULL;
-	struct ust_app *app;
-
-	rcu_read_lock();
-
-	cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, app, pid_n.node) {
-		if (!app->compatible) {
-			/*
-			 * TODO: In time, we should notice the caller of this error by
-			 * telling him that this is a version error.
-			 */
-			continue;
-		}
-		ua_sess = lookup_session_by_app(usess, app);
-		if (ua_sess == NULL) {
-			continue;
-		}
-
-		/* Lookup channel in the ust app session */
-		lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &uiter);
-		ua_chan_node = lttng_ht_iter_get_node_str(&uiter);
-		if (ua_chan_node == NULL) {
-			continue;
-		}
-		ua_chan = caa_container_of(ua_chan_node, struct ust_app_channel,
-				node);
-
-		lttng_ht_lookup(ua_chan->events, (void *)uevent->attr.name, &uiter);
-		ua_event_node = lttng_ht_iter_get_node_str(&uiter);
-		if (ua_event_node == NULL) {
-			continue;
-		}
-		ua_event = caa_container_of(ua_event_node, struct ust_app_event,
-				node);
-
-		ret = set_ust_app_event_filter(ua_sess, ua_event, bytecode, app);
-		if (ret < 0) {
-			continue;
-		}
-	}
-
-	rcu_read_unlock();
-	return ret;
-}
-
-/*
  * Enable event for a channel from a UST session for a specific PID.
  */
 int ust_app_enable_event_pid(struct ltt_ust_session *usess,
@@ -2799,7 +2693,7 @@ int ust_app_enable_event_pid(struct ltt_ust_session *usess,
 {
 	int ret = 0;
 	struct lttng_ht_iter iter;
-	struct lttng_ht_node_str *ua_chan_node, *ua_event_node;
+	struct lttng_ht_node_str *ua_chan_node;
 	struct ust_app *app;
 	struct ust_app_session *ua_sess;
 	struct ust_app_channel *ua_chan;
@@ -2833,16 +2727,14 @@ int ust_app_enable_event_pid(struct ltt_ust_session *usess,
 
 	ua_chan = caa_container_of(ua_chan_node, struct ust_app_channel, node);
 
-	lttng_ht_lookup(ua_chan->events, (void *)uevent->attr.name, &iter);
-	ua_event_node = lttng_ht_iter_get_node_str(&iter);
-	if (ua_event_node == NULL) {
+	ua_event = find_ust_app_event(ua_chan->events, uevent->attr.name,
+			uevent->filter, uevent->attr.loglevel);
+	if (ua_event == NULL) {
 		ret = create_ust_app_event(ua_sess, ua_chan, uevent, app);
 		if (ret < 0) {
 			goto error;
 		}
 	} else {
-		ua_event = caa_container_of(ua_event_node, struct ust_app_event, node);
-
 		ret = enable_ust_app_event(ua_sess, ua_event, app);
 		if (ret < 0) {
 			goto error;

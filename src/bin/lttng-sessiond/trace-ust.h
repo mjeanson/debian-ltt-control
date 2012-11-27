@@ -29,6 +29,12 @@
 #include "consumer.h"
 #include "ust-ctl.h"
 
+struct ltt_ust_ht_key {
+	const char *name;
+	const struct lttng_filter_bytecode *filter;
+	enum lttng_ust_loglevel_type loglevel;
+};
+
 /* UST Stream list */
 struct ltt_ust_stream_list {
 	unsigned int count;
@@ -45,7 +51,6 @@ struct ltt_ust_context {
 struct ltt_ust_event {
 	unsigned int enabled;
 	struct lttng_ust_event attr;
-	struct lttng_ht *ctx;
 	struct lttng_ht_node_str node;
 	struct lttng_ust_filter_bytecode *filter;
 };
@@ -124,15 +129,21 @@ struct ltt_ust_session {
 	 */
 	struct consumer_output *consumer;
 	struct consumer_output *tmp_consumer;
+	/* Sequence number for filters so the tracer knows the ordering. */
+	uint64_t filter_seq_num;
 };
 
 #ifdef HAVE_LIBLTTNG_UST_CTL
 
+int trace_ust_ht_match_event(struct cds_lfht_node *node, const void *_key);
+int trace_ust_ht_match_event_by_name(struct cds_lfht_node *node,
+		const void *_key);
+
 /*
  * Lookup functions. NULL is returned if not found.
  */
-struct ltt_ust_event *trace_ust_find_event_by_name(struct lttng_ht *ht,
-		char *name);
+struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
+		char *name, struct lttng_filter_bytecode *filter, int loglevel);
 struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 		char *name);
 
@@ -143,7 +154,8 @@ struct ltt_ust_session *trace_ust_create_session(char *path,
 		unsigned int session_id, struct lttng_domain *domain);
 struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr,
 		char *path);
-struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev);
+struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
+		struct lttng_filter_bytecode *filter);
 struct ltt_ust_metadata *trace_ust_create_metadata(char *path);
 struct ltt_ust_context *trace_ust_create_context(
 		struct lttng_event_context *ctx);
@@ -158,13 +170,6 @@ void trace_ust_destroy_channel(struct ltt_ust_channel *channel);
 void trace_ust_destroy_event(struct ltt_ust_event *event);
 
 #else /* HAVE_LIBLTTNG_UST_CTL */
-
-static inline
-struct ltt_ust_event *trace_ust_find_event_by_name(struct lttng_ht *ht,
-		char *name)
-{
-	return NULL;
-}
 
 static inline
 struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
@@ -186,7 +191,8 @@ struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr,
 	return NULL;
 }
 static inline
-struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev)
+struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
+		struct lttng_filter_bytecode *filter)
 {
 	return NULL;
 }
