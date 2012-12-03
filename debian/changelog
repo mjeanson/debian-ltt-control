@@ -1,3 +1,10 @@
+ltt-control (2.1.0~rc8-1) unstable; urgency=low
+
+  * [72662ab] New upstream version 2.1.0~rc8
+  * [ae2ad38] Link test utilities against urcu-bp
+
+ -- Jon Bernard <jbernard@debian.org>  Mon, 03 Dec 2012 13:06:07 -0500
+
 ltt-control (2.1.0~rc6-1) unstable; urgency=low
 
   * [4908348] New upstream version 2.1.0~rc6
