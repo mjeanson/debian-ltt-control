@@ -8462,6 +8462,7 @@ PyObject *md;
   public_symbol = 0;
   (void)public_symbol;
   md = d;
+  d;
   
   PyDict_SetItemString(md, "__all__", public_interface);
   Py_DECREF(public_interface);
