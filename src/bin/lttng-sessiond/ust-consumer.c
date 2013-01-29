@@ -32,15 +32,17 @@
 /*
  * Send a single channel to the consumer using command ADD_CHANNEL.
  */
-static int send_channel(int sock, struct ust_app_channel *uchan)
+static int send_channel(struct consumer_socket *sock,
+		struct ust_app_channel *uchan)
 {
 	int ret, fd;
 	struct lttcomm_consumer_msg msg;
 
 	/* Safety net */
 	assert(uchan);
+	assert(sock);
 
-	if (sock < 0) {
+	if (sock->fd < 0) {
 		ret = -EINVAL;
 		goto error;
 	}
@@ -55,16 +57,22 @@ static int send_channel(int sock, struct ust_app_channel *uchan)
 			uchan->name,
 			uchan->streams.count);
 
+	health_code_update(&health_thread_cmd);
+
 	ret = consumer_send_channel(sock, &msg);
 	if (ret < 0) {
 		goto error;
 	}
+
+	health_code_update(&health_thread_cmd);
 
 	fd = uchan->obj->shm_fd;
 	ret = consumer_send_fds(sock, &fd, 1);
 	if (ret < 0) {
 		goto error;
 	}
+
+	health_code_update(&health_thread_cmd);
 
 error:
 	return ret;
@@ -73,9 +81,10 @@ error:
 /*
  * Send a single stream to the consumer using ADD_STREAM command.
  */
-static int send_channel_stream(int sock, struct ust_app_channel *uchan,
-		struct ust_app_session *usess, struct ltt_ust_stream *stream,
-		struct consumer_output *consumer, const char *pathname)
+static int send_channel_stream(struct consumer_socket *sock,
+		struct ust_app_channel *uchan, struct ust_app_session *usess,
+		struct ltt_ust_stream *stream, struct consumer_output *consumer,
+		const char *pathname)
 {
 	int ret, fds[2];
 	struct lttcomm_consumer_msg msg;
@@ -85,6 +94,7 @@ static int send_channel_stream(int sock, struct ust_app_channel *uchan,
 	assert(usess);
 	assert(stream);
 	assert(consumer);
+	assert(sock);
 
 	DBG2("Sending stream %d of channel %s to kernel consumer",
 			stream->obj->shm_fd, uchan->name);
@@ -104,6 +114,8 @@ static int send_channel_stream(int sock, struct ust_app_channel *uchan,
 			pathname,
 			usess->id);
 
+	health_code_update(&health_thread_cmd);
+
 	/* Send stream and file descriptor */
 	fds[0] = stream->obj->shm_fd;
 	fds[1] = stream->obj->wait_fd;
@@ -112,6 +124,8 @@ static int send_channel_stream(int sock, struct ust_app_channel *uchan,
 		goto error;
 	}
 
+	health_code_update(&health_thread_cmd);
+
 error:
 	return ret;
 }
@@ -119,7 +133,7 @@ error:
 /*
  * Send all stream fds of UST channel to the consumer.
  */
-static int send_channel_streams(int sock,
+static int send_channel_streams(struct consumer_socket *sock,
 		struct ust_app_channel *uchan, struct ust_app_session *usess,
 		struct consumer_output *consumer)
 {
@@ -127,6 +141,8 @@ static int send_channel_streams(int sock,
 	char tmp_path[PATH_MAX];
 	const char *pathname;
 	struct ltt_ust_stream *stream, *tmp;
+
+	assert(sock);
 
 	DBG("Sending streams of channel %s to UST consumer", uchan->name);
 
@@ -180,8 +196,8 @@ error:
 /*
  * Sending metadata to the consumer with command ADD_CHANNEL and ADD_STREAM.
  */
-static int send_metadata(int sock, struct ust_app_session *usess,
-		struct consumer_output *consumer)
+static int send_metadata(struct consumer_socket *sock,
+		struct ust_app_session *usess, struct consumer_output *consumer)
 {
 	int ret, fd, fds[2];
 	char tmp_path[PATH_MAX];
@@ -191,9 +207,10 @@ static int send_metadata(int sock, struct ust_app_session *usess,
 	/* Safety net */
 	assert(usess);
 	assert(consumer);
+	assert(sock);
 
-	if (sock < 0) {
-		ERR("Consumer socket is negative (%d)", sock);
+	if (sock->fd < 0) {
+		ERR("Consumer socket is negative (%d)", sock->fd);
 		return -EINVAL;
 	}
 
@@ -213,10 +230,14 @@ static int send_metadata(int sock, struct ust_app_session *usess,
 			"metadata",
 			1);
 
+	health_code_update(&health_thread_cmd);
+
 	ret = consumer_send_channel(sock, &msg);
 	if (ret < 0) {
 		goto error;
 	}
+
+	health_code_update(&health_thread_cmd);
 
 	/* Sending metadata shared memory fd */
 	fd = usess->metadata->obj->shm_fd;
@@ -224,6 +245,8 @@ static int send_metadata(int sock, struct ust_app_session *usess,
 	if (ret < 0) {
 		goto error;
 	}
+
+	health_code_update(&health_thread_cmd);
 
 	/* Get correct path name destination */
 	if (consumer->type == CONSUMER_DST_LOCAL) {
@@ -270,6 +293,8 @@ static int send_metadata(int sock, struct ust_app_session *usess,
 			pathname,
 			usess->id);
 
+	health_code_update(&health_thread_cmd);
+
 	/* Send stream and file descriptor */
 	fds[0] = usess->metadata->stream_obj->shm_fd;
 	fds[1] = usess->metadata->stream_obj->wait_fd;
@@ -277,6 +302,8 @@ static int send_metadata(int sock, struct ust_app_session *usess,
 	if (ret < 0) {
 		goto error;
 	}
+
+	health_code_update(&health_thread_cmd);
 
 error:
 	return ret;
@@ -305,7 +332,7 @@ int ust_consumer_send_session(struct ust_app_session *usess,
 	pthread_mutex_lock(sock->lock);
 
 	/* Sending metadata information to the consumer */
-	ret = send_metadata(sock->fd, usess, consumer);
+	ret = send_metadata(sock, usess, consumer);
 	if (ret < 0) {
 		goto error;
 	}
@@ -322,7 +349,7 @@ int ust_consumer_send_session(struct ust_app_session *usess,
 			continue;
 		}
 
-		ret = send_channel_streams(sock->fd, ua_chan, usess, consumer);
+		ret = send_channel_streams(sock, ua_chan, usess, consumer);
 		if (ret < 0) {
 			rcu_read_unlock();
 			goto error;

@@ -1,15 +1,18 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 
 import os, sys
 import subprocess
 import threading
 import Queue
 import time
+import shlex
 
-from signal import signal, SIGTERM, SIGINT
+from signal import signal, SIGTERM, SIGINT, SIGPIPE, SIG_DFL
 
 SESSIOND_BIN_NAME = "lttng-sessiond"
-SESSIOND_BIN_PATH = "src/bin/lttng-sessiond/.libs/"
+SESSIOND_BIN_PATH = "src/bin/lttng-sessiond/"
+CONSUMERD_BIN_NAME = "lttng-consumerd"
+CONSUMERD_BIN_PATH = "src/bin/lttng-consumerd/"
 TESTDIR_PATH = ""
 
 PRINT_BRACKET = "\033[1;34m[\033[1;33m+\033[1;34m]\033[00m"
@@ -43,10 +46,12 @@ def cpu_create_usage_dict(top_line):
     top_line = top_line.replace(",","")
     words = top_line.split()[1:]
 
-    for word in words:
-        index = word.find('%')
+
+    for key in top_dict:
+        index = words.index(key)
         # Add the value to the dictionnary
-        top_dict[word[index + 1:]] = float(word[:index])
+        val = words[index-1]
+        top_dict[key] = float(val)
 
     return top_dict
 
@@ -84,7 +89,7 @@ def cpu_sample_usage(pid=None):
     # Spawn top process
     top = subprocess.Popen(args, stdout = subprocess.PIPE)
 
-    grep = subprocess.Popen(["grep", "^Cpu"], stdin = top.stdout,
+    grep = subprocess.Popen(["grep", "Cpu"], stdin = top.stdout,
             stdout = subprocess.PIPE)
     top.stdout.close()
 
@@ -168,18 +173,16 @@ class SamplingWorker(threading.Thread):
             mem_ret_q.put((count, mem_stat))
 
 class TestWorker(threading.Thread):
-    def __init__(self, path, name):
+    def __init__(self, path, name, env):
         threading.Thread.__init__(self)
         self.path = path
         self.name = name
+        self.env  = env
 
     def run(self):
         bin_path_name = os.path.join(self.path, self.name)
 
-        env = os.environ
-        env['TEST_NO_SESSIOND'] = '1'
-
-        test = subprocess.Popen([bin_path_name], env=env)
+        test = subprocess.Popen([bin_path_name], env=self.env, preexec_fn = lambda: signal(SIGPIPE, SIG_DFL))
         test.wait()
 
         # Send ret value to main thread
@@ -208,19 +211,26 @@ def spawn_session_daemon():
         os.kill(pid, SIGTERM)
 
     bin_path = os.path.join(TESTDIR_PATH, "..", SESSIOND_BIN_PATH, SESSIOND_BIN_NAME)
+    consumer_path = os.path.join(TESTDIR_PATH, "..", CONSUMERD_BIN_PATH, CONSUMERD_BIN_NAME)
 
     if not os.path.isfile(bin_path):
         print "Error: No session daemon binary found. Compiled?"
         return 0
 
     try:
-        sdaemon_proc = subprocess.Popen([bin_path, "-d"], shell=False,
-                stderr = subprocess.PIPE)
+        args = shlex.split("libtool execute " + bin_path
+                           + " --consumerd32-path=" + consumer_path
+                           + " --consumerd64-path=" + consumer_path)
+
+        sdaemon_proc = subprocess.Popen(args, shell = False, stderr = subprocess.PIPE)
+
     except OSError, e:
         print e
         return 0
 
-    return get_pid(SESSIOND_BIN_NAME)
+    time.sleep(1)
+
+    return get_pid("lt-" + SESSIOND_BIN_NAME)
 
 def start_test(name):
     """
@@ -291,10 +301,23 @@ def run_test(test):
         print "Unable to find test file '%s'. Skipping" % (test['bin'])
         return 0
 
-    # No session daemon needed
-    if not test['daemon']:
+    # Session daemon is controlled by the test
+    if test['daemon'] == "test":
+        print PRINT_ARROW + " Session daemon is controlled by the test"
+        env = os.environ
+        env['TEST_NO_SESSIOND'] = '0'
+        tw = TestWorker(".", test['bin'], env)
+        tw.start()
+        ret = test_ret_q.get(True)
+        print_test_success(ret, test['success'])
+        return 0
+    elif test['daemon'] == False:
         print PRINT_ARROW + " No session daemon needed"
-        ret = start_test(test['bin'])
+        env = os.environ
+        env['TEST_NO_SESSIOND'] = '1'
+        tw = TestWorker(".", test['bin'], env)
+        tw.start()
+        ret = test_ret_q.get(True)
         print_test_success(ret, test['success'])
         return 0
     else:
@@ -315,7 +338,12 @@ def run_test(test):
         cpu_count, cpu_stats = get_cpu_usage(pid = dem_pid)
         print_cpu_stats(cpu_stats, cpu_count)
 
-    tw = TestWorker(".", test['bin'])
+    # Sessiond was already spawned, do not let the test spawn
+    # an additional sessiond
+    env = os.environ
+    env['TEST_NO_SESSIOND'] = '1'
+
+    tw = TestWorker(".", test['bin'], env)
     tw.start()
 
     if not no_stats:

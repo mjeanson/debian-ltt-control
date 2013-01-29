@@ -33,7 +33,7 @@
  * Send command. Fill up the header and append the data.
  */
 static int send_command(struct lttcomm_sock *sock,
-		enum lttcomm_sessiond_command cmd, void *data, size_t size,
+		enum lttcomm_relayd_command cmd, void *data, size_t size,
 		int flags)
 {
 	int ret;
@@ -90,10 +90,66 @@ static int recv_reply(struct lttcomm_sock *sock, void *data, size_t size)
 	DBG3("Relayd waiting for reply of size %ld", size);
 
 	ret = sock->ops->recvmsg(sock, data, size, 0);
-	if (ret < 0) {
-		ret = -errno;
+	if (ret <= 0 || ret != size) {
+		if (ret == 0) {
+			/* Orderly shutdown. */
+			DBG("Socket %d has performed an orderly shutdown", sock->fd);
+		} else {
+			DBG("Receiving reply failed on sock %d for size %lu with ret %d",
+					sock->fd, size, ret);
+		}
+		/* Always return -1 here and the caller can use errno. */
+		ret = -1;
 		goto error;
 	}
+
+error:
+	return ret;
+}
+
+/*
+ * Send a RELAYD_CREATE_SESSION command to the relayd with the given socket and
+ * set session_id of the relayd if we have a successful reply from the relayd.
+ *
+ * On success, return 0 else a negative value which is either an errno error or
+ * a lttng error code from the relayd.
+ */
+int relayd_create_session(struct lttcomm_sock *sock, uint64_t *session_id)
+{
+	int ret;
+	struct lttcomm_relayd_status_session reply;
+
+	assert(sock);
+	assert(session_id);
+
+	DBG("Relayd create session");
+
+	/* Send command */
+	ret = send_command(sock, RELAYD_CREATE_SESSION, NULL, 0, 0);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Receive response */
+	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	if (ret < 0) {
+		goto error;
+	}
+
+	reply.session_id = be64toh(reply.session_id);
+	reply.ret_code = be32toh(reply.ret_code);
+
+	/* Return session id or negative ret code. */
+	if (reply.ret_code != LTTNG_OK) {
+		ret = -1;
+		ERR("Relayd create session replied error %d", reply.ret_code);
+		goto error;
+	} else {
+		ret = 0;
+		*session_id = reply.session_id;
+	}
+
+	DBG("Relayd session created with id %" PRIu64, reply.session_id);
 
 error:
 	return ret;
@@ -139,8 +195,8 @@ int relayd_add_stream(struct lttcomm_sock *sock, const char *channel_name,
 
 	/* Return session id or negative ret code. */
 	if (reply.ret_code != LTTNG_OK) {
-		ret = -reply.ret_code;
-		ERR("Relayd add stream replied error %d", ret);
+		ret = -1;
+		ERR("Relayd add stream replied error %d", reply.ret_code);
 	} else {
 		/* Success */
 		ret = 0;
@@ -163,42 +219,61 @@ int relayd_version_check(struct lttcomm_sock *sock, uint32_t major,
 		uint32_t minor)
 {
 	int ret;
-	struct lttcomm_relayd_version reply;
+	struct lttcomm_relayd_version msg;
 
 	/* Code flow error. Safety net. */
 	assert(sock);
 
 	DBG("Relayd version check for major.minor %u.%u", major, minor);
 
+	/* Prepare network byte order before transmission. */
+	msg.major = htobe32(major);
+	msg.minor = htobe32(minor);
+
 	/* Send command */
-	ret = send_command(sock, RELAYD_VERSION, NULL, 0, 0);
+	ret = send_command(sock, RELAYD_VERSION, (void *) &msg, sizeof(msg), 0);
 	if (ret < 0) {
 		goto error;
 	}
 
-	/* Recevie response */
-	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	/* Receive response */
+	ret = recv_reply(sock, (void *) &msg, sizeof(msg));
 	if (ret < 0) {
 		goto error;
 	}
 
 	/* Set back to host bytes order */
-	reply.major = be32toh(reply.major);
-	reply.minor = be32toh(reply.minor);
+	msg.major = be32toh(msg.major);
+	msg.minor = be32toh(msg.minor);
 
-	/* Validate version */
-	if (reply.major <= major) {
-		if (reply.minor <= minor) {
-			/* Compatible */
-			ret = 0;
-			DBG2("Relayd version is compatible");
-			goto error;
-		}
+	/*
+	 * Only validate the major version. If the other side is higher,
+	 * communication is not possible. Only major version equal can talk to each
+	 * other. If the minor version differs, the lowest version is used by both
+	 * sides.
+	 *
+	 * For now, before 2.1.0 stable release, we don't have to check the minor
+	 * because this new mechanism with the relayd will only be available with
+	 * 2.1 and NOT 2.0.x.
+	 */
+	if (msg.major == major) {
+		/* Compatible */
+		ret = 0;
+		DBG2("Relayd version is compatible");
+		goto error;
 	}
 
+	/*
+	 * After 2.1.0 release, for the 2.2 release, at this point will have to
+	 * check the minor version in order for the session daemon to know which
+	 * structure to use to communicate with the relayd. If the relayd's minor
+	 * version is higher, it will adapt to our version so we can continue to
+	 * use the latest relayd communication data structure.
+	 */
+
 	/* Version number not compatible */
-	DBG2("Relayd version is NOT compatible %u.%u > %u.%u", reply.major,
-			reply.minor, major, minor);
+	DBG2("Relayd version is NOT compatible. Relayd version %u != %u (us)",
+			msg.major, major);
 	ret = -1;
 
 error:
@@ -322,7 +397,7 @@ int relayd_send_close_stream(struct lttcomm_sock *sock, uint64_t stream_id,
 		goto error;
 	}
 
-	/* Recevie response */
+	/* Receive response */
 	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
@@ -332,8 +407,8 @@ int relayd_send_close_stream(struct lttcomm_sock *sock, uint64_t stream_id,
 
 	/* Return session id or negative ret code. */
 	if (reply.ret_code != LTTNG_OK) {
-		ret = -reply.ret_code;
-		ERR("Relayd close stream replied error %d", ret);
+		ret = -1;
+		ERR("Relayd close stream replied error %d", reply.ret_code);
 	} else {
 		/* Success */
 		ret = 0;
@@ -372,7 +447,7 @@ int relayd_data_pending(struct lttcomm_sock *sock, uint64_t stream_id,
 		goto error;
 	}
 
-	/* Recevie response */
+	/* Receive response */
 	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
@@ -382,15 +457,14 @@ int relayd_data_pending(struct lttcomm_sock *sock, uint64_t stream_id,
 
 	/* Return session id or negative ret code. */
 	if (reply.ret_code >= LTTNG_OK) {
-		ret = -reply.ret_code;
-		ERR("Relayd data pending replied error %d", ret);
+		ERR("Relayd data pending replied error %d", reply.ret_code);
 	}
 
 	/* At this point, the ret code is either 1 or 0 */
 	ret = reply.ret_code;
 
 	DBG("Relayd data is %s pending for stream id %" PRIu64,
-			ret == 1 ? "NOT" : "", stream_id);
+			ret == 1 ? "" : "NOT", stream_id);
 
 error:
 	return ret;
@@ -399,9 +473,11 @@ error:
 /*
  * Check on the relayd side for a quiescent state on the control socket.
  */
-int relayd_quiescent_control(struct lttcomm_sock *sock)
+int relayd_quiescent_control(struct lttcomm_sock *sock,
+		uint64_t metadata_stream_id)
 {
 	int ret;
+	struct lttcomm_relayd_quiescent_control msg;
 	struct lttcomm_relayd_generic_reply reply;
 
 	/* Code flow error. Safety net. */
@@ -409,13 +485,15 @@ int relayd_quiescent_control(struct lttcomm_sock *sock)
 
 	DBG("Relayd checking quiescent control state");
 
+	msg.stream_id = htobe64(metadata_stream_id);
+
 	/* Send command */
-	ret = send_command(sock, RELAYD_QUIESCENT_CONTROL, NULL, 0, 0);
+	ret = send_command(sock, RELAYD_QUIESCENT_CONTROL, &msg, sizeof(msg), 0);
 	if (ret < 0) {
 		goto error;
 	}
 
-	/* Recevie response */
+	/* Receive response */
 	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
@@ -425,12 +503,103 @@ int relayd_quiescent_control(struct lttcomm_sock *sock)
 
 	/* Return session id or negative ret code. */
 	if (reply.ret_code != LTTNG_OK) {
-		ret = -reply.ret_code;
-		ERR("Relayd quiescent control replied error %d", ret);
+		ret = -1;
+		ERR("Relayd quiescent control replied error %d", reply.ret_code);
 		goto error;
 	}
 
 	/* Control socket is quiescent */
+	return 0;
+
+error:
+	return ret;
+}
+
+/*
+ * Begin a data pending command for a specific session id.
+ */
+int relayd_begin_data_pending(struct lttcomm_sock *sock, uint64_t id)
+{
+	int ret;
+	struct lttcomm_relayd_begin_data_pending msg;
+	struct lttcomm_relayd_generic_reply reply;
+
+	/* Code flow error. Safety net. */
+	assert(sock);
+
+	DBG("Relayd begin data pending");
+
+	msg.session_id = htobe64(id);
+
+	/* Send command */
+	ret = send_command(sock, RELAYD_BEGIN_DATA_PENDING, &msg, sizeof(msg), 0);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Receive response */
+	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	if (ret < 0) {
+		goto error;
+	}
+
+	reply.ret_code = be32toh(reply.ret_code);
+
+	/* Return session id or negative ret code. */
+	if (reply.ret_code != LTTNG_OK) {
+		ret = -1;
+		ERR("Relayd begin data pending replied error %d", reply.ret_code);
+		goto error;
+	}
+
+	return 0;
+
+error:
+	return ret;
+}
+
+/*
+ * End a data pending command for a specific session id.
+ *
+ * Return 0 on success and set is_data_inflight to 0 if no data is being
+ * streamed or 1 if it is the case.
+ */
+int relayd_end_data_pending(struct lttcomm_sock *sock, uint64_t id,
+		unsigned int *is_data_inflight)
+{
+	int ret;
+	struct lttcomm_relayd_end_data_pending msg;
+	struct lttcomm_relayd_generic_reply reply;
+
+	/* Code flow error. Safety net. */
+	assert(sock);
+
+	DBG("Relayd end data pending");
+
+	msg.session_id = htobe64(id);
+
+	/* Send command */
+	ret = send_command(sock, RELAYD_END_DATA_PENDING, &msg, sizeof(msg), 0);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Receive response */
+	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	if (ret < 0) {
+		goto error;
+	}
+
+	reply.ret_code = be32toh(reply.ret_code);
+	if (reply.ret_code < 0) {
+		ret = reply.ret_code;
+		goto error;
+	}
+
+	*is_data_inflight = reply.ret_code;
+
+	DBG("Relayd end data pending is data inflight: %d", reply.ret_code);
+
 	return 0;
 
 error:

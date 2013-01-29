@@ -157,6 +157,7 @@ ssize_t lttcomm_recv_unix_sock(int sock, void *buf, size_t len)
 	struct msghdr msg;
 	struct iovec iov[1];
 	ssize_t ret = -1;
+	size_t len_last;
 
 	memset(&msg, 0, sizeof(msg));
 
@@ -166,11 +167,20 @@ ssize_t lttcomm_recv_unix_sock(int sock, void *buf, size_t len)
 	msg.msg_iovlen = 1;
 
 	do {
-		ret = recvmsg(sock, &msg, MSG_WAITALL);
-	} while (ret < 0 && errno == EINTR);
+		len_last = iov[0].iov_len;
+		ret = recvmsg(sock, &msg, 0);
+		if (ret > 0) {
+			iov[0].iov_base += ret;
+			iov[0].iov_len -= ret;
+			assert(ret <= len_last);
+		}
+	} while ((ret > 0 && ret < len_last) || (ret < 0 && errno == EINTR));
 	if (ret < 0) {
 		PERROR("recvmsg");
+	} else if (ret > 0) {
+		ret = len;
 	}
+	/* Else ret = 0 meaning an orderly shutdown. */
 
 	return ret;
 }
@@ -247,6 +257,7 @@ ssize_t lttcomm_send_fds_unix_sock(int sock, int *fds, size_t nb_fd)
 	char dummy = 0;
 
 	memset(&msg, 0, sizeof(msg));
+	memset(tmp, 0, CMSG_SPACE(sizeof_fds) * sizeof(char));
 
 	if (nb_fd > LTTCOMM_MAX_SEND_FDS)
 		return -EINVAL;
@@ -370,6 +381,7 @@ ssize_t lttcomm_send_creds_unix_sock(int sock, void *buf, size_t len)
 #endif /* __linux__ */
 
 	memset(&msg, 0, sizeof(msg));
+	memset(anc_buf, 0, CMSG_SPACE(sizeof_cred) * sizeof(char));
 
 	iov[0].iov_base = buf;
 	iov[0].iov_len = len;

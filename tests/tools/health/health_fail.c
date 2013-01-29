@@ -17,10 +17,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
-#include <unistd.h>
-
-#define STALL_TIME 60
+#include <pthread.h>
 
 /*
  * Check if the specified environment variable is set.
@@ -38,43 +35,34 @@ int check_env_var(const char *env)
 	return 0;
 }
 
-int __testpoint_thread_manage_clients_before_loop(void)
+int __testpoint_thread_manage_clients(void)
 {
-	const char *var = "LTTNG_THREAD_MANAGE_CLIENTS_STALL";
+	const char *var = "LTTNG_THREAD_MANAGE_CLIENTS_TP_FAIL";
 
 	if (check_env_var(var)) {
-		unsigned int sleep_time = STALL_TIME;
-		while (sleep_time > 0) {
-			sleep_time = sleep(sleep_time);
-		}
+		return 1;
 	}
 
 	return 0;
 }
 
-int __testpoint_thread_manage_kernel_before_loop(void)
+int __testpoint_thread_manage_apps(void)
 {
-	const char *var = "LTTNG_THREAD_MANAGE_KERNEL_STALL";
+	const char *var = "LTTNG_THREAD_MANAGE_APPS_TP_FAIL";
 
 	if (check_env_var(var)) {
-		unsigned int sleep_time = STALL_TIME;
-		while (sleep_time > 0) {
-			sleep_time = sleep(sleep_time);
-		}
+		return 1;
 	}
 
 	return 0;
 }
 
-int __testpoint_thread_manage_apps_before_loop(void)
+int __testpoint_thread_manage_kernel(void)
 {
-	const char *var = "LTTNG_THREAD_MANAGE_APPS_STALL";
+	const char *var = "LTTNG_THREAD_MANAGE_KERNEL_TP_FAIL";
 
 	if (check_env_var(var)) {
-		unsigned int sleep_time = STALL_TIME;
-		while (sleep_time > 0) {
-			sleep_time = sleep(sleep_time);
-		}
+		return 1;
 	}
 
 	return 0;

@@ -86,7 +86,7 @@ int lttng_ustconsumer_get_produced_snapshot(
 			stream->buf, pos);
 	if (ret != 0) {
 		errno = -ret;
-		PERROR("kernctl_snapshot_get_produced");
+		PERROR("ustctl_snapshot_get_produced");
 	}
 
 	return ret;
@@ -101,6 +101,7 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		int sock, struct pollfd *consumer_sockpoll)
 {
 	ssize_t ret;
+	enum lttng_error_code ret_code = LTTNG_OK;
 	struct lttcomm_consumer_msg msg;
 
 	ret = lttcomm_recv_unix_sock(sock, &msg, sizeof(msg));
@@ -108,9 +109,21 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		DBG("Consumer received unexpected message size %zd (expects %zu)",
 			ret, sizeof(msg));
 		lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_ERROR_RECV_FD);
+		/*
+		 * The ret value might 0 meaning an orderly shutdown but this is ok
+		 * since the caller handles this.
+		 */
 		return ret;
 	}
 	if (msg.cmd_type == LTTNG_CONSUMER_STOP) {
+		/*
+		 * Notify the session daemon that the command is completed.
+		 *
+		 * On transport layer error, the function call will print an error
+		 * message so handling the returned code is a bit useless since we
+		 * return an error code anyway.
+		 */
+		(void) consumer_send_status_msg(sock, ret_code);
 		return -ENOENT;
 	}
 
@@ -120,9 +133,10 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 	switch (msg.cmd_type) {
 	case LTTNG_CONSUMER_ADD_RELAYD_SOCKET:
 	{
+		/* Session daemon status message are handled in the following call. */
 		ret = consumer_add_relayd_socket(msg.u.relayd_sock.net_index,
 				msg.u.relayd_sock.type, ctx, sock, consumer_sockpoll,
-				&msg.u.relayd_sock.sock);
+				&msg.u.relayd_sock.sock, msg.u.relayd_sock.session_id);
 		goto end_nosignal;
 	}
 	case LTTNG_CONSUMER_ADD_CHANNEL:
@@ -133,6 +147,13 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 
 		DBG("UST Consumer adding channel");
 
+		/* First send a status message before receiving the fds. */
+		ret = consumer_send_status_msg(sock, ret_code);
+		if (ret < 0) {
+			/* Somehow, the session daemon is not responding anymore. */
+			goto end_nosignal;
+		}
+
 		/* block */
 		if (lttng_consumer_poll_socket(consumer_sockpoll) < 0) {
 			rcu_read_unlock();
@@ -142,7 +163,22 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		if (ret != sizeof(fds)) {
 			lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_ERROR_RECV_FD);
 			rcu_read_unlock();
+			/*
+			 * The ret value might 0 meaning an orderly shutdown but this is ok
+			 * since the caller handles this.
+			 */
 			return ret;
+		}
+
+		/*
+		 * Send status code to session daemon only if the recv works. If the
+		 * above recv() failed, the session daemon is notified through the
+		 * error socket and the teardown is eventually done.
+		 */
+		ret = consumer_send_status_msg(sock, ret_code);
+		if (ret < 0) {
+			/* Somehow, the session daemon is not responding anymore. */
+			goto end_nosignal;
 		}
 
 		DBG("consumer_add_channel %d", msg.u.channel.channel_key);
@@ -178,6 +214,13 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 
 		DBG("UST Consumer adding stream");
 
+		/* First send a status message before receiving the fds. */
+		ret = consumer_send_status_msg(sock, ret_code);
+		if (ret < 0) {
+			/* Somehow, the session daemon is not responding anymore. */
+			goto end_nosignal;
+		}
+
 		/* block */
 		if (lttng_consumer_poll_socket(consumer_sockpoll) < 0) {
 			rcu_read_unlock();
@@ -187,7 +230,22 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		if (ret != sizeof(fds)) {
 			lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_ERROR_RECV_FD);
 			rcu_read_unlock();
+			/*
+			 * The ret value might 0 meaning an orderly shutdown but this is ok
+			 * since the caller handles this.
+			 */
 			return ret;
+		}
+
+		/*
+		 * Send status code to session daemon only if the recv works. If the
+		 * above recv() failed, the session daemon is notified through the
+		 * error socket and the teardown is eventually done.
+		 */
+		ret = consumer_send_status_msg(sock, ret_code);
+		if (ret < 0) {
+			/* Somehow, the session daemon is not responding anymore. */
+			goto end_nosignal;
 		}
 
 		DBG("Consumer command ADD_STREAM chan %d stream %d",
@@ -287,8 +345,8 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		/* Get relayd reference if exists. */
 		relayd = consumer_find_relayd(index);
 		if (relayd == NULL) {
-			ERR("Unable to find relayd %" PRIu64, index);
-			goto end_nosignal;
+			DBG("Unable to find relayd %" PRIu64, index);
+			ret_code = LTTNG_ERR_NO_CONSUMER;
 		}
 
 		/*
@@ -301,7 +359,15 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		 *
 		 * The destroy can happen either here or when a stream fd hangs up.
 		 */
-		consumer_flag_relayd_for_destroy(relayd);
+		if (relayd) {
+			consumer_flag_relayd_for_destroy(relayd);
+		}
+
+		ret = consumer_send_status_msg(sock, ret_code);
+		if (ret < 0) {
+			/* Somehow, the session daemon is not responding anymore. */
+			goto end_nosignal;
+		}
 
 		goto end_nosignal;
 	}
@@ -312,18 +378,24 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 	}
 	case LTTNG_CONSUMER_DATA_PENDING:
 	{
-		int32_t ret;
+		int ret, is_data_pending;
 		uint64_t id = msg.u.data_pending.session_id;
 
 		DBG("UST consumer data pending command for id %" PRIu64, id);
 
-		ret = consumer_data_pending(id);
+		is_data_pending = consumer_data_pending(id);
 
 		/* Send back returned value to session daemon */
-		ret = lttcomm_send_unix_sock(sock, &ret, sizeof(ret));
+		ret = lttcomm_send_unix_sock(sock, &is_data_pending,
+				sizeof(is_data_pending));
 		if (ret < 0) {
-			PERROR("send data pending ret code");
+			DBG("Error when sending the data pending ret code: %d", ret);
 		}
+
+		/*
+		 * No need to send back a status message since the data pending
+		 * returned value is the response.
+		 */
 		break;
 	}
 	default:
@@ -425,13 +497,14 @@ int lttng_ustconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
 	struct lttng_ust_shm_handle *handle;
 	struct lttng_ust_lib_ring_buffer *buf;
 	char dummy;
-	ssize_t readlen;
 
 	DBG("In read_subbuffer (wait_fd: %d, stream key: %d)",
 		stream->wait_fd, stream->key);
 
 	/* We can consume the 1 byte written into the wait_fd by UST */
 	if (!stream->hangup_flush_done) {
+		ssize_t readlen;
+
 		do {
 			readlen = read(stream->wait_fd, &dummy, 1);
 		} while (readlen == -1 && errno == EINTR);
@@ -480,9 +553,13 @@ int lttng_ustconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
 			(ret != len && stream->net_seq_idx == -1)) {
 		/*
 		 * Display the error but continue processing to try to release the
-		 * subbuffer
+		 * subbuffer. This is a DBG statement since any unexpected kill or
+		 * signal, the application gets unregistered, relayd gets closed or
+		 * anything that affects the buffer lifetime will trigger this error.
+		 * So, for the sake of the user, don't print this error since it can
+		 * happen and it is OK with the code flow.
 		 */
-		ERR("Error writing to tracefile "
+		DBG("Error writing to tracefile "
 				"(ret: %zd != len: %lu != subbuf_size: %lu)",
 				ret, len, subbuf_size);
 	}

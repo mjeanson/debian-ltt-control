@@ -53,44 +53,48 @@
 
 enum lttcomm_sessiond_command {
 	/* Tracer command */
-	LTTNG_ADD_CONTEXT					= 1,
-	LTTNG_CALIBRATE						= 2,
-	LTTNG_DISABLE_CHANNEL				= 3,
-	LTTNG_DISABLE_EVENT					= 4,
-	LTTNG_DISABLE_ALL_EVENT				= 5,
-	LTTNG_ENABLE_CHANNEL				= 6,
-	LTTNG_ENABLE_EVENT					= 7,
-	LTTNG_ENABLE_ALL_EVENT				= 8,
+	LTTNG_ADD_CONTEXT                   = 0,
+	LTTNG_CALIBRATE                     = 1,
+	LTTNG_DISABLE_CHANNEL               = 2,
+	LTTNG_DISABLE_EVENT                 = 3,
+	LTTNG_DISABLE_ALL_EVENT             = 4,
+	LTTNG_ENABLE_CHANNEL                = 5,
+	LTTNG_ENABLE_EVENT                  = 6,
+	LTTNG_ENABLE_ALL_EVENT              = 7,
 	/* Session daemon command */
-	LTTNG_CREATE_SESSION				= 9,
-	LTTNG_DESTROY_SESSION				= 10,
-	LTTNG_LIST_CHANNELS                 = 11,
-	LTTNG_LIST_DOMAINS                  = 12,
-	LTTNG_LIST_EVENTS                   = 13,
-	LTTNG_LIST_SESSIONS                 = 14,
-	LTTNG_LIST_TRACEPOINTS              = 15,
-	LTTNG_REGISTER_CONSUMER             = 16,
-	LTTNG_START_TRACE                   = 17,
-	LTTNG_STOP_TRACE                    = 18,
-	LTTNG_LIST_TRACEPOINT_FIELDS        = 19,
+	LTTNG_CREATE_SESSION                = 8,
+	LTTNG_DESTROY_SESSION               = 9,
+	LTTNG_LIST_CHANNELS                 = 10,
+	LTTNG_LIST_DOMAINS                  = 11,
+	LTTNG_LIST_EVENTS                   = 12,
+	LTTNG_LIST_SESSIONS                 = 13,
+	LTTNG_LIST_TRACEPOINTS              = 14,
+	LTTNG_REGISTER_CONSUMER             = 15,
+	LTTNG_START_TRACE                   = 16,
+	LTTNG_STOP_TRACE                    = 17,
+	LTTNG_LIST_TRACEPOINT_FIELDS        = 18,
 
 	/* Consumer */
-	LTTNG_DISABLE_CONSUMER              = 20,
-	LTTNG_ENABLE_CONSUMER               = 21,
-	LTTNG_SET_CONSUMER_URI              = 22,
-	/* Relay daemon */
-	RELAYD_ADD_STREAM                   = 23,
-	RELAYD_CREATE_SESSION               = 24,
-	RELAYD_START_DATA                   = 25,
-	RELAYD_UPDATE_SYNC_INFO             = 26,
-	RELAYD_VERSION                      = 27,
-	RELAYD_SEND_METADATA                = 28,
-	RELAYD_CLOSE_STREAM                 = 29,
-	RELAYD_DATA_PENDING                 = 30,
-	RELAYD_QUIESCENT_CONTROL            = 31,
-	LTTNG_ENABLE_EVENT_WITH_FILTER      = 32,
-	LTTNG_HEALTH_CHECK                  = 33,
-	LTTNG_DATA_PENDING                  = 34,
+	LTTNG_DISABLE_CONSUMER              = 19,
+	LTTNG_ENABLE_CONSUMER               = 20,
+	LTTNG_SET_CONSUMER_URI              = 21,
+	LTTNG_ENABLE_EVENT_WITH_FILTER      = 22,
+	LTTNG_HEALTH_CHECK                  = 23,
+	LTTNG_DATA_PENDING                  = 24,
+};
+
+enum lttcomm_relayd_command {
+	RELAYD_ADD_STREAM                   = 1,
+	RELAYD_CREATE_SESSION               = 2,
+	RELAYD_START_DATA                   = 3,
+	RELAYD_UPDATE_SYNC_INFO             = 4,
+	RELAYD_VERSION                      = 5,
+	RELAYD_SEND_METADATA                = 6,
+	RELAYD_CLOSE_STREAM                 = 7,
+	RELAYD_DATA_PENDING                 = 8,
+	RELAYD_QUIESCENT_CONTROL            = 9,
+	RELAYD_BEGIN_DATA_PENDING           = 10,
+	RELAYD_END_DATA_PENDING             = 11,
 };
 
 /*
@@ -136,14 +140,14 @@ struct lttcomm_sockaddr {
 		struct sockaddr_in sin;
 		struct sockaddr_in6 sin6;
 	} addr;
-};
+} LTTNG_PACKED;
 
 struct lttcomm_sock {
 	int fd;
 	enum lttcomm_sock_proto proto;
 	struct lttcomm_sockaddr sockaddr;
 	const struct lttcomm_proto_ops *ops;
-};
+} LTTNG_PACKED;
 
 struct lttcomm_net_family {
 	int family;
@@ -173,39 +177,39 @@ struct lttcomm_session_msg {
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];
 			char name[NAME_MAX];
-		} disable;
+		} LTTNG_PACKED disable;
 		/* Event data */
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];
 			struct lttng_event event;
 			/* Length of following bytecode for filter. */
 			uint32_t bytecode_len;
-		} enable;
+		} LTTNG_PACKED enable;
 		/* Create channel */
 		struct {
 			struct lttng_channel chan;
-		} channel;
+		} LTTNG_PACKED channel;
 		/* Context */
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];
 			struct lttng_event_context ctx;
-		} context;
+		} LTTNG_PACKED context;
 		/* Use by register_consumer */
 		struct {
 			char path[PATH_MAX];
-		} reg;
+		} LTTNG_PACKED reg;
 		/* List */
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];
-		} list;
+		} LTTNG_PACKED list;
 		struct lttng_calibrate calibrate;
 		/* Used by the set_consumer_url and used by create_session also call */
 		struct {
 			/* Number of lttng_uri following */
 			uint32_t size;
-		} uri;
+		} LTTNG_PACKED uri;
 	} u;
-};
+} LTTNG_PACKED;
 
 #define LTTNG_FILTER_MAX_LEN	65536
 
@@ -221,7 +225,7 @@ struct lttng_filter_bytecode {
 	uint64_t seqnum;
 	char padding[LTTNG_FILTER_PADDING];
 	char data[0];
-};
+} LTTNG_PACKED;
 
 /*
  * Data structure for the response from sessiond to the lttng client.
@@ -233,16 +237,16 @@ struct lttcomm_lttng_msg {
 	uint32_t data_size;
 	/* Contains: trace_name + data */
 	char payload[];
-};
+} LTTNG_PACKED;
 
 struct lttcomm_health_msg {
 	uint32_t component;
 	uint32_t cmd;
-};
+} LTTNG_PACKED;
 
 struct lttcomm_health_data {
 	uint32_t ret_code;
-};
+} LTTNG_PACKED;
 
 /*
  * lttcomm_consumer_msg is the message sent from sessiond to consumerd
@@ -260,7 +264,7 @@ struct lttcomm_consumer_msg {
 			/* nb_init_streams is the number of streams open initially. */
 			unsigned int nb_init_streams;
 			char name[LTTNG_SYMBOL_NAME_LEN];
-		} channel;
+		} LTTNG_PACKED channel;
 		struct {
 			int channel_key;
 			int stream_key;
@@ -275,21 +279,30 @@ struct lttcomm_consumer_msg {
 			unsigned int metadata_flag;
 			char name[DEFAULT_STREAM_NAME_LEN];  /* Name string of the stream */
 			uint64_t session_id;   /* Tracing session id of the stream */
-		} stream;
+		} LTTNG_PACKED stream;
 		struct {
 			int net_index;
 			enum lttng_stream_type type;
 			/* Open socket to the relayd */
 			struct lttcomm_sock sock;
-		} relayd_sock;
+			/* Tracing session id associated to the relayd. */
+			uint64_t session_id;
+		} LTTNG_PACKED relayd_sock;
 		struct {
 			uint64_t net_seq_idx;
-		} destroy_relayd;
+		} LTTNG_PACKED destroy_relayd;
 		struct {
 			uint64_t session_id;
-		} data_pending;
+		} LTTNG_PACKED data_pending;
 	} u;
-};
+} LTTNG_PACKED;
+
+/*
+ * Status message returned to the sessiond after a received command.
+ */
+struct lttcomm_consumer_status_msg {
+	enum lttng_error_code ret_code;
+} LTTNG_PACKED;
 
 #ifdef HAVE_LIBLTTNG_UST_CTL
 
@@ -308,7 +321,7 @@ struct lttcomm_ust_msg {
 		struct lttng_ust_context context;
 		struct lttng_ust_tracer_version version;
 	} u;
-};
+} LTTNG_PACKED;
 
 /*
  * Data structure for the response from UST to the session daemon.
@@ -322,13 +335,13 @@ struct lttcomm_ust_reply {
 	union {
 		struct {
 			uint64_t memory_map_size;
-		} channel;
+		} LTTNG_PACKED channel;
 		struct {
 			uint64_t memory_map_size;
-		} stream;
+		} LTTNG_PACKED stream;
 		struct lttng_ust_tracer_version version;
 	} u;
-};
+} LTTNG_PACKED;
 
 #endif /* HAVE_LIBLTTNG_UST_CTL */
 

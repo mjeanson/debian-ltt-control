@@ -55,11 +55,10 @@ target_triplet = @target@
 subdir = .
 DIST_COMMON = README $(am__configure_deps) $(dist_doc_DATA) \
 	$(dist_noinst_DATA) $(srcdir)/Makefile.am \
-	$(srcdir)/Makefile.in $(top_srcdir)/configure AUTHORS \
-	ChangeLog INSTALL NEWS TODO config/config.guess \
-	config/config.sub config/depcomp config/install-sh \
-	config/ltmain.sh config/missing config/py-compile \
-	config/ylwrap
+	$(srcdir)/Makefile.in $(top_srcdir)/configure ChangeLog \
+	INSTALL TODO config/config.guess config/config.sub \
+	config/depcomp config/install-sh config/ltmain.sh \
+	config/missing config/py-compile config/ylwrap
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/config/ax_pkg_swig.m4 \
 	$(top_srcdir)/config/config_feature.m4 \

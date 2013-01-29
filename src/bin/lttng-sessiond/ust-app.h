@@ -107,6 +107,7 @@ struct ust_app_session {
 	/* UID/GID of the user owning the session */
 	uid_t uid;
 	gid_t gid;
+	struct cds_list_head teardown_node;
 };
 
 /*
@@ -130,6 +131,16 @@ struct ust_app {
 	struct lttng_ht *sessions;
 	struct lttng_ht_node_ulong pid_n;
 	struct lttng_ht_node_ulong sock_n;
+	/*
+	 * This is a list of ust app session that, once the app is going into
+	 * teardown mode, in the RCU call, each node in this list is removed and
+	 * deleted.
+	 *
+	 * Element of the list are added when an application unregisters after each
+	 * ht_del of ust_app_session associated to this app. This list is NOT used
+	 * when a session is destroyed.
+	 */
+	struct cds_list_head teardown_head;
 };
 
 #ifdef HAVE_LIBLTTNG_UST_CTL
@@ -146,7 +157,6 @@ int ust_app_start_trace(struct ltt_ust_session *usess, struct ust_app *app);
 int ust_app_stop_trace(struct ltt_ust_session *usess, struct ust_app *app);
 int ust_app_start_trace_all(struct ltt_ust_session *usess);
 int ust_app_stop_trace_all(struct ltt_ust_session *usess);
-int ust_app_destroy_trace(struct ltt_ust_session *usess, struct ust_app *app);
 int ust_app_destroy_trace_all(struct ltt_ust_session *usess);
 int ust_app_list_events(struct lttng_event **events);
 int ust_app_list_event_fields(struct lttng_event_field **fields);

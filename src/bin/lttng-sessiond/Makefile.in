@@ -78,10 +78,10 @@ am__lttng_sessiond_SOURCES_DIST = utils.c utils.h trace-kernel.c \
 	trace-ust.h context.c context.h channel.c channel.h event.c \
 	event.h shm.c shm.h consumer.c consumer.h session.c session.h \
 	modprobe.c modprobe.h kern-modules.h lttng-ust-ctl.h \
-	lttng-ust-abi.h fd-limit.c fd-limit.h kernel-consumer.c \
-	kernel-consumer.h health.c health.h cmd.c cmd.h testpoint.h \
-	trace-ust.c ust-app.c ust-consumer.c ust-consumer.h \
-	lttng-sessiond.h main.c
+	lttng-ust-abi.h lttng-ust-error.h fd-limit.c fd-limit.h \
+	kernel-consumer.c kernel-consumer.h health.c health.h cmd.c \
+	cmd.h testpoint.h trace-ust.c ust-app.c ust-consumer.c \
+	ust-consumer.h lttng-sessiond.h main.c
 @HAVE_LIBLTTNG_UST_CTL_TRUE@am__objects_1 = trace-ust.$(OBJEXT) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@	ust-app.$(OBJEXT) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@	ust-consumer.$(OBJEXT)
@@ -298,9 +298,9 @@ lttng_sessiond_SOURCES = utils.c utils.h trace-kernel.c trace-kernel.h \
 	context.h channel.c channel.h event.c event.h shm.c shm.h \
 	consumer.c consumer.h session.c session.h modprobe.c \
 	modprobe.h kern-modules.h lttng-ust-ctl.h lttng-ust-abi.h \
-	fd-limit.c fd-limit.h kernel-consumer.c kernel-consumer.h \
-	consumer.h health.c health.h cmd.c cmd.h testpoint.h \
-	$(am__append_1) lttng-sessiond.h main.c
+	lttng-ust-error.h fd-limit.c fd-limit.h kernel-consumer.c \
+	kernel-consumer.h consumer.h health.c health.h cmd.c cmd.h \
+	testpoint.h $(am__append_1) lttng-sessiond.h main.c
 
 # link on liblttngctl for check if sessiond is already alive.
 lttng_sessiond_LDADD = -lrt -lurcu-common -lurcu \

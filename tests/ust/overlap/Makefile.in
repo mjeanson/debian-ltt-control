@@ -270,7 +270,7 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 SUBDIRS = demo
 noinst_SCRIPTS = run
-EXTRA_DIST = run
+EXTRA_DIST = run overlap.sh
 all: all-recursive
 
 .SUFFIXES:

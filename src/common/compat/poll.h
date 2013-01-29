@@ -18,6 +18,7 @@
 #ifndef _LTT_POLL_H
 #define _LTT_POLL_H
 
+#include <assert.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -78,10 +79,24 @@ enum {
 struct compat_epoll_event {
 	int epfd;
 	uint32_t nb_fd;       /* Current number of fd in events */
-	uint32_t events_size; /* Size of events array */
+	uint32_t alloc_size; /* Size of events array */
+	uint32_t init_size;	/* Initial size of events array */
 	struct epoll_event *events;
 };
 #define lttng_poll_event compat_epoll_event
+
+static inline int __lttng_epoll_get_prev_fd(struct lttng_poll_event *events,
+		int index, uint32_t nb_fd)
+{
+	assert(events);
+	assert(index != nb_fd);
+
+	if (index == 0 || nb_fd == 0) {
+		return -1;
+	} else {
+		return events->events[index - 1].data.fd;
+	}
+}
 
 /*
  * For the following calls, consider 'e' to be a lttng_poll_event pointer and i
@@ -91,6 +106,8 @@ struct compat_epoll_event {
 #define LTTNG_POLL_GETEV(e, i) LTTNG_REF(e)->events[i].events
 #define LTTNG_POLL_GETNB(e) LTTNG_REF(e)->nb_fd
 #define LTTNG_POLL_GETSZ(e) LTTNG_REF(e)->events_size
+#define LTTNG_POLL_GET_PREV_FD(e, i, nb_fd) \
+	__lttng_epoll_get_prev_fd(LTTNG_REF(e), i, nb_fd)
 
 /*
  * Create the epoll set. No memory allocation is done here.
@@ -202,21 +219,55 @@ enum {
 	LTTNG_CLOEXEC = 0xdead,
 };
 
-struct compat_poll_event {
+struct compat_poll_event_array {
 	uint32_t nb_fd;       /* Current number of fd in events */
-	uint32_t events_size; /* Size of events array */
+	uint32_t alloc_size; /* Size of events array */
+	/* Initial size of the pollset. We never shrink below that. */
+	uint32_t init_size;
 	struct pollfd *events;
 };
+
+struct compat_poll_event {
+	/*
+	 * Modified by the wait action. Updated using current fields if the
+	 * need_update flag is set.
+	 */
+	struct compat_poll_event_array wait;
+	/*
+	 * This is modified by add/del actions being the _current_ flow of
+	 * execution before a poll wait is done.
+	 */
+	struct compat_poll_event_array current;
+	/* Indicate if wait.events needs to be realloc. */
+	int need_realloc:1;
+	/* Indicate if wait.events need to be updated from current. */
+	int need_update:1;
+};
 #define lttng_poll_event compat_poll_event
+
+static inline int __lttng_poll_get_prev_fd(struct lttng_poll_event *events,
+		int index, uint32_t nb_fd)
+{
+	assert(events);
+	assert(index != nb_fd);
+
+	if (index == 0 || nb_fd == 0) {
+		return -1;
+	} else {
+		return events->current.events[index - 1].fd;
+	}
+}
 
 /*
  * For the following calls, consider 'e' to be a lttng_poll_event pointer and i
  * being the index of the events array.
  */
-#define LTTNG_POLL_GETFD(e, i) LTTNG_REF(e)->events[i].fd
-#define LTTNG_POLL_GETEV(e, i) LTTNG_REF(e)->events[i].revents
-#define LTTNG_POLL_GETNB(e) LTTNG_REF(e)->nb_fd
-#define LTTNG_POLL_GETSZ(e) LTTNG_REF(e)->events_size
+#define LTTNG_POLL_GETFD(e, i) LTTNG_REF(e)->wait.events[i].fd
+#define LTTNG_POLL_GETEV(e, i) LTTNG_REF(e)->wait.events[i].revents
+#define LTTNG_POLL_GETNB(e) LTTNG_REF(e)->wait.nb_fd
+#define LTTNG_POLL_GETSZ(e) LTTNG_REF(e)->wait.events_size
+#define LTTNG_POLL_GET_PREV_FD(e, i, nb_fd) \
+	__lttng_poll_get_prev_fd(LTTNG_REF(e), i, nb_fd)
 
 /*
  * Create a pollfd structure of size 'size'.
@@ -270,7 +321,8 @@ static inline void lttng_poll_reset(struct lttng_poll_event *events)
 static inline void lttng_poll_clean(struct lttng_poll_event *events)
 {
 	if (events) {
-		__lttng_poll_free((void *) events->events);
+		__lttng_poll_free((void *) events->wait.events);
+		__lttng_poll_free((void *) events->current.events);
 	}
 }
 
