@@ -461,7 +461,7 @@ static void cleanup(void)
 static int send_unix_sock(int sock, void *buf, size_t len)
 {
 	/* Check valid length */
-	if (len <= 0) {
+	if (len == 0) {
 		return -1;
 	}
 
@@ -633,7 +633,7 @@ static int update_kernel_stream(struct consumer_data *consumer_data, int fd)
 						assert(socket->fd >= 0);
 
 						pthread_mutex_lock(socket->lock);
-						ret = kernel_consumer_send_channel_stream(socket->fd,
+						ret = kernel_consumer_send_channel_stream(socket,
 								channel, ksess);
 						pthread_mutex_unlock(socket->lock);
 						if (ret < 0) {
@@ -689,34 +689,42 @@ static void *thread_manage_kernel(void *data)
 	char tmp;
 	struct lttng_poll_event events;
 
-	DBG("Thread manage kernel started");
+	DBG("[thread] Thread manage kernel started");
 
-	testpoint(thread_manage_kernel);
+	/*
+	 * This first step of the while is to clean this structure which could free
+	 * non NULL pointers so zero it before the loop.
+	 */
+	memset(&events, 0, sizeof(events));
+
+	if (testpoint(thread_manage_kernel)) {
+		goto error_testpoint;
+	}
 
 	health_code_update(&health_thread_kernel);
 
-	testpoint(thread_manage_kernel_before_loop);
-
-	ret = create_thread_poll_set(&events, 2);
-	if (ret < 0) {
-		goto error_poll_create;
-	}
-
-	ret = lttng_poll_add(&events, kernel_poll_pipe[0], LPOLLIN);
-	if (ret < 0) {
-		goto error;
+	if (testpoint(thread_manage_kernel_before_loop)) {
+		goto error_testpoint;
 	}
 
 	while (1) {
 		health_code_update(&health_thread_kernel);
 
 		if (update_poll_flag == 1) {
-			/*
-			 * Reset number of fd in the poll set. Always 2 since there is the thread
-			 * quit pipe and the kernel pipe.
-			 */
-			events.nb_fd = 2;
+			/* Clean events object. We are about to populate it again. */
+			lttng_poll_clean(&events);
 
+			ret = create_thread_poll_set(&events, 2);
+			if (ret < 0) {
+				goto error_poll_create;
+			}
+
+			ret = lttng_poll_add(&events, kernel_poll_pipe[0], LPOLLIN);
+			if (ret < 0) {
+				goto error;
+			}
+
+			/* This will add the available kernel channel if any. */
 			ret = update_kernel_poll(&events);
 			if (ret < 0) {
 				goto error;
@@ -724,12 +732,7 @@ static void *thread_manage_kernel(void *data)
 			update_poll_flag = 0;
 		}
 
-		nb_fd = LTTNG_POLL_GETNB(&events);
-
-		DBG("Thread kernel polling on %d fds", nb_fd);
-
-		/* Zeroed the poll events */
-		lttng_poll_reset(&events);
+		DBG("Thread kernel polling on %d fds", LTTNG_POLL_GETNB(&events));
 
 		/* Poll infinite value of time */
 	restart:
@@ -751,6 +754,8 @@ static void *thread_manage_kernel(void *data)
 			continue;
 		}
 
+		nb_fd = ret;
+
 		for (i = 0; i < nb_fd; i++) {
 			/* Fetch once the poll data */
 			revents = LTTNG_POLL_GETEV(&events, i);
@@ -767,7 +772,13 @@ static void *thread_manage_kernel(void *data)
 
 			/* Check for data on kernel pipe */
 			if (pollfd == kernel_poll_pipe[0] && (revents & LPOLLIN)) {
-				ret = read(kernel_poll_pipe[0], &tmp, 1);
+				do {
+					ret = read(kernel_poll_pipe[0], &tmp, 1);
+				} while (ret < 0 && errno == EINTR);
+				/*
+				 * Ret value is useless here, if this pipe gets any actions an
+				 * update is required anyway.
+				 */
 				update_poll_flag = 1;
 				continue;
 			} else {
@@ -794,6 +805,7 @@ exit:
 error:
 	lttng_poll_clean(&events);
 error_poll_create:
+error_testpoint:
 	utils_close_pipe(kernel_poll_pipe);
 	kernel_poll_pipe[0] = kernel_poll_pipe[1] = -1;
 	if (err) {
@@ -881,15 +893,15 @@ static void *thread_manage_consumer(void *data)
 		goto error;
 	}
 
-	nb_fd = LTTNG_POLL_GETNB(&events);
-
 	health_code_update(&consumer_data->health);
 
 	/* Inifinite blocking call, waiting for transmission */
 restart:
 	health_poll_update(&consumer_data->health);
 
-	testpoint(thread_manage_consumer);
+	if (testpoint(thread_manage_consumer)) {
+		goto error;
+	}
 
 	ret = lttng_poll_wait(&events, -1);
 	health_poll_update(&consumer_data->health);
@@ -902,6 +914,8 @@ restart:
 		}
 		goto error;
 	}
+
+	nb_fd = ret;
 
 	for (i = 0; i < nb_fd; i++) {
 		/* Fetch once the poll data */
@@ -980,9 +994,6 @@ restart:
 
 	health_code_update(&consumer_data->health);
 
-	/* Update number of fd */
-	nb_fd = LTTNG_POLL_GETNB(&events);
-
 	/* Inifinite blocking call, waiting for transmission */
 restart_poll:
 	health_poll_update(&consumer_data->health);
@@ -997,6 +1008,8 @@ restart_poll:
 		}
 		goto error;
 	}
+
+	nb_fd = ret;
 
 	for (i = 0; i < nb_fd; i++) {
 		/* Fetch once the poll data */
@@ -1093,10 +1106,12 @@ static void *thread_manage_apps(void *data)
 
 	DBG("[thread] Manage application started");
 
-	testpoint(thread_manage_apps);
-
 	rcu_register_thread();
 	rcu_thread_online();
+
+	if (testpoint(thread_manage_apps)) {
+		goto error_testpoint;
+	}
 
 	health_code_update(&health_thread_app_manage);
 
@@ -1110,17 +1125,14 @@ static void *thread_manage_apps(void *data)
 		goto error;
 	}
 
-	testpoint(thread_manage_apps_before_loop);
+	if (testpoint(thread_manage_apps_before_loop)) {
+		goto error;
+	}
 
 	health_code_update(&health_thread_app_manage);
 
 	while (1) {
-		/* Zeroed the events structure */
-		lttng_poll_reset(&events);
-
-		nb_fd = LTTNG_POLL_GETNB(&events);
-
-		DBG("Apps thread polling on %d fds", nb_fd);
+		DBG("Apps thread polling on %d fds", LTTNG_POLL_GETNB(&events));
 
 		/* Inifinite blocking call, waiting for transmission */
 	restart:
@@ -1136,6 +1148,8 @@ static void *thread_manage_apps(void *data)
 			}
 			goto error;
 		}
+
+		nb_fd = ret;
 
 		for (i = 0; i < nb_fd; i++) {
 			/* Fetch once the poll data */
@@ -1158,7 +1172,9 @@ static void *thread_manage_apps(void *data)
 					goto error;
 				} else if (revents & LPOLLIN) {
 					/* Empty pipe */
-					ret = read(apps_cmd_pipe[0], &ust_cmd, sizeof(ust_cmd));
+					do {
+						ret = read(apps_cmd_pipe[0], &ust_cmd, sizeof(ust_cmd));
+					} while (ret < 0 && errno == EINTR);
 					if (ret < 0 || ret < sizeof(ust_cmd)) {
 						PERROR("read apps cmd pipe");
 						goto error;
@@ -1250,6 +1266,7 @@ exit:
 error:
 	lttng_poll_clean(&events);
 error_poll_create:
+error_testpoint:
 	utils_close_pipe(apps_cmd_pipe);
 	apps_cmd_pipe[0] = apps_cmd_pipe[1] = -1;
 
@@ -1309,9 +1326,11 @@ static void *thread_dispatch_ust_registration(void *data)
 			 * at some point in time or wait to the end of the world :)
 			 */
 			if (apps_cmd_pipe[1] >= 0) {
-				ret = write(apps_cmd_pipe[1], ust_cmd,
-						sizeof(struct ust_command));
-				if (ret < 0) {
+				do {
+					ret = write(apps_cmd_pipe[1], ust_cmd,
+							sizeof(struct ust_command));
+				} while (ret < 0 && errno == EINTR);
+				if (ret < 0 || ret != sizeof(struct ust_command)) {
 					PERROR("write apps cmd pipe");
 					if (errno == EBADF) {
 						/*
@@ -1358,7 +1377,9 @@ static void *thread_registration_apps(void *data)
 
 	DBG("[thread] Manage application registration started");
 
-	testpoint(thread_registration_apps);
+	if (testpoint(thread_registration_apps)) {
+		goto error_testpoint;
+	}
 
 	ret = lttcomm_listen_unix_sock(apps_sock);
 	if (ret < 0) {
@@ -1391,8 +1412,6 @@ static void *thread_registration_apps(void *data)
 	while (1) {
 		DBG("Accepting application registration");
 
-		nb_fd = LTTNG_POLL_GETNB(&events);
-
 		/* Inifinite blocking call, waiting for transmission */
 	restart:
 		health_poll_update(&health_thread_app_reg);
@@ -1407,6 +1426,8 @@ static void *thread_registration_apps(void *data)
 			}
 			goto error;
 		}
+
+		nb_fd = ret;
 
 		for (i = 0; i < nb_fd; i++) {
 			health_code_update(&health_thread_app_reg);
@@ -1513,7 +1534,6 @@ error:
 		health_error(&health_thread_app_reg);
 		ERR("Health error occurred in %s", __func__);
 	}
-	health_exit(&health_thread_app_reg);
 
 	/* Notify that the registration thread is gone */
 	notify_ust_apps(0);
@@ -1537,7 +1557,9 @@ error_poll_add:
 	lttng_poll_clean(&events);
 error_listen:
 error_create_poll:
+error_testpoint:
 	DBG("UST Registration thread cleanup complete");
+	health_exit(&health_thread_app_reg);
 
 	return NULL;
 }
@@ -1669,10 +1691,10 @@ error:
 static int join_consumer_thread(struct consumer_data *consumer_data)
 {
 	void *status;
-	int ret;
 
 	/* Consumer pid must be a real one. */
 	if (consumer_data->pid > 0) {
+		int ret;
 		ret = kill(consumer_data->pid, SIGTERM);
 		if (ret) {
 			ERR("Error killing consumer daemon");
@@ -1851,7 +1873,7 @@ error:
  */
 static int start_consumerd(struct consumer_data *consumer_data)
 {
-	int ret, err;
+	int ret;
 
 	/*
 	 * Set the listen() state on the socket since there is a possible race
@@ -1894,6 +1916,8 @@ end:
 error:
 	/* Cleanup already created socket on error. */
 	if (consumer_data->err_sock >= 0) {
+		int err;
+
 		err = close(consumer_data->err_sock);
 		if (err < 0) {
 			PERROR("close consumer data error socket");
@@ -2967,8 +2991,6 @@ static void *thread_manage_health(void *data)
 	while (1) {
 		DBG("Health check ready");
 
-		nb_fd = LTTNG_POLL_GETNB(&events);
-
 		/* Inifinite blocking call, waiting for transmission */
 restart:
 		ret = lttng_poll_wait(&events, -1);
@@ -2981,6 +3003,8 @@ restart:
 			}
 			goto error;
 		}
+
+		nb_fd = ret;
 
 		for (i = 0; i < nb_fd; i++) {
 			/* Fetch once the poll data */
@@ -3122,9 +3146,11 @@ static void *thread_manage_clients(void *data)
 
 	DBG("[thread] Manage client started");
 
-	testpoint(thread_manage_clients);
-
 	rcu_register_thread();
+
+	if (testpoint(thread_manage_clients)) {
+		goto error_testpoint;
+	}
 
 	health_code_update(&health_thread_cmd);
 
@@ -3155,14 +3181,14 @@ static void *thread_manage_clients(void *data)
 		kill(ppid, SIGUSR1);
 	}
 
-	testpoint(thread_manage_clients_before_loop);
+	if (testpoint(thread_manage_clients_before_loop)) {
+		goto error;
+	}
 
 	health_code_update(&health_thread_cmd);
 
 	while (1) {
 		DBG("Accepting client command ...");
-
-		nb_fd = LTTNG_POLL_GETNB(&events);
 
 		/* Inifinite blocking call, waiting for transmission */
 	restart:
@@ -3178,6 +3204,8 @@ static void *thread_manage_clients(void *data)
 			}
 			goto error;
 		}
+
+		nb_fd = ret;
 
 		for (i = 0; i < nb_fd; i++) {
 			/* Fetch once the poll data */
@@ -3330,6 +3358,7 @@ error:
 
 error_listen:
 error_create_poll:
+error_testpoint:
 	unlink(client_unix_sock_path);
 	if (client_sock >= 0) {
 		ret = close(client_sock);
@@ -3835,7 +3864,7 @@ int main(int argc, char **argv)
 
 	/* Parse arguments */
 	progname = argv[0];
-	if ((ret = parse_args(argc, argv) < 0)) {
+	if ((ret = parse_args(argc, argv)) < 0) {
 		goto error;
 	}
 

@@ -16,6 +16,7 @@
 @SET_MAKE@
 
 
+
 VPATH = @srcdir@
 am__make_dryrun = \
   { \
@@ -96,6 +97,7 @@ PROGRAMS = $(noinst_PROGRAMS)
 am_demo_OBJECTS = demo.$(OBJEXT)
 demo_OBJECTS = $(am_demo_OBJECTS)
 demo_DEPENDENCIES =
+SCRIPTS = $(noinst_SCRIPTS)
 depcomp = $(SHELL) $(top_srcdir)/config/depcomp
 am__depfiles_maybe = depfiles
 am__mv = mv -f
@@ -304,6 +306,8 @@ demo_SOURCES = demo.c ust_tests_demo.h
 @LTTNG_TOOLS_BUILD_WITH_LIBC_DL_TRUE@demo_LDADD = -lc
 # The demo program only depends on libdl/libc for dlopen().
 @LTTNG_TOOLS_BUILD_WITH_LIBDL_TRUE@demo_LDADD = -ldl
+noinst_SCRIPTS = demo-trace
+EXTRA_DIST = demo-trace
 all: all-am
 
 .SUFFIXES:
@@ -486,7 +490,7 @@ distdir: $(DISTFILES)
 	done
 check-am: all-am
 check: check-am
-all-am: Makefile $(LTLIBRARIES) $(PROGRAMS)
+all-am: Makefile $(LTLIBRARIES) $(PROGRAMS) $(SCRIPTS)
 installdirs:
 install: install-am
 install-exec: install-exec-am

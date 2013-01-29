@@ -129,13 +129,25 @@ struct lttng_consumer_stream {
 	unsigned int metadata_flag;
 	/* Used when the stream is set for network streaming */
 	uint64_t relayd_stream_id;
-	/* Next sequence number to use for trace packet */
+	/*
+	 * When sending a stream packet to a relayd, this number is used to track
+	 * the packet sent by the consumer and seen by the relayd. When sending the
+	 * data header to the relayd, this number is sent and if the transmission
+	 * was successful, it is incremented.
+	 *
+	 * Even if the full data is not fully transmitted it won't matter since
+	 * only two possible error can happen after that where either the relayd
+	 * died or a read error is detected on the stream making this value useless
+	 * after that.
+	 *
+	 * This value SHOULD be read/updated atomically or with the lock acquired.
+	 */
 	uint64_t next_net_seq_num;
 	/*
-	 * Lock to use the stream FDs since they are used between threads. Using
-	 * this lock with network streaming, when using the control mutex of a
-	 * consumer_relayd_sock_pair, make sure to acquire this lock BEFORE locking
-	 * it and releasing it AFTER the control mutex unlock.
+	 * Lock to use the stream FDs since they are used between threads.
+	 *
+	 * This is nested INSIDE the consumer_data lock.
+	 * This is nested OUTSIDE consumer_relayd_sock_pair lock.
 	 */
 	pthread_mutex_t lock;
 	/* Tracing session id */
@@ -170,6 +182,9 @@ struct consumer_relayd_sock_pair {
 	 * between threads sending data to the relayd. Since metadata data is sent
 	 * over that socket, at least two sendmsg() are needed (header + data)
 	 * creating a race for packets to overlap between threads using it.
+	 *
+	 * This is nested INSIDE the consumer_data lock.
+	 * This is nested INSIDE the stream lock.
 	 */
 	pthread_mutex_t ctrl_sock_mutex;
 
@@ -183,6 +198,10 @@ struct consumer_relayd_sock_pair {
 	 */
 	struct lttcomm_sock data_sock;
 	struct lttng_ht_node_ulong node;
+
+	/* Session id on both sides for the sockets. */
+	uint64_t relayd_session_id;
+	uint64_t sessiond_session_id;
 };
 
 /*
@@ -257,8 +276,8 @@ struct lttng_consumer_global_data {
 	 * and number of element in the hash table. It's also a protection for
 	 * concurrent read/write between threads.
 	 *
-	 * XXX: We need to see if this lock is still needed with the lockless RCU
-	 * hash tables.
+	 * This is nested OUTSIDE the stream lock.
+	 * This is nested OUTSIDE the consumer_relayd_sock_pair lock.
 	 */
 	pthread_mutex_t lock;
 
@@ -409,9 +428,11 @@ ssize_t lttng_consumer_read_subbuffer(struct lttng_consumer_stream *stream,
 int lttng_consumer_on_recv_stream(struct lttng_consumer_stream *stream);
 int consumer_add_relayd_socket(int net_seq_idx, int sock_type,
 		struct lttng_consumer_local_data *ctx, int sock,
-		struct pollfd *consumer_sockpoll, struct lttcomm_sock *relayd_sock);
+		struct pollfd *consumer_sockpoll, struct lttcomm_sock *relayd_sock,
+		unsigned int sessiond_id);
 void consumer_flag_relayd_for_destroy(
 		struct consumer_relayd_sock_pair *relayd);
 int consumer_data_pending(uint64_t id);
+int consumer_send_status_msg(int sock, int ret_code);
 
 #endif /* LIB_CONSUMER_H */

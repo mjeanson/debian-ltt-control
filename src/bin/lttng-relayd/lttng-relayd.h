@@ -40,9 +40,13 @@ enum connection_type {
  * Represents a session for the relay point of view
  */
 struct relay_session {
+	/*
+	 * This session id is used to identify a set of stream to a tracing session
+	 * but also make sure we have a unique session id associated with a session
+	 * daemon which can provide multiple data source.
+	 */
 	uint64_t id;
 	struct lttcomm_sock *sock;
-	unsigned int version_check_done:1;
 };
 
 /*
@@ -59,6 +63,8 @@ struct relay_stream {
 	/* Information telling us when to close the stream  */
 	unsigned int close_flag:1;
 	uint64_t last_net_seq_num;
+	/* Indicate if the stream was initialized for a data pending command. */
+	unsigned int data_pending_check_done:1;
 };
 
 /*
@@ -72,6 +78,7 @@ struct relay_command {
 	struct lttng_ht_node_ulong sock_n;
 	struct rcu_head rcu_node;
 	enum connection_type type;
+	unsigned int version_check_done:1;
 };
 
 #endif /* LTTNG_RELAYD_H */

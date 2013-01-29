@@ -90,7 +90,6 @@ static void set_default_url_attr(struct lttng_uri *uri,
 static ssize_t parse_str_urls_to_uri(const char *ctrl_url, const char *data_url,
 		struct lttng_uri **uris)
 {
-	int ret;
 	unsigned int equal = 1, idx = 0;
 	/* Add the "file://" size to the URL maximum size */
 	char url[PATH_MAX + 7];
@@ -115,6 +114,8 @@ static ssize_t parse_str_urls_to_uri(const char *ctrl_url, const char *data_url,
 	 * Check if first character is a '/' or else reject the URL.
 	 */
 	if (ctrl_url && ctrl_url[0] == '/') {
+		int ret;
+
 		ret = snprintf(url, sizeof(url), "file://%s", ctrl_url);
 		if (ret < 0) {
 			PERROR("snprintf file url");
@@ -183,10 +184,12 @@ static ssize_t parse_str_urls_to_uri(const char *ctrl_url, const char *data_url,
 		/* It's possible the control URIs array contains more than one URI */
 		memcpy(tmp_uris, ctrl_uris, sizeof(struct lttng_uri) * size_ctrl);
 		++idx;
+		free(ctrl_uris);
 	}
 
 	if (data_uris) {
 		memcpy(&tmp_uris[idx], data_uris, sizeof(struct lttng_uri));
+		free(data_uris);
 	}
 
 	*uris = tmp_uris;
@@ -414,7 +417,6 @@ error:
  */
 static int set_session_daemon_path(void)
 {
-	int ret;
 	int in_tgroup = 0;	/* In tracing group */
 	uid_t uid;
 
@@ -431,6 +433,8 @@ static int set_session_daemon_path(void)
 	}
 
 	if (uid != 0) {
+		int ret;
+
 		if (in_tgroup) {
 			/* Tracing group */
 			ret = try_connect_sessiond(sessiond_sock_path);
@@ -1137,6 +1141,7 @@ const char *lttng_strerror(int code)
  */
 int lttng_create_session(const char *name, const char *url)
 {
+	int ret;
 	ssize_t size;
 	struct lttcomm_session_msg lsm;
 	struct lttng_uri *uris = NULL;
@@ -1158,8 +1163,11 @@ int lttng_create_session(const char *name, const char *url)
 
 	lsm.u.uri.size = size;
 
-	return ask_sessiond_varlen(&lsm, uris, sizeof(struct lttng_uri) * size,
+	ret = ask_sessiond_varlen(&lsm, uris, sizeof(struct lttng_uri) * size,
 			NULL);
+
+	free(uris);
+	return ret;
 }
 
 /*
@@ -1417,6 +1425,7 @@ int lttng_session_daemon_alive(void)
 int lttng_set_consumer_url(struct lttng_handle *handle,
 		const char *control_url, const char *data_url)
 {
+	int ret;
 	ssize_t size;
 	struct lttcomm_session_msg lsm;
 	struct lttng_uri *uris = NULL;
@@ -1440,8 +1449,11 @@ int lttng_set_consumer_url(struct lttng_handle *handle,
 
 	lsm.u.uri.size = size;
 
-	return ask_sessiond_varlen(&lsm, uris, sizeof(struct lttng_uri) * size,
+	ret = ask_sessiond_varlen(&lsm, uris, sizeof(struct lttng_uri) * size,
 			NULL);
+
+	free(uris);
+	return ret;
 }
 
 /*
@@ -1496,7 +1508,6 @@ int lttng_disable_consumer(struct lttng_handle *handle)
  */
 static int set_health_socket_path(void)
 {
-	int ret;
 	int in_tgroup = 0;	/* In tracing group */
 	uid_t uid;
 	const char *home;
@@ -1514,6 +1525,8 @@ static int set_health_socket_path(void)
 	}
 
 	if (uid != 0) {
+		int ret;
+
 		/*
 		 * With GNU C <  2.1, snprintf returns -1 if the target buffer is too small;
 		 * With GNU C >= 2.1, snprintf returns the required size (excluding closing null)
@@ -1618,7 +1631,8 @@ int _lttng_create_session_ext(const char *name, const char *url,
 	/* There should never be a data URL */
 	size = parse_str_urls_to_uri(url, NULL, &uris);
 	if (size < 0) {
-		return -LTTNG_ERR_INVALID;
+		ret = -LTTNG_ERR_INVALID;
+		goto error;
 	}
 
 	lsm.u.uri.size = size;
@@ -1628,12 +1642,17 @@ int _lttng_create_session_ext(const char *name, const char *url,
 				datetime);
 		if (ret < 0) {
 			PERROR("snprintf uri subdir");
-			return -LTTNG_ERR_FATAL;
+			ret = -LTTNG_ERR_FATAL;
+			goto error;
 		}
 	}
 
-	return ask_sessiond_varlen(&lsm, uris, sizeof(struct lttng_uri) * size,
+	ret = ask_sessiond_varlen(&lsm, uris, sizeof(struct lttng_uri) * size,
 			NULL);
+
+error:
+	free(uris);
+	return ret;
 }
 
 /*

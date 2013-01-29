@@ -256,8 +256,7 @@ static
 void delete_ust_app(struct ust_app *app)
 {
 	int ret, sock;
-	struct lttng_ht_iter iter;
-	struct ust_app_session *ua_sess;
+	struct ust_app_session *ua_sess, *tmp_ua_sess;
 
 	rcu_read_lock();
 
@@ -265,14 +264,14 @@ void delete_ust_app(struct ust_app *app)
 	sock = app->sock;
 	app->sock = -1;
 
-	/* Wipe sessions */
-	cds_lfht_for_each_entry(app->sessions->ht, &iter.iter, ua_sess,
-			node.node) {
-		ret = lttng_ht_del(app->sessions, &iter);
-		assert(!ret);
-		delete_ust_app_session(app->sock, ua_sess);
-	}
 	lttng_ht_destroy(app->sessions);
+
+	/* Wipe sessions */
+	cds_list_for_each_entry_safe(ua_sess, tmp_ua_sess, &app->teardown_head,
+			teardown_node) {
+		/* Free every object in the session and the session. */
+		delete_ust_app_session(sock, ua_sess);
+	}
 
 	/*
 	 * Wait until we have deleted the application from the sock hash table
@@ -1039,7 +1038,6 @@ error:
 static struct ust_app_session *create_ust_app_session(
 		struct ltt_ust_session *usess, struct ust_app *app)
 {
-	int ret;
 	struct ust_app_session *ua_sess;
 
 	health_code_update(&health_thread_cmd);
@@ -1059,6 +1057,8 @@ static struct ust_app_session *create_ust_app_session(
 	health_code_update(&health_thread_cmd);
 
 	if (ua_sess->handle == -1) {
+		int ret;
+
 		ret = ustctl_create_session(app->sock);
 		if (ret < 0) {
 			ERR("Creating session for app pid %d", app->pid);
@@ -1213,11 +1213,12 @@ error:
 }
 
 /*
- * Create UST app channel and create it on the tracer.
+ * Create UST app channel and create it on the tracer. Set ua_chanp of the
+ * newly created channel if not NULL.
  */
-static struct ust_app_channel *create_ust_app_channel(
-		struct ust_app_session *ua_sess, struct ltt_ust_channel *uchan,
-		struct ust_app *app)
+static int create_ust_app_channel(struct ust_app_session *ua_sess,
+		struct ltt_ust_channel *uchan, struct ust_app *app,
+		struct ust_app_channel **ua_chanp)
 {
 	int ret = 0;
 	struct lttng_ht_iter iter;
@@ -1235,6 +1236,7 @@ static struct ust_app_channel *create_ust_app_channel(
 	ua_chan = alloc_ust_app_channel(uchan->name, &uchan->attr);
 	if (ua_chan == NULL) {
 		/* Only malloc can fail here */
+		ret = -ENOMEM;
 		goto error;
 	}
 	shadow_copy_channel(ua_chan, uchan);
@@ -1246,17 +1248,23 @@ static struct ust_app_channel *create_ust_app_channel(
 		goto error;
 	}
 
+	/* Only add the channel if successful on the tracer side. */
 	lttng_ht_add_unique_str(ua_sess->channels, &ua_chan->node);
 
 	DBG2("UST app create channel %s for PID %d completed", ua_chan->name,
 			app->pid);
 
 end:
-	return ua_chan;
+	if (ua_chanp) {
+		*ua_chanp = ua_chan;
+	}
+
+	/* Everything went well. */
+	return 0;
 
 error:
 	delete_ust_app_channel(-1, ua_chan);
-	return NULL;
+	return ret;
 }
 
 /*
@@ -1462,6 +1470,8 @@ int ust_app_register(struct ust_register_msg *msg, int sock)
 	lta->sock = sock;
 	lttng_ht_node_init_ulong(&lta->sock_n, (unsigned long)lta->sock);
 
+	CDS_INIT_LIST_HEAD(&lta->teardown_head);
+
 	rcu_read_lock();
 
 	/*
@@ -1497,6 +1507,7 @@ void ust_app_unregister(int sock)
 	struct ust_app *lta;
 	struct lttng_ht_node_ulong *node;
 	struct lttng_ht_iter iter;
+	struct ust_app_session *ua_sess;
 	int ret;
 
 	rcu_read_lock();
@@ -1531,6 +1542,22 @@ void ust_app_unregister(int sock)
 				lta->pid);
 	}
 
+	/* Remove sessions so they are not visible during deletion.*/
+	cds_lfht_for_each_entry(lta->sessions->ht, &iter.iter, ua_sess,
+			node.node) {
+		ret = lttng_ht_del(lta->sessions, &iter);
+		if (ret) {
+			/* The session was already removed so scheduled for teardown. */
+			continue;
+		}
+
+		/*
+		 * Add session to list for teardown. This is safe since at this point we
+		 * are the only one using this list.
+		 */
+		cds_list_add(&ua_sess->teardown_node, &lta->teardown_head);
+	}
+
 	/* Free memory */
 	call_rcu(&lta->pid_n.head, delete_ust_app_rcu);
 
@@ -1562,11 +1589,11 @@ int ust_app_list_events(struct lttng_event **events)
 	size_t nbmem, count = 0;
 	struct lttng_ht_iter iter;
 	struct ust_app *app;
-	struct lttng_event *tmp;
+	struct lttng_event *tmp_event;
 
 	nbmem = UST_APP_EVENT_LIST_SIZE;
-	tmp = zmalloc(nbmem * sizeof(struct lttng_event));
-	if (tmp == NULL) {
+	tmp_event = zmalloc(nbmem * sizeof(struct lttng_event));
+	if (tmp_event == NULL) {
 		PERROR("zmalloc ust app events");
 		ret = -ENOMEM;
 		goto error;
@@ -1598,29 +1625,31 @@ int ust_app_list_events(struct lttng_event **events)
 			health_code_update(&health_thread_cmd);
 			if (count >= nbmem) {
 				/* In case the realloc fails, we free the memory */
-				void *tmp_ptr = (void *) tmp;
+				void *ptr;
+
 				DBG2("Reallocating event list from %zu to %zu entries", nbmem,
 						2 * nbmem);
 				nbmem *= 2;
-				tmp = realloc(tmp, nbmem * sizeof(struct lttng_event));
-				if (tmp == NULL) {
+				ptr = realloc(tmp_event, nbmem * sizeof(struct lttng_event));
+				if (ptr == NULL) {
 					PERROR("realloc ust app events");
-					free(tmp_ptr);
+					free(tmp_event);
 					ret = -ENOMEM;
 					goto rcu_error;
 				}
+				tmp_event = ptr;
 			}
-			memcpy(tmp[count].name, uiter.name, LTTNG_UST_SYM_NAME_LEN);
-			tmp[count].loglevel = uiter.loglevel;
-			tmp[count].type = (enum lttng_event_type) LTTNG_UST_TRACEPOINT;
-			tmp[count].pid = app->pid;
-			tmp[count].enabled = -1;
+			memcpy(tmp_event[count].name, uiter.name, LTTNG_UST_SYM_NAME_LEN);
+			tmp_event[count].loglevel = uiter.loglevel;
+			tmp_event[count].type = (enum lttng_event_type) LTTNG_UST_TRACEPOINT;
+			tmp_event[count].pid = app->pid;
+			tmp_event[count].enabled = -1;
 			count++;
 		}
 	}
 
 	ret = count;
-	*events = tmp;
+	*events = tmp_event;
 
 	DBG2("UST app list events done (%zu events)", count);
 
@@ -1640,11 +1669,11 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 	size_t nbmem, count = 0;
 	struct lttng_ht_iter iter;
 	struct ust_app *app;
-	struct lttng_event_field *tmp;
+	struct lttng_event_field *tmp_event;
 
 	nbmem = UST_APP_EVENT_LIST_SIZE;
-	tmp = zmalloc(nbmem * sizeof(struct lttng_event_field));
-	if (tmp == NULL) {
+	tmp_event = zmalloc(nbmem * sizeof(struct lttng_event_field));
+	if (tmp_event == NULL) {
 		PERROR("zmalloc ust app event fields");
 		ret = -ENOMEM;
 		goto error;
@@ -1676,34 +1705,36 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 			health_code_update(&health_thread_cmd);
 			if (count >= nbmem) {
 				/* In case the realloc fails, we free the memory */
-				void *tmp_ptr = (void *) tmp;
+				void *ptr;
+
 				DBG2("Reallocating event field list from %zu to %zu entries", nbmem,
 						2 * nbmem);
 				nbmem *= 2;
-				tmp = realloc(tmp, nbmem * sizeof(struct lttng_event_field));
-				if (tmp == NULL) {
+				ptr = realloc(tmp_event, nbmem * sizeof(struct lttng_event_field));
+				if (ptr == NULL) {
 					PERROR("realloc ust app event fields");
-					free(tmp_ptr);
+					free(tmp_event);
 					ret = -ENOMEM;
 					goto rcu_error;
 				}
+				tmp_event = ptr;
 			}
 
-			memcpy(tmp[count].field_name, uiter.field_name, LTTNG_UST_SYM_NAME_LEN);
-			tmp[count].type = uiter.type;
-			tmp[count].nowrite = uiter.nowrite;
+			memcpy(tmp_event[count].field_name, uiter.field_name, LTTNG_UST_SYM_NAME_LEN);
+			tmp_event[count].type = uiter.type;
+			tmp_event[count].nowrite = uiter.nowrite;
 
-			memcpy(tmp[count].event.name, uiter.event_name, LTTNG_UST_SYM_NAME_LEN);
-			tmp[count].event.loglevel = uiter.loglevel;
-			tmp[count].event.type = LTTNG_UST_TRACEPOINT;
-			tmp[count].event.pid = app->pid;
-			tmp[count].event.enabled = -1;
+			memcpy(tmp_event[count].event.name, uiter.event_name, LTTNG_UST_SYM_NAME_LEN);
+			tmp_event[count].event.loglevel = uiter.loglevel;
+			tmp_event[count].event.type = LTTNG_UST_TRACEPOINT;
+			tmp_event[count].event.pid = app->pid;
+			tmp_event[count].event.enabled = -1;
 			count++;
 		}
 	}
 
 	ret = count;
-	*fields = tmp;
+	*fields = tmp_event;
 
 	DBG2("UST app list event fields done (%zu events)", count);
 
@@ -1964,8 +1995,10 @@ int ust_app_disable_all_event_glb(struct ltt_ust_session *usess,
 			continue;
 		}
 		ua_sess = lookup_session_by_app(usess, app);
-		/* If ua_sess is NULL, there is a code flow error */
-		assert(ua_sess);
+		if (!ua_sess) {
+			/* The application has problem or is probably dead. */
+			continue;
+		}
 
 		/* Lookup channel in the ust app session */
 		lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &uiter);
@@ -2001,7 +2034,6 @@ int ust_app_create_channel_glb(struct ltt_ust_session *usess,
 	struct lttng_ht_iter iter;
 	struct ust_app *app;
 	struct ust_app_session *ua_sess;
-	struct ust_app_channel *ua_chan;
 
 	/* Very wrong code flow */
 	assert(usess);
@@ -2029,26 +2061,27 @@ int ust_app_create_channel_glb(struct ltt_ust_session *usess,
 		ua_sess = create_ust_app_session(usess, app);
 		if (ua_sess == NULL) {
 			/* The malloc() failed. */
-			ret = -1;
-			goto error;
+			ret = -ENOMEM;
+			goto error_rcu_unlock;
 		} else if (ua_sess == (void *) -1UL) {
-			/* The application's socket is not valid. Contiuing */
-			ret = -1;
+			/*
+			 * The application's socket is not valid. Either a bad socket or a
+			 * timeout on it. We can't inform yet the caller that for a
+			 * specific app, the session failed so we continue here.
+			 */
 			continue;
 		}
 
-		/* Create channel onto application */
-		ua_chan = create_ust_app_channel(ua_sess, uchan, app);
-		if (ua_chan == NULL) {
-			/* Major problem here and it's maybe the tracer or malloc() */
-			ret = -1;
-			goto error;
+		/* Create channel onto application. We don't need the chan ref. */
+		ret = create_ust_app_channel(ua_sess, uchan, app, NULL);
+		if (ret < 0 && ret == -ENOMEM) {
+			/* No more memory is a fatal error. Stop right now. */
+			goto error_rcu_unlock;
 		}
 	}
 
+error_rcu_unlock:
 	rcu_read_unlock();
-
-error:
 	return ret;
 }
 
@@ -2087,8 +2120,10 @@ int ust_app_enable_event_glb(struct ltt_ust_session *usess,
 			continue;
 		}
 		ua_sess = lookup_session_by_app(usess, app);
-		/* If ua_sess is NULL, there is a code flow error */
-		assert(ua_sess);
+		if (!ua_sess) {
+			/* The application has problem or is probably dead. */
+			continue;
+		}
 
 		/* Lookup channel in the ust app session */
 		lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &uiter);
@@ -2147,8 +2182,10 @@ int ust_app_create_event_glb(struct ltt_ust_session *usess,
 			continue;
 		}
 		ua_sess = lookup_session_by_app(usess, app);
-		/* If ua_sess is NULL, there is a code flow error */
-		assert(ua_sess);
+		if (!ua_sess) {
+			/* The application has problem or is probably dead. */
+			continue;
+		}
 
 		/* Lookup channel in the ust app session */
 		lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &uiter);
@@ -2197,7 +2234,8 @@ int ust_app_start_trace(struct ltt_ust_session *usess, struct ust_app *app)
 
 	ua_sess = lookup_session_by_app(usess, app);
 	if (ua_sess == NULL) {
-		goto error_rcu_unlock;
+		/* The session is in teardown process. Ignore and continue. */
+		goto end;
 	}
 
 	/* Upon restart, we skip the setup, already done */
@@ -2218,9 +2256,6 @@ int ust_app_start_trace(struct ltt_ust_session *usess, struct ust_app *app)
 			}
 		}
 	}
-
-	/* Indicate that the session has been started once */
-	ua_sess->started = 1;
 
 	ret = create_ust_app_metadata(ua_sess, usess->pathname, app);
 	if (ret < 0) {
@@ -2315,9 +2350,12 @@ skip_setup:
 	/* This start the UST tracing */
 	ret = ustctl_start_session(app->sock, ua_sess->handle);
 	if (ret < 0) {
-		ERR("Error starting tracing for app pid: %d", app->pid);
+		ERR("Error starting tracing for app pid: %d (ret: %d)", app->pid, ret);
 		goto error_rcu_unlock;
 	}
+
+	/* Indicate that the session has been started once */
+	ua_sess->started = 1;
 
 	health_code_update(&health_thread_cmd);
 
@@ -2355,23 +2393,25 @@ int ust_app_stop_trace(struct ltt_ust_session *usess, struct ust_app *app)
 
 	ua_sess = lookup_session_by_app(usess, app);
 	if (ua_sess == NULL) {
-		/* Only malloc can failed so something is really wrong */
-		goto error_rcu_unlock;
+		goto end;
 	}
 
 	/*
 	 * If started = 0, it means that stop trace has been called for a session
-	 * that was never started. This is a code flow error and should never
-	 * happen.
+	 * that was never started. It's possible since we can have a fail start
+	 * from either the application manager thread or the command thread. Simply
+	 * indicate that this is a stop error.
 	 */
-	assert(ua_sess->started == 1);
+	if (!ua_sess->started) {
+		goto error_rcu_unlock;
+	}
 
 	health_code_update(&health_thread_cmd);
 
 	/* This inhibits UST tracing */
 	ret = ustctl_stop_session(app->sock, ua_sess->handle);
 	if (ret < 0) {
-		ERR("Error stopping tracing for app pid: %d", app->pid);
+		ERR("Error stopping tracing for app pid: %d (ret: %d)", app->pid, ret);
 		goto error_rcu_unlock;
 	}
 
@@ -2418,7 +2458,7 @@ error_rcu_unlock:
 /*
  * Destroy a specific UST session in apps.
  */
-int ust_app_destroy_trace(struct ltt_ust_session *usess, struct ust_app *app)
+static int destroy_trace(struct ltt_ust_session *usess, struct ust_app *app)
 {
 	struct ust_app_session *ua_sess;
 	struct lttng_ust_object_data obj;
@@ -2437,12 +2477,16 @@ int ust_app_destroy_trace(struct ltt_ust_session *usess, struct ust_app *app)
 	__lookup_session_by_app(usess, app, &iter);
 	node = lttng_ht_iter_get_node_ulong(&iter);
 	if (node == NULL) {
-		/* Only malloc can failed so something is really wrong */
-		goto error_rcu_unlock;
+		/* Session is being or is deleted. */
+		goto end;
 	}
 	ua_sess = caa_container_of(node, struct ust_app_session, node);
 	ret = lttng_ht_del(app->sessions, &iter);
-	assert(!ret);
+	if (ret) {
+		/* Already scheduled for teardown. */
+		goto end;
+	}
+
 	obj.handle = ua_sess->handle;
 	obj.shm_fd = -1;
 	obj.wait_fd = -1;
@@ -2460,11 +2504,6 @@ end:
 	rcu_read_unlock();
 	health_code_update(&health_thread_cmd);
 	return 0;
-
-error_rcu_unlock:
-	rcu_read_unlock();
-	health_code_update(&health_thread_cmd);
-	return -1;
 }
 
 /*
@@ -2533,7 +2572,7 @@ int ust_app_destroy_trace_all(struct ltt_ust_session *usess)
 	rcu_read_lock();
 
 	cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, app, pid_n.node) {
-		ret = ust_app_destroy_trace(usess, app);
+		ret = destroy_trace(usess, app);
 		if (ret < 0) {
 			/* Continue to next apps even on error */
 			continue;
@@ -2558,10 +2597,7 @@ void ust_app_global_update(struct ltt_ust_session *usess, int sock)
 	struct ust_app_event *ua_event;
 	struct ust_app_ctx *ua_ctx;
 
-	if (usess == NULL) {
-		ERR("No UST session on global update. Returning");
-		goto error;
-	}
+	assert(usess);
 
 	DBG2("UST app global update for app sock %d for session id %d", sock,
 			usess->id);
@@ -2716,8 +2752,10 @@ int ust_app_enable_event_pid(struct ltt_ust_session *usess,
 	}
 
 	ua_sess = lookup_session_by_app(usess, app);
-	/* If ua_sess is NULL, there is a code flow error */
-	assert(ua_sess);
+	if (!ua_sess) {
+		/* The application has problem or is probably dead. */
+		goto error;
+	}
 
 	/* Lookup channel in the ust app session */
 	lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &iter);
@@ -2777,8 +2815,10 @@ int ust_app_disable_event_pid(struct ltt_ust_session *usess,
 	}
 
 	ua_sess = lookup_session_by_app(usess, app);
-	/* If ua_sess is NULL, there is a code flow error */
-	assert(ua_sess);
+	if (!ua_sess) {
+		/* The application has problem or is probably dead. */
+		goto error;
+	}
 
 	/* Lookup channel in the ust app session */
 	lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &iter);
