@@ -94,8 +94,8 @@ index 20beea0..bc3a503 100644
 -gen_events_time_LDADD = -llttng-ust
 +gen_events_time_LDADD = -llttng-ust -lurcu-bp
  
- noinst_SCRIPTS = run
- EXTRA_DIST = run
+ noinst_SCRIPTS = run ust-nprocesses
+ EXTRA_DIST = run ust-nprocesses
 -- 
 1.8.0
 
