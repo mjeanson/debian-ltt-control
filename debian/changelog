@@ -1,3 +1,13 @@
+ltt-control (2.1.1-1) unstable; urgency=low
+
+  * [228144f] New upstream version 2.1.1
+  * [a9f14a2] Refresh test utilities link patch
+  * [49f2b94] Set build dependency on proper version of ust.
+    Thanks to Glenn McGrath (Closes: #701779)
+  * [7f80999] Remove AUTHORS and NEWS from docs, no longer shipped
+
+ -- Jon Bernard <jbernard@debian.org>  Thu, 28 Feb 2013 18:34:16 -0500
+
 ltt-control (2.1.0~rc9-1) unstable; urgency=low
 
   * [f95cb9a] New upstream version 2.1.0~rc9
