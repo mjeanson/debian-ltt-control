@@ -1,3 +1,10 @@
+ltt-control (2.1.1-2) unstable; urgency=low
+
+  * [08f3c8b] Use dh-autoreconf to call autoreconf before building.
+    Thanks to Roland Stigge (Closes: #701976)
+
+ -- Jon Bernard <jbernard@debian.org>  Tue, 02 Apr 2013 16:03:39 -0400
+
 ltt-control (2.1.1-1) unstable; urgency=low
 
   * [228144f] New upstream version 2.1.1
