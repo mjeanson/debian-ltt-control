@@ -23,12 +23,104 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <common/common.h>
 #include <common/defaults.h>
 #include <common/uri.h>
 
 #include "consumer.h"
+#include "health.h"
+#include "ust-app.h"
+#include "utils.h"
+
+/*
+ * Send a data payload using a given consumer socket of size len.
+ *
+ * The consumer socket lock MUST be acquired before calling this since this
+ * function can change the fd value.
+ *
+ * Return 0 on success else a negative value on error.
+ */
+int consumer_socket_send(struct consumer_socket *socket, void *msg, size_t len)
+{
+	int fd;
+	ssize_t size;
+
+	assert(socket);
+	assert(socket->fd_ptr);
+	assert(msg);
+
+	/* Consumer socket is invalid. Stopping. */
+	fd = *socket->fd_ptr;
+	if (fd < 0) {
+		goto error;
+	}
+
+	size = lttcomm_send_unix_sock(fd, msg, len);
+	if (size < 0) {
+		/* The above call will print a PERROR on error. */
+		DBG("Error when sending data to consumer on sock %d", fd);
+		/*
+		 * At this point, the socket is not usable anymore thus closing it and
+		 * setting the file descriptor to -1 so it is not reused.
+		 */
+
+		/* This call will PERROR on error. */
+		(void) lttcomm_close_unix_sock(fd);
+		*socket->fd_ptr = -1;
+		goto error;
+	}
+
+	return 0;
+
+error:
+	return -1;
+}
+
+/*
+ * Receive a data payload using a given consumer socket of size len.
+ *
+ * The consumer socket lock MUST be acquired before calling this since this
+ * function can change the fd value.
+ *
+ * Return 0 on success else a negative value on error.
+ */
+int consumer_socket_recv(struct consumer_socket *socket, void *msg, size_t len)
+{
+	int fd;
+	ssize_t size;
+
+	assert(socket);
+	assert(socket->fd_ptr);
+	assert(msg);
+
+	/* Consumer socket is invalid. Stopping. */
+	fd = *socket->fd_ptr;
+	if (fd < 0) {
+		goto error;
+	}
+
+	size = lttcomm_recv_unix_sock(fd, msg, len);
+	if (size <= 0) {
+		/* The above call will print a PERROR on error. */
+		DBG("Error when receiving data from the consumer socket %d", fd);
+		/*
+		 * At this point, the socket is not usable anymore thus closing it and
+		 * setting the file descriptor to -1 so it is not reused.
+		 */
+
+		/* This call will PERROR on error. */
+		(void) lttcomm_close_unix_sock(fd);
+		*socket->fd_ptr = -1;
+		goto error;
+	}
+
+	return 0;
+
+error:
+	return -1;
+}
 
 /*
  * Receive a reply command status message from the consumer. Consumer socket
@@ -44,14 +136,8 @@ int consumer_recv_status_reply(struct consumer_socket *sock)
 
 	assert(sock);
 
-	ret = lttcomm_recv_unix_sock(sock->fd, &reply, sizeof(reply));
-	if (ret <= 0) {
-		if (ret == 0) {
-			/* Orderly shutdown. Don't return 0 which means success. */
-			ret = -1;
-		}
-		/* The above call will print a PERROR on error. */
-		DBG("Fail to receive status reply on sock %d", sock->fd);
+	ret = consumer_socket_recv(sock, &reply, sizeof(reply));
+	if (ret < 0) {
 		goto end;
 	}
 
@@ -60,8 +146,44 @@ int consumer_recv_status_reply(struct consumer_socket *sock)
 		ret = 0;
 	} else {
 		ret = -reply.ret_code;
-		DBG("Consumer ret code %d", reply.ret_code);
+		DBG("Consumer ret code %d", ret);
 	}
+
+end:
+	return ret;
+}
+
+/*
+ * Once the ASK_CHANNEL command is sent to the consumer, the channel
+ * information are sent back. This call receives that data and populates key
+ * and stream_count.
+ *
+ * On success return 0 and both key and stream_count are set. On error, a
+ * negative value is sent back and both parameters are untouched.
+ */
+int consumer_recv_status_channel(struct consumer_socket *sock,
+		uint64_t *key, unsigned int *stream_count)
+{
+	int ret;
+	struct lttcomm_consumer_status_channel reply;
+
+	assert(sock);
+	assert(stream_count);
+	assert(key);
+
+	ret = consumer_socket_recv(sock, &reply, sizeof(reply));
+	if (ret < 0) {
+		goto end;
+	}
+
+	/* An error is possible so don't touch the key and stream_count. */
+	if (reply.ret_code != LTTNG_OK) {
+		ret = -1;
+		goto end;
+	}
+
+	*key = reply.key;
+	*stream_count = reply.stream_count;
 
 end:
 	return ret;
@@ -81,24 +203,15 @@ int consumer_send_destroy_relayd(struct consumer_socket *sock,
 	assert(consumer);
 	assert(sock);
 
-	DBG2("Sending destroy relayd command to consumer...");
-
-	/* Bail out if consumer is disabled */
-	if (!consumer->enabled) {
-		ret = LTTNG_OK;
-		DBG3("Consumer is disabled");
-		goto error;
-	}
+	DBG2("Sending destroy relayd command to consumer sock %d", *sock->fd_ptr);
 
 	msg.cmd_type = LTTNG_CONSUMER_DESTROY_RELAYD;
 	msg.u.destroy_relayd.net_seq_idx = consumer->net_seq_index;
 
 	pthread_mutex_lock(sock->lock);
-	ret = lttcomm_send_unix_sock(sock->fd, &msg, sizeof(msg));
+	ret = consumer_socket_send(sock, &msg, sizeof(msg));
 	if (ret < 0) {
-		/* Indicate that the consumer is probably closing at this point. */
-		DBG("send consumer destroy relayd command");
-		goto error_send;
+		goto error;
 	}
 
 	/* Don't check the return value. The caller will do it. */
@@ -106,9 +219,8 @@ int consumer_send_destroy_relayd(struct consumer_socket *sock,
 
 	DBG2("Consumer send destroy relayd command done");
 
-error_send:
-	pthread_mutex_unlock(sock->lock);
 error:
+	pthread_mutex_unlock(sock->lock);
 	return ret;
 }
 
@@ -124,7 +236,7 @@ void consumer_output_send_destroy_relayd(struct consumer_output *consumer)
 	assert(consumer);
 
 	/* Destroy any relayd connection */
-	if (consumer && consumer->type == CONSUMER_DST_NET) {
+	if (consumer->type == CONSUMER_DST_NET) {
 		rcu_read_lock();
 		cds_lfht_for_each_entry(consumer->socks->ht, &iter.iter, socket,
 				node.node) {
@@ -167,7 +279,7 @@ int consumer_create_socket(struct consumer_data *data,
 	socket = consumer_find_socket(data->cmd_sock, output);
 	rcu_read_unlock();
 	if (socket == NULL) {
-		socket = consumer_allocate_socket(data->cmd_sock);
+		socket = consumer_allocate_socket(&data->cmd_sock);
 		if (socket == NULL) {
 			ret = -1;
 			goto error;
@@ -180,11 +292,48 @@ int consumer_create_socket(struct consumer_data *data,
 		rcu_read_unlock();
 	}
 
+	socket->type = data->type;
+
 	DBG3("Consumer socket created (fd: %d) and added to output",
 			data->cmd_sock);
 
 error:
 	return ret;
+}
+
+/*
+ * Return the consumer socket from the given consumer output with the right
+ * bitness. On error, returns NULL.
+ *
+ * The caller MUST acquire a rcu read side lock and keep it until the socket
+ * object reference is not needed anymore.
+ */
+struct consumer_socket *consumer_find_socket_by_bitness(int bits,
+		struct consumer_output *consumer)
+{
+	int consumer_fd;
+	struct consumer_socket *socket = NULL;
+
+	switch (bits) {
+	case 64:
+		consumer_fd = uatomic_read(&ust_consumerd64_fd);
+		break;
+	case 32:
+		consumer_fd = uatomic_read(&ust_consumerd32_fd);
+		break;
+	default:
+		assert(0);
+		goto end;
+	}
+
+	socket = consumer_find_socket(consumer_fd, consumer);
+	if (!socket) {
+		ERR("Consumer socket fd %d not found in consumer obj %p",
+				consumer_fd, consumer);
+	}
+
+end:
+	return socket;
 }
 
 /*
@@ -217,9 +366,11 @@ struct consumer_socket *consumer_find_socket(int key,
 /*
  * Allocate a new consumer_socket and return the pointer.
  */
-struct consumer_socket *consumer_allocate_socket(int fd)
+struct consumer_socket *consumer_allocate_socket(int *fd)
 {
 	struct consumer_socket *socket = NULL;
+
+	assert(fd);
 
 	socket = zmalloc(sizeof(struct consumer_socket));
 	if (socket == NULL) {
@@ -227,8 +378,8 @@ struct consumer_socket *consumer_allocate_socket(int fd)
 		goto error;
 	}
 
-	socket->fd = fd;
-	lttng_ht_node_init_ulong(&socket->node, fd);
+	socket->fd_ptr = fd;
+	lttng_ht_node_init_ulong(&socket->node, *fd);
 
 error:
 	return socket;
@@ -292,8 +443,8 @@ void consumer_destroy_socket(struct consumer_socket *sock)
 	 * consumer was registered,
 	 */
 	if (sock->registered) {
-		DBG3("Consumer socket was registered. Closing fd %d", sock->fd);
-		lttcomm_close_unix_sock(sock->fd);
+		DBG3("Consumer socket was registered. Closing fd %d", *sock->fd_ptr);
+		lttcomm_close_unix_sock(*sock->fd_ptr);
 	}
 
 	call_rcu(&sock->node.head, destroy_socket_rcu);
@@ -317,7 +468,7 @@ struct consumer_output *consumer_create_output(enum consumer_dst_type type)
 	/* By default, consumer output is enabled */
 	output->enabled = 1;
 	output->type = type;
-	output->net_seq_index = -1;
+	output->net_seq_index = (uint64_t) -1ULL;
 
 	output->socks = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
 
@@ -326,7 +477,31 @@ error:
 }
 
 /*
+ * Iterate over the consumer output socket hash table and destroy them. The
+ * socket file descriptor are only closed if the consumer output was
+ * registered meaning it's an external consumer.
+ */
+void consumer_destroy_output_sockets(struct consumer_output *obj)
+{
+	struct lttng_ht_iter iter;
+	struct consumer_socket *socket;
+
+	if (!obj->socks) {
+		return;
+	}
+
+	rcu_read_lock();
+	cds_lfht_for_each_entry(obj->socks->ht, &iter.iter, socket, node.node) {
+		consumer_del_socket(socket, obj);
+		consumer_destroy_socket(socket);
+	}
+	rcu_read_unlock();
+}
+
+/*
  * Delete the consumer_output object from the list and free the ptr.
+ *
+ * Should *NOT* be called with RCU read-side lock held.
  */
 void consumer_destroy_output(struct consumer_output *obj)
 {
@@ -334,19 +509,11 @@ void consumer_destroy_output(struct consumer_output *obj)
 		return;
 	}
 
+	consumer_destroy_output_sockets(obj);
+
 	if (obj->socks) {
-		struct lttng_ht_iter iter;
-		struct consumer_socket *socket;
-
-		rcu_read_lock();
-		cds_lfht_for_each_entry(obj->socks->ht, &iter.iter, socket, node.node) {
-			consumer_del_socket(socket, obj);
-			consumer_destroy_socket(socket);
-		}
-		rcu_read_unlock();
-
 		/* Finally destroy HT */
-		lttng_ht_destroy(obj->socks);
+		ht_cleanup_push(obj->socks);
 	}
 
 	free(obj);
@@ -354,12 +521,13 @@ void consumer_destroy_output(struct consumer_output *obj)
 
 /*
  * Copy consumer output and returned the newly allocated copy.
+ *
+ * Should *NOT* be called with RCU read-side lock held.
  */
 struct consumer_output *consumer_copy_output(struct consumer_output *obj)
 {
+	int ret;
 	struct lttng_ht *tmp_ht_ptr;
-	struct lttng_ht_iter iter;
-	struct consumer_socket *socket, *copy_sock;
 	struct consumer_output *output;
 
 	assert(obj);
@@ -376,20 +544,10 @@ struct consumer_output *consumer_copy_output(struct consumer_output *obj)
 	/* Putting back the HT pointer and start copying socket(s). */
 	output->socks = tmp_ht_ptr;
 
-	rcu_read_lock();
-	cds_lfht_for_each_entry(obj->socks->ht, &iter.iter, socket, node.node) {
-		/* Create new socket object. */
-		copy_sock = consumer_allocate_socket(socket->fd);
-		if (copy_sock == NULL) {
-			rcu_read_unlock();
-			goto malloc_error;
-		}
-
-		copy_sock->registered = socket->registered;
-		copy_sock->lock = socket->lock;
-		consumer_add_socket(copy_sock, output);
+	ret = consumer_copy_sockets(output, obj);
+	if (ret < 0) {
+		goto malloc_error;
 	}
-	rcu_read_unlock();
 
 error:
 	return output;
@@ -397,6 +555,52 @@ error:
 malloc_error:
 	consumer_destroy_output(output);
 	return NULL;
+}
+
+/*
+ * Copy consumer sockets from src to dst.
+ *
+ * Return 0 on success or else a negative value.
+ */
+int consumer_copy_sockets(struct consumer_output *dst,
+		struct consumer_output *src)
+{
+	int ret = 0;
+	struct lttng_ht_iter iter;
+	struct consumer_socket *socket, *copy_sock;
+
+	assert(dst);
+	assert(src);
+
+	rcu_read_lock();
+	cds_lfht_for_each_entry(src->socks->ht, &iter.iter, socket, node.node) {
+		/* Ignore socket that are already there. */
+		copy_sock = consumer_find_socket(*socket->fd_ptr, dst);
+		if (copy_sock) {
+			continue;
+		}
+
+		/* Create new socket object. */
+		copy_sock = consumer_allocate_socket(socket->fd_ptr);
+		if (copy_sock == NULL) {
+			rcu_read_unlock();
+			ret = -ENOMEM;
+			goto error;
+		}
+
+		copy_sock->registered = socket->registered;
+		/*
+		 * This is valid because this lock is shared accross all consumer
+		 * object being the global lock of the consumer data structure of the
+		 * session daemon.
+		 */
+		copy_sock->lock = socket->lock;
+		consumer_add_socket(copy_sock, dst);
+	}
+	rcu_read_unlock();
+
+error:
+	return ret;
 }
 
 /*
@@ -424,6 +628,12 @@ int consumer_set_network_uri(struct consumer_output *obj,
 		if (uri->port == 0) {
 			/* Assign default port. */
 			uri->port = DEFAULT_NETWORK_CONTROL_PORT;
+		} else {
+			if (obj->dst.net.data_isset && uri->port ==
+					obj->dst.net.data.port) {
+				ret = -LTTNG_ERR_INVALID;
+				goto error;
+			}
 		}
 		DBG3("Consumer control URI set with port %d", uri->port);
 		break;
@@ -433,11 +643,18 @@ int consumer_set_network_uri(struct consumer_output *obj,
 		if (uri->port == 0) {
 			/* Assign default port. */
 			uri->port = DEFAULT_NETWORK_DATA_PORT;
+		} else {
+			if (obj->dst.net.control_isset && uri->port ==
+					obj->dst.net.control.port) {
+				ret = -LTTNG_ERR_INVALID;
+				goto error;
+			}
 		}
 		DBG3("Consumer data URI set with port %d", uri->port);
 		break;
 	default:
 		ERR("Set network uri type unknown %d", uri->stype);
+		ret = -LTTNG_ERR_INVALID;
 		goto error;
 	}
 
@@ -473,6 +690,7 @@ int consumer_set_network_uri(struct consumer_output *obj,
 		}
 		if (ret < 0) {
 			PERROR("snprintf set consumer uri subdir");
+			ret = -LTTNG_ERR_NOMEM;
 			goto error;
 		}
 
@@ -484,7 +702,7 @@ int consumer_set_network_uri(struct consumer_output *obj,
 equal:
 	return 1;
 error:
-	return -1;
+	return ret;
 }
 
 /*
@@ -498,10 +716,32 @@ int consumer_send_fds(struct consumer_socket *sock, int *fds, size_t nb_fd)
 	assert(sock);
 	assert(nb_fd > 0);
 
-	ret = lttcomm_send_fds_unix_sock(sock->fd, fds, nb_fd);
+	ret = lttcomm_send_fds_unix_sock(*sock->fd_ptr, fds, nb_fd);
 	if (ret < 0) {
 		/* The above call will print a PERROR on error. */
-		DBG("Error when sending consumer fds on sock %d", sock->fd);
+		DBG("Error when sending consumer fds on sock %d", *sock->fd_ptr);
+		goto error;
+	}
+
+	ret = consumer_recv_status_reply(sock);
+
+error:
+	return ret;
+}
+
+/*
+ * Consumer send communication message structure to consumer.
+ */
+int consumer_send_msg(struct consumer_socket *sock,
+		struct lttcomm_consumer_msg *msg)
+{
+	int ret;
+
+	assert(msg);
+	assert(sock);
+
+	ret = consumer_socket_send(sock, msg, sizeof(struct lttcomm_consumer_msg));
+	if (ret < 0) {
 		goto error;
 	}
 
@@ -521,20 +761,78 @@ int consumer_send_channel(struct consumer_socket *sock,
 
 	assert(msg);
 	assert(sock);
-	assert(sock->fd >= 0);
 
-	ret = lttcomm_send_unix_sock(sock->fd, msg,
-			sizeof(struct lttcomm_consumer_msg));
+	ret = consumer_send_msg(sock, msg);
 	if (ret < 0) {
-		/* The above call will print a PERROR on error. */
-		DBG("Error when sending consumer channel on sock %d", sock->fd);
 		goto error;
 	}
 
-	ret = consumer_recv_status_reply(sock);
-
 error:
 	return ret;
+}
+
+/*
+ * Populate the given consumer msg structure with the ask_channel command
+ * information.
+ */
+void consumer_init_ask_channel_comm_msg(struct lttcomm_consumer_msg *msg,
+		uint64_t subbuf_size,
+		uint64_t num_subbuf,
+		int overwrite,
+		unsigned int switch_timer_interval,
+		unsigned int read_timer_interval,
+		int output,
+		int type,
+		uint64_t session_id,
+		const char *pathname,
+		const char *name,
+		uid_t uid,
+		gid_t gid,
+		uint64_t relayd_id,
+		uint64_t key,
+		unsigned char *uuid,
+		uint32_t chan_id,
+		uint64_t tracefile_size,
+		uint64_t tracefile_count,
+		uint64_t session_id_per_pid,
+		unsigned int monitor,
+		uint32_t ust_app_uid)
+{
+	assert(msg);
+
+	/* Zeroed structure */
+	memset(msg, 0, sizeof(struct lttcomm_consumer_msg));
+
+	msg->cmd_type = LTTNG_CONSUMER_ASK_CHANNEL_CREATION;
+	msg->u.ask_channel.subbuf_size = subbuf_size;
+	msg->u.ask_channel.num_subbuf = num_subbuf ;
+	msg->u.ask_channel.overwrite = overwrite;
+	msg->u.ask_channel.switch_timer_interval = switch_timer_interval;
+	msg->u.ask_channel.read_timer_interval = read_timer_interval;
+	msg->u.ask_channel.output = output;
+	msg->u.ask_channel.type = type;
+	msg->u.ask_channel.session_id = session_id;
+	msg->u.ask_channel.session_id_per_pid = session_id_per_pid;
+	msg->u.ask_channel.uid = uid;
+	msg->u.ask_channel.gid = gid;
+	msg->u.ask_channel.relayd_id = relayd_id;
+	msg->u.ask_channel.key = key;
+	msg->u.ask_channel.chan_id = chan_id;
+	msg->u.ask_channel.tracefile_size = tracefile_size;
+	msg->u.ask_channel.tracefile_count = tracefile_count;
+	msg->u.ask_channel.monitor = monitor;
+	msg->u.ask_channel.ust_app_uid = ust_app_uid;
+
+	memcpy(msg->u.ask_channel.uuid, uuid, sizeof(msg->u.ask_channel.uuid));
+
+	if (pathname) {
+		strncpy(msg->u.ask_channel.pathname, pathname,
+				sizeof(msg->u.ask_channel.pathname));
+		msg->u.ask_channel.pathname[sizeof(msg->u.ask_channel.pathname)-1] = '\0';
+	}
+
+	strncpy(msg->u.ask_channel.name, name, sizeof(msg->u.ask_channel.name));
+	msg->u.ask_channel.name[sizeof(msg->u.ask_channel.name) - 1] = '\0';
 }
 
 /*
@@ -542,15 +840,21 @@ error:
  */
 void consumer_init_channel_comm_msg(struct lttcomm_consumer_msg *msg,
 		enum lttng_consumer_command cmd,
-		int channel_key,
-		uint64_t max_sb_size,
-		uint64_t mmap_len,
+		uint64_t channel_key,
+		uint64_t session_id,
+		const char *pathname,
+		uid_t uid,
+		gid_t gid,
+		uint64_t relayd_id,
 		const char *name,
-		unsigned int nb_init_streams)
+		unsigned int nb_init_streams,
+		enum lttng_event_output output,
+		int type,
+		uint64_t tracefile_size,
+		uint64_t tracefile_count,
+		unsigned int monitor)
 {
 	assert(msg);
-
-	/* TODO: Args validation */
 
 	/* Zeroed structure */
 	memset(msg, 0, sizeof(struct lttcomm_consumer_msg));
@@ -558,9 +862,23 @@ void consumer_init_channel_comm_msg(struct lttcomm_consumer_msg *msg,
 	/* Send channel */
 	msg->cmd_type = cmd;
 	msg->u.channel.channel_key = channel_key;
-	msg->u.channel.max_sb_size = max_sb_size;
-	msg->u.channel.mmap_len = mmap_len;
+	msg->u.channel.session_id = session_id;
+	msg->u.channel.uid = uid;
+	msg->u.channel.gid = gid;
+	msg->u.channel.relayd_id = relayd_id;
 	msg->u.channel.nb_init_streams = nb_init_streams;
+	msg->u.channel.output = output;
+	msg->u.channel.type = type;
+	msg->u.channel.tracefile_size = tracefile_size;
+	msg->u.channel.tracefile_count = tracefile_count;
+	msg->u.channel.monitor = monitor;
+
+	strncpy(msg->u.channel.pathname, pathname,
+			sizeof(msg->u.channel.pathname));
+	msg->u.channel.pathname[sizeof(msg->u.channel.pathname) - 1] = '\0';
+
+	strncpy(msg->u.channel.name, name, sizeof(msg->u.channel.name));
+	msg->u.channel.name[sizeof(msg->u.channel.name) - 1] = '\0';
 }
 
 /*
@@ -568,41 +886,18 @@ void consumer_init_channel_comm_msg(struct lttcomm_consumer_msg *msg,
  */
 void consumer_init_stream_comm_msg(struct lttcomm_consumer_msg *msg,
 		enum lttng_consumer_command cmd,
-		int channel_key,
-		int stream_key,
-		uint32_t state,
-		enum lttng_event_output output,
-		uint64_t mmap_len,
-		uid_t uid,
-		gid_t gid,
-		int net_index,
-		unsigned int metadata_flag,
-		const char *name,
-		const char *pathname,
-		unsigned int session_id)
+		uint64_t channel_key,
+		uint64_t stream_key,
+		int cpu)
 {
 	assert(msg);
 
 	memset(msg, 0, sizeof(struct lttcomm_consumer_msg));
 
-	/* TODO: Args validation */
-
 	msg->cmd_type = cmd;
 	msg->u.stream.channel_key = channel_key;
 	msg->u.stream.stream_key = stream_key;
-	msg->u.stream.state = state;
-	msg->u.stream.output = output;
-	msg->u.stream.mmap_len = mmap_len;
-	msg->u.stream.uid = uid;
-	msg->u.stream.gid = gid;
-	msg->u.stream.net_index = net_index;
-	msg->u.stream.metadata_flag = metadata_flag;
-	msg->u.stream.session_id = (uint64_t) session_id;
-	strncpy(msg->u.stream.name, name, sizeof(msg->u.stream.name));
-	msg->u.stream.name[sizeof(msg->u.stream.name) - 1] = '\0';
-	strncpy(msg->u.stream.path_name, pathname,
-			sizeof(msg->u.stream.path_name));
-	msg->u.stream.path_name[sizeof(msg->u.stream.path_name) - 1] = '\0';
+	msg->u.stream.cpu = cpu;
 }
 
 /*
@@ -617,40 +912,9 @@ int consumer_send_stream(struct consumer_socket *sock,
 	assert(msg);
 	assert(dst);
 	assert(sock);
+	assert(fds);
 
-	switch (dst->type) {
-	case CONSUMER_DST_NET:
-		/* Consumer should send the stream on the network. */
-		msg->u.stream.net_index = dst->net_seq_index;
-		break;
-	case CONSUMER_DST_LOCAL:
-		/* Add stream file name to stream path */
-		strncat(msg->u.stream.path_name, "/",
-				sizeof(msg->u.stream.path_name) -
-				strlen(msg->u.stream.path_name) - 1);
-		strncat(msg->u.stream.path_name, msg->u.stream.name,
-				sizeof(msg->u.stream.path_name) -
-				strlen(msg->u.stream.path_name) - 1);
-		msg->u.stream.path_name[sizeof(msg->u.stream.path_name) - 1] = '\0';
-		/* Indicate that the stream is NOT network */
-		msg->u.stream.net_index = -1;
-		break;
-	default:
-		ERR("Consumer unknown output type (%d)", dst->type);
-		ret = -1;
-		goto error;
-	}
-
-	/* Send on socket */
-	ret = lttcomm_send_unix_sock(sock->fd, msg,
-			sizeof(struct lttcomm_consumer_msg));
-	if (ret < 0) {
-		/* The above call will print a PERROR on error. */
-		DBG("Error when sending consumer stream on sock %d", sock->fd);
-		goto error;
-	}
-
-	ret = consumer_recv_status_reply(sock);
+	ret = consumer_send_msg(sock, msg);
 	if (ret < 0) {
 		goto error;
 	}
@@ -670,14 +934,14 @@ error:
  * On success return positive value. On error, negative value.
  */
 int consumer_send_relayd_socket(struct consumer_socket *consumer_sock,
-		struct lttcomm_sock *sock, struct consumer_output *consumer,
-		enum lttng_stream_type type, unsigned int session_id)
+		struct lttcomm_relayd_sock *rsock, struct consumer_output *consumer,
+		enum lttng_stream_type type, uint64_t session_id)
 {
 	int ret;
 	struct lttcomm_consumer_msg msg;
 
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 	assert(consumer);
 	assert(consumer_sock);
 
@@ -696,23 +960,16 @@ int consumer_send_relayd_socket(struct consumer_socket *consumer_sock,
 	msg.u.relayd_sock.net_index = consumer->net_seq_index;
 	msg.u.relayd_sock.type = type;
 	msg.u.relayd_sock.session_id = session_id;
-	memcpy(&msg.u.relayd_sock.sock, sock, sizeof(msg.u.relayd_sock.sock));
+	memcpy(&msg.u.relayd_sock.sock, rsock, sizeof(msg.u.relayd_sock.sock));
 
-	DBG3("Sending relayd sock info to consumer on %d", consumer_sock->fd);
-	ret = lttcomm_send_unix_sock(consumer_sock->fd, &msg, sizeof(msg));
-	if (ret < 0) {
-		/* The above call will print a PERROR on error. */
-		DBG("Error when sending relayd sockets on sock %d", sock->fd);
-		goto error;
-	}
-
-	ret = consumer_recv_status_reply(consumer_sock);
+	DBG3("Sending relayd sock info to consumer on %d", *consumer_sock->fd_ptr);
+	ret = consumer_send_msg(consumer_sock, &msg);
 	if (ret < 0) {
 		goto error;
 	}
 
 	DBG3("Sending relayd socket file descriptor to consumer");
-	ret = consumer_send_fds(consumer_sock, &sock->fd, 1);
+	ret = consumer_send_fds(consumer_sock, &rsock->sock.fd, 1);
 	if (ret < 0) {
 		goto error;
 	}
@@ -778,7 +1035,7 @@ error:
  * This function has a different behavior with the consumer i.e. that it waits
  * for a reply from the consumer if yes or no the data is pending.
  */
-int consumer_is_data_pending(unsigned int id,
+int consumer_is_data_pending(uint64_t session_id,
 		struct consumer_output *consumer)
 {
 	int ret;
@@ -791,23 +1048,17 @@ int consumer_is_data_pending(unsigned int id,
 
 	msg.cmd_type = LTTNG_CONSUMER_DATA_PENDING;
 
-	msg.u.data_pending.session_id = (uint64_t) id;
+	msg.u.data_pending.session_id = session_id;
 
-	DBG3("Consumer data pending for id %u", id);
+	DBG3("Consumer data pending for id %" PRIu64, session_id);
 
 	/* Send command for each consumer */
 	rcu_read_lock();
 	cds_lfht_for_each_entry(consumer->socks->ht, &iter.iter, socket,
 			node.node) {
-		/* Code flow error */
-		assert(socket->fd >= 0);
-
 		pthread_mutex_lock(socket->lock);
-
-		ret = lttcomm_send_unix_sock(socket->fd, &msg, sizeof(msg));
+		ret = consumer_socket_send(socket, &msg, sizeof(msg));
 		if (ret < 0) {
-			/* The above call will print a PERROR on error. */
-			DBG("Error on consumer is data pending on sock %d", socket->fd);
 			pthread_mutex_unlock(socket->lock);
 			goto error_unlock;
 		}
@@ -817,18 +1068,11 @@ int consumer_is_data_pending(unsigned int id,
 		 * the reply status message.
 		 */
 
-		ret = lttcomm_recv_unix_sock(socket->fd, &ret_code, sizeof(ret_code));
-		if (ret <= 0) {
-			if (ret == 0) {
-				/* Orderly shutdown. Don't return 0 which means success. */
-				ret = -1;
-			}
-			/* The above call will print a PERROR on error. */
-			DBG("Error on recv consumer is data pending on sock %d", socket->fd);
+		ret = consumer_socket_recv(socket, &ret_code, sizeof(ret_code));
+		if (ret < 0) {
 			pthread_mutex_unlock(socket->lock);
 			goto error_unlock;
 		}
-
 		pthread_mutex_unlock(socket->lock);
 
 		if (ret_code == 1) {
@@ -837,11 +1081,222 @@ int consumer_is_data_pending(unsigned int id,
 	}
 	rcu_read_unlock();
 
-	DBG("Consumer data is %s pending for session id %u",
-			ret_code == 1 ? "" : "NOT", id);
+	DBG("Consumer data is %s pending for session id %" PRIu64,
+			ret_code == 1 ? "" : "NOT", session_id);
 	return ret_code;
 
 error_unlock:
 	rcu_read_unlock();
 	return -1;
+}
+
+/*
+ * Send a flush command to consumer using the given channel key.
+ *
+ * Return 0 on success else a negative value.
+ */
+int consumer_flush_channel(struct consumer_socket *socket, uint64_t key)
+{
+	int ret;
+	struct lttcomm_consumer_msg msg;
+
+	assert(socket);
+
+	DBG2("Consumer flush channel key %" PRIu64, key);
+
+	msg.cmd_type = LTTNG_CONSUMER_FLUSH_CHANNEL;
+	msg.u.flush_channel.key = key;
+
+	pthread_mutex_lock(socket->lock);
+	health_code_update();
+
+	ret = consumer_send_msg(socket, &msg);
+	if (ret < 0) {
+		goto end;
+	}
+
+end:
+	health_code_update();
+	pthread_mutex_unlock(socket->lock);
+	return ret;
+}
+
+/*
+ * Send a close metdata command to consumer using the given channel key.
+ *
+ * Return 0 on success else a negative value.
+ */
+int consumer_close_metadata(struct consumer_socket *socket,
+		uint64_t metadata_key)
+{
+	int ret;
+	struct lttcomm_consumer_msg msg;
+
+	assert(socket);
+
+	DBG2("Consumer close metadata channel key %" PRIu64, metadata_key);
+
+	msg.cmd_type = LTTNG_CONSUMER_CLOSE_METADATA;
+	msg.u.close_metadata.key = metadata_key;
+
+	pthread_mutex_lock(socket->lock);
+	health_code_update();
+
+	ret = consumer_send_msg(socket, &msg);
+	if (ret < 0) {
+		goto end;
+	}
+
+end:
+	health_code_update();
+	pthread_mutex_unlock(socket->lock);
+	return ret;
+}
+
+/*
+ * Send a setup metdata command to consumer using the given channel key.
+ *
+ * Return 0 on success else a negative value.
+ */
+int consumer_setup_metadata(struct consumer_socket *socket,
+		uint64_t metadata_key)
+{
+	int ret;
+	struct lttcomm_consumer_msg msg;
+
+	assert(socket);
+
+	DBG2("Consumer setup metadata channel key %" PRIu64, metadata_key);
+
+	msg.cmd_type = LTTNG_CONSUMER_SETUP_METADATA;
+	msg.u.setup_metadata.key = metadata_key;
+
+	pthread_mutex_lock(socket->lock);
+	health_code_update();
+
+	ret = consumer_send_msg(socket, &msg);
+	if (ret < 0) {
+		goto end;
+	}
+
+end:
+	health_code_update();
+	pthread_mutex_unlock(socket->lock);
+	return ret;
+}
+
+/*
+ * Send metadata string to consumer. Socket lock MUST be acquired.
+ *
+ * Return 0 on success else a negative value.
+ */
+int consumer_push_metadata(struct consumer_socket *socket,
+		uint64_t metadata_key, char *metadata_str, size_t len,
+		size_t target_offset)
+{
+	int ret;
+	struct lttcomm_consumer_msg msg;
+
+	assert(socket);
+
+	DBG2("Consumer push metadata to consumer socket %d", *socket->fd_ptr);
+
+	msg.cmd_type = LTTNG_CONSUMER_PUSH_METADATA;
+	msg.u.push_metadata.key = metadata_key;
+	msg.u.push_metadata.target_offset = target_offset;
+	msg.u.push_metadata.len = len;
+
+	health_code_update();
+	ret = consumer_send_msg(socket, &msg);
+	if (ret < 0 || len == 0) {
+		goto end;
+	}
+
+	DBG3("Consumer pushing metadata on sock %d of len %zu", *socket->fd_ptr,
+			len);
+
+	ret = consumer_socket_send(socket, metadata_str, len);
+	if (ret < 0) {
+		goto end;
+	}
+
+	health_code_update();
+	ret = consumer_recv_status_reply(socket);
+	if (ret < 0) {
+		goto end;
+	}
+
+end:
+	health_code_update();
+	return ret;
+}
+
+/*
+ * Ask the consumer to snapshot a specific channel using the key.
+ *
+ * Return 0 on success or else a negative error.
+ */
+int consumer_snapshot_channel(struct consumer_socket *socket, uint64_t key,
+		struct snapshot_output *output, int metadata, uid_t uid, gid_t gid,
+		const char *session_path, int wait, int max_stream_size)
+{
+	int ret;
+	struct lttcomm_consumer_msg msg;
+
+	assert(socket);
+	assert(output);
+	assert(output->consumer);
+
+	DBG("Consumer snapshot channel key %" PRIu64, key);
+
+	memset(&msg, 0, sizeof(msg));
+	msg.cmd_type = LTTNG_CONSUMER_SNAPSHOT_CHANNEL;
+	msg.u.snapshot_channel.key = key;
+	msg.u.snapshot_channel.max_stream_size = max_stream_size;
+	msg.u.snapshot_channel.metadata = metadata;
+
+	if (output->consumer->type == CONSUMER_DST_NET) {
+		msg.u.snapshot_channel.relayd_id = output->consumer->net_seq_index;
+		msg.u.snapshot_channel.use_relayd = 1;
+		ret = snprintf(msg.u.snapshot_channel.pathname,
+				sizeof(msg.u.snapshot_channel.pathname),
+				"%s/%s-%s-%" PRIu64 "%s", output->consumer->subdir,
+				output->name, output->datetime, output->nb_snapshot,
+				session_path);
+		if (ret < 0) {
+			ret = -LTTNG_ERR_NOMEM;
+			goto error;
+		}
+	} else {
+		ret = snprintf(msg.u.snapshot_channel.pathname,
+				sizeof(msg.u.snapshot_channel.pathname),
+				"%s/%s-%s-%" PRIu64 "%s", output->consumer->dst.trace_path,
+				output->name, output->datetime, output->nb_snapshot,
+				session_path);
+		if (ret < 0) {
+			ret = -LTTNG_ERR_NOMEM;
+			goto error;
+		}
+		msg.u.snapshot_channel.relayd_id = (uint64_t) -1ULL;
+
+		/* Create directory. Ignore if exist. */
+		ret = run_as_mkdir_recursive(msg.u.snapshot_channel.pathname,
+				S_IRWXU | S_IRWXG, uid, gid);
+		if (ret < 0) {
+			if (ret != -EEXIST) {
+				ERR("Trace directory creation error");
+				goto error;
+			}
+		}
+	}
+
+	health_code_update();
+	ret = consumer_send_msg(socket, &msg);
+	if (ret < 0) {
+		goto error;
+	}
+
+error:
+	health_code_update();
+	return ret;
 }

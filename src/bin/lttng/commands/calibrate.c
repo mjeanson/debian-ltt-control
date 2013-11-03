@@ -73,8 +73,8 @@ static struct poptOption long_options[] = {
 	 * tracer anymore.
 	 */
 	{"function:entry", 0,   POPT_ARG_NONE, 0, OPT_FUNCTION_ENTRY, 0, 0},
-#endif
 	{"syscall",        0,   POPT_ARG_NONE, 0, OPT_SYSCALL, 0, 0},
+#endif
 	{"list-options", 0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{0, 0, 0, 0, 0, 0, 0}
 };
@@ -151,6 +151,7 @@ static int calibrate_lttng(void)
 		calibrate.type = LTTNG_CALIBRATE_FUNCTION;
 		ret = lttng_calibrate(handle, &calibrate);
 		if (ret < 0) {
+			ERR("%s", lttng_strerror(ret));
 			goto error;
 		}
 		MSG("%s calibration done", opt_kernel ? "Kernel" : "UST");

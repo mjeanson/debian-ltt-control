@@ -26,9 +26,10 @@
 
 #include <lttng/lttng.h>
 #include <common/defaults.h>
+#include <config.h>
 
-#define RELAYD_VERSION_COMM_MAJOR             2
-#define RELAYD_VERSION_COMM_MINOR             1
+#define RELAYD_VERSION_COMM_MAJOR             VERSION_MAJOR
+#define RELAYD_VERSION_COMM_MINOR             VERSION_MINOR
 
 /*
  * lttng-relayd communication header.
@@ -67,6 +68,17 @@ struct lttcomm_relayd_status_session {
 struct lttcomm_relayd_add_stream {
 	char channel_name[DEFAULT_STREAM_NAME_LEN];
 	char pathname[PATH_MAX];
+} LTTNG_PACKED;
+
+/*
+ * Used to add a stream on the relay daemon.
+ * Protocol version 2.2
+ */
+struct lttcomm_relayd_add_stream_2_2 {
+	char channel_name[DEFAULT_STREAM_NAME_LEN];
+	char pathname[PATH_MAX];
+	uint64_t tracefile_size;
+	uint64_t tracefile_count;
 } LTTNG_PACKED;
 
 /*

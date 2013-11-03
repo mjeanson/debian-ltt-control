@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include <common/error.h>
+#include <common/utils.h>
 
 #include "conf.h"
 
@@ -40,6 +41,7 @@ char *config_get_file_path(char *path)
 	ret = asprintf(&file_path, "%s/%s", path, CONFIG_FILENAME);
 	if (ret < 0) {
 		ERR("Fail allocating config file path");
+		file_path = NULL;
 	}
 
 	return file_path;
@@ -65,9 +67,7 @@ static FILE *open_config(char *path, const char *mode)
 	}
 
 error:
-	if (file_path) {
-		free(file_path);
-	}
+	free(file_path);
 	return fp;
 }
 
@@ -124,14 +124,6 @@ end:
 }
 
 /*
- * Returns the HOME directory path. Caller MUST NOT free(3) the return pointer.
- */
-char *config_get_default_path(void)
-{
-	return getenv("HOME");
-}
-
-/*
  * Destroys directory config and file config.
  */
 void config_destroy(char *path)
@@ -162,7 +154,7 @@ end:
  */
 void config_destroy_default(void)
 {
-	char *path = config_get_default_path();
+	char *path = utils_get_home_dir();
 	if (path == NULL) {
 		return;
 	}
@@ -205,6 +197,7 @@ char *config_read_session_name(char *path)
 	if (fp == NULL) {
 		ERR("Can't find valid lttng config %s/.lttngrc", path);
 		MSG("Did you create a session? (lttng create <my_session>)");
+		free(session_name);
 		goto error;
 	}
 
@@ -223,6 +216,7 @@ char *config_read_session_name(char *path)
 	}
 
 error_close:
+	free(session_name);
 	ret = fclose(fp);
 	if (ret < 0) {
 		PERROR("close config read session name");
@@ -248,14 +242,16 @@ found:
 int config_add_session_name(char *path, char *name)
 {
 	int ret;
-	char session_name[NAME_MAX];
+	char *attr = "session=";
+	/* Max name len accepted plus attribute's len and the NULL byte. */
+	char session_name[NAME_MAX + strlen(attr) + 1];
 
 	/*
 	 * With GNU C <  2.1, snprintf returns -1 if the target buffer is too small;
 	 * With GNU C >= 2.1, snprintf returns the required size (excluding closing null)
 	 */
-	ret = snprintf(session_name, NAME_MAX, "session=%s\n", name);
-	if ((ret < 0) || (ret >= NAME_MAX)) {
+	ret = snprintf(session_name, sizeof(session_name), "%s%s\n", attr, name);
+	if (ret < 0) {
 		ret = -1;
 		goto error;
 	}
@@ -274,7 +270,7 @@ int config_init(char *session_name)
 	int ret;
 	char *path;
 
-	path = config_get_default_path();
+	path = utils_get_home_dir();
 	if (path == NULL) {
 		ret = -1;
 		goto error;

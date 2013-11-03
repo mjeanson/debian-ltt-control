@@ -32,20 +32,22 @@
 #include "filter-ast.h"
 #include "filter-parser.h"
 
-__attribute__((visibility("hidden")))
+#include <common/macros.h>
+
+LTTNG_HIDDEN
 int yydebug;
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int filter_parser_debug = 0;
 
-__attribute__((visibility("hidden")))
-int yyparse(struct filter_parser_ctx *parser_ctx);
-__attribute__((visibility("hidden")))
-int yylex(union YYSTYPE *yyval, struct filter_parser_ctx *parser_ctx);
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
+int yyparse(struct filter_parser_ctx *parser_ctx, yyscan_t scanner);
+LTTNG_HIDDEN
+int yylex(union YYSTYPE *yyval, yyscan_t scanner);
+LTTNG_HIDDEN
 int yylex_init_extra(struct filter_parser_ctx *parser_ctx, yyscan_t * ptr_yy_globals);
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int yylex_destroy(yyscan_t yyparser_ctx);
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 void yyrestart(FILE * in_str, yyscan_t parser_ctx);
 
 struct gc_string {
@@ -62,7 +64,7 @@ static const char *node_type_to_str[] = {
 	[ NODE_UNARY_OP ] = "NODE_UNARY_OP",
 };
 
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 const char *node_type(struct filter_node *node)
 {
 	if (node->type < NR_NODE_TYPES)
@@ -93,7 +95,7 @@ static struct gc_string *gc_string_alloc(struct filter_parser_ctx *parser_ctx,
  * gsrc will be garbage collected immediately, and gstr might be.
  * Should only be used to append characters to a string literal or constant.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 struct gc_string *gc_string_append(struct filter_parser_ctx *parser_ctx,
 				   struct gc_string *gstr,
 				   struct gc_string *gsrc)
@@ -123,7 +125,7 @@ struct gc_string *gc_string_append(struct filter_parser_ctx *parser_ctx,
 	return gstr;
 }
 
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 void setstring(struct filter_parser_ctx *parser_ctx, YYSTYPE *lvalp, const char *src)
 {
 	lvalp->gs = gc_string_alloc(parser_ctx, strlen(src) + 1);
@@ -185,13 +187,13 @@ static struct filter_node *make_op_node(struct filter_parser_ctx *scanner,
 	return node;
 }
 
-__attribute__((visibility("hidden")))
-void yyerror(struct filter_parser_ctx *parser_ctx, const char *str)
+LTTNG_HIDDEN
+void yyerror(struct filter_parser_ctx *parser_ctx, yyscan_t scanner, const char *str)
 {
 	fprintf(stderr, "error %s\n", str);
 }
  
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int yywrap(void)
 {
 	return 1;
@@ -199,7 +201,7 @@ int yywrap(void)
 
 #define parse_error(parser_ctx, str)				\
 do {								\
-	yyerror(parser_ctx, YY_("parse error: " str "\n"));	\
+	yyerror(parser_ctx, parser_ctx->scanner, YY_("parse error: " str "\n"));	\
 	YYERROR;						\
 } while (0)
 
@@ -233,13 +235,13 @@ static void filter_ast_free(struct filter_ast *ast)
 	free(ast);
 }
 
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int filter_parser_ctx_append_ast(struct filter_parser_ctx *parser_ctx)
 {
-	return yyparse(parser_ctx);
+	return yyparse(parser_ctx, parser_ctx->scanner);
 }
 
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 struct filter_parser_ctx *filter_parser_ctx_alloc(FILE *input)
 {
 	struct filter_parser_ctx *parser_ctx;
@@ -281,7 +283,7 @@ cleanup_parser_ctx:
 	return NULL;
 }
 
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 void filter_parser_ctx_free(struct filter_parser_ctx *parser_ctx)
 {
 	int ret;
@@ -299,7 +301,8 @@ void filter_parser_ctx_free(struct filter_parser_ctx *parser_ctx)
 %define api.pure
 	/* %locations */
 %parse-param {struct filter_parser_ctx *parser_ctx}
-%lex-param {struct filter_parser_ctx *parser_ctx}
+%parse-param {yyscan_t scanner}
+%lex-param {yyscan_t scanner}
 %start translation_unit
 %token CHARACTER_CONSTANT_START SQUOTE STRING_LITERAL_START DQUOTE
 %token ESCSEQ CHAR_STRING_TOKEN
@@ -311,7 +314,7 @@ void filter_parser_ctx_free(struct filter_parser_ctx *parser_ctx)
 %token ASSIGN COLON SEMICOLON DOTDOTDOT DOT EQUAL COMMA
 %token XOR_BIN AND_BIN OR_BIN NOT_BIN
 
-%token <gs> IDENTIFIER
+%token <gs> IDENTIFIER GLOBAL_IDENTIFIER
 %token ERROR
 %union
 {
@@ -385,6 +388,13 @@ primary_expression
 			$$->u.expression.type = AST_EXP_IDENTIFIER;
 			$$->u.expression.u.identifier = yylval.gs->s;
 		}
+	|	GLOBAL_IDENTIFIER
+		{
+			$$ = make_node(parser_ctx, NODE_EXPRESSION);
+			$$->u.expression.type = AST_EXP_GLOBAL_IDENTIFIER;
+			$$->u.expression.u.identifier = yylval.gs->s;
+		}
+
 	|	DECIMAL_CONSTANT
 		{
 			$$ = make_node(parser_ctx, NODE_EXPRESSION);

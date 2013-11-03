@@ -20,32 +20,29 @@
 
 #include "trace-kernel.h"
 
-int event_kernel_disable_tracepoint(struct ltt_kernel_session *ksession,
-		struct ltt_kernel_channel *kchan, char *event_name);
-int event_kernel_disable_all_syscalls(struct ltt_kernel_session *ksession,
-		struct ltt_kernel_channel *kchan);
-int event_kernel_disable_all_tracepoints(struct ltt_kernel_session *ksession,
-		struct ltt_kernel_channel *kchan);
-int event_kernel_disable_all(struct ltt_kernel_session *ksession,
-		struct ltt_kernel_channel *kchan);
+int event_kernel_disable_tracepoint(struct ltt_kernel_channel *kchan,
+		char *event_name);
+int event_kernel_disable_all_syscalls(struct ltt_kernel_channel *kchan);
+int event_kernel_disable_all_tracepoints(struct ltt_kernel_channel *kchan);
+int event_kernel_disable_all(struct ltt_kernel_channel *kchan);
 
-int event_kernel_enable_tracepoint(struct ltt_kernel_session *ksession,
-		struct ltt_kernel_channel *kchan, struct lttng_event *event);
-int event_kernel_enable_all_tracepoints(struct ltt_kernel_session *ksession,
-		struct ltt_kernel_channel *kchan, int kernel_tracer_fd);
-int event_kernel_enable_all_syscalls(struct ltt_kernel_session *ksession,
-		struct ltt_kernel_channel *kchan, int kernel_tracer_fd);
-int event_kernel_enable_all(struct ltt_kernel_session *ksession,
-		struct ltt_kernel_channel *kchan, int kernel_tracer_fd);
+int event_kernel_enable_tracepoint(struct ltt_kernel_channel *kchan,
+		struct lttng_event *event);
+int event_kernel_enable_all_tracepoints(struct ltt_kernel_channel *kchan,
+		int kernel_tracer_fd);
+int event_kernel_enable_all_syscalls(struct ltt_kernel_channel *kchan,
+		int kernel_tracer_fd);
+int event_kernel_enable_all(struct ltt_kernel_channel *kchan,
+		int kernel_tracer_fd);
 
-int event_ust_enable_tracepoint(struct ltt_ust_session *usess, int domain,
+int event_ust_enable_tracepoint(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct lttng_event *event,
 		struct lttng_filter_bytecode *filter);
-int event_ust_disable_tracepoint(struct ltt_ust_session *usess, int domain,
+int event_ust_disable_tracepoint(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, char *event_name);
-int event_ust_enable_all_tracepoints(struct ltt_ust_session *usess, int domain,
+int event_ust_enable_all_tracepoints(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct lttng_filter_bytecode *filter);
-int event_ust_disable_all_tracepoints(struct ltt_ust_session *usess, int domain,
+int event_ust_disable_all_tracepoints(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan);
 
 #endif /* _LTT_EVENT_H */

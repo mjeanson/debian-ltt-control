@@ -82,7 +82,13 @@ int kernctl_open_metadata(int fd, struct lttng_channel_attr *chops)
 		old_channel.switch_timer_interval = chops->switch_timer_interval;
 		old_channel.read_timer_interval = chops->read_timer_interval;
 		old_channel.output = chops->output;
-		memcpy(old_channel.padding, chops->padding, sizeof(old_channel.padding));
+
+		memset(old_channel.padding, 0, sizeof(old_channel.padding));
+		/*
+		 * The new channel padding is smaller than the old ABI so we use the
+		 * new ABI padding size for the memcpy.
+		 */
+		memcpy(old_channel.padding, chops->padding, sizeof(chops->padding));
 
 		return ioctl(fd, LTTNG_KERNEL_OLD_METADATA, &old_channel);
 	}
@@ -93,7 +99,7 @@ int kernctl_open_metadata(int fd, struct lttng_channel_attr *chops)
 	channel.switch_timer_interval = chops->switch_timer_interval;
 	channel.read_timer_interval = chops->read_timer_interval;
 	channel.output = chops->output;
-	memcpy(channel.padding, chops->padding, sizeof(channel.padding));
+	memcpy(channel.padding, chops->padding, sizeof(chops->padding));
 
 	return ioctl(fd, LTTNG_KERNEL_METADATA, &channel);
 }
@@ -111,7 +117,13 @@ int kernctl_create_channel(int fd, struct lttng_channel_attr *chops)
 		old_channel.switch_timer_interval = chops->switch_timer_interval;
 		old_channel.read_timer_interval = chops->read_timer_interval;
 		old_channel.output = chops->output;
-		memcpy(old_channel.padding, chops->padding, sizeof(old_channel.padding));
+
+		memset(old_channel.padding, 0, sizeof(old_channel.padding));
+		/*
+		 * The new channel padding is smaller than the old ABI so we use the
+		 * new ABI padding size for the memcpy.
+		 */
+		memcpy(old_channel.padding, chops->padding, sizeof(chops->padding));
 
 		return ioctl(fd, LTTNG_KERNEL_OLD_CHANNEL, &old_channel);
 	}
@@ -122,7 +134,7 @@ int kernctl_create_channel(int fd, struct lttng_channel_attr *chops)
 	channel.switch_timer_interval = chops->switch_timer_interval;
 	channel.read_timer_interval = chops->read_timer_interval;
 	channel.output = chops->output;
-	memcpy(channel.padding, chops->padding, sizeof(channel.padding));
+	memcpy(channel.padding, chops->padding, sizeof(chops->padding));
 
 	return ioctl(fd, LTTNG_KERNEL_CHANNEL, &channel);
 }

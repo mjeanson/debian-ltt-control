@@ -25,11 +25,17 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <time.h>
+#include <poll.h>
 
-#include <common/defaults.h>
-#include <common/error.h>
+#include <common/common.h>
 
 #include "inet6.h"
+
+#define MSEC_PER_SEC	1000
+#define NSEC_PER_MSEC	1000000
+#define RECONNECT_DELAY	200	/* ms */
 
 /*
  * INET protocol operations.
@@ -47,10 +53,11 @@ static const struct lttcomm_proto_ops inet6_ops = {
 /*
  * Creates an PF_INET socket.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_create_inet6_sock(struct lttcomm_sock *sock, int type, int proto)
 {
 	int val = 1, ret;
+	unsigned long timeout;
 
 	/* Create server socket */
 	if ((sock->fd = socket(PF_INET6, type, proto)) < 0) {
@@ -68,6 +75,17 @@ int lttcomm_create_inet6_sock(struct lttcomm_sock *sock, int type, int proto)
 		PERROR("setsockopt inet6");
 		goto error;
 	}
+	timeout = lttcomm_get_network_timeout();
+	if (timeout) {
+		ret = lttcomm_setsockopt_rcv_timeout(sock->fd, timeout);
+		if (ret) {
+			goto error;
+		}
+		ret = lttcomm_setsockopt_snd_timeout(sock->fd, timeout);
+		if (ret) {
+			goto error;
+		}
+	}
 
 	return 0;
 
@@ -78,7 +96,7 @@ error:
 /*
  * Bind socket and return.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_bind_inet6_sock(struct lttcomm_sock *sock)
 {
 	int ret;
@@ -92,21 +110,145 @@ int lttcomm_bind_inet6_sock(struct lttcomm_sock *sock)
 	return ret;
 }
 
+static
+int connect_no_timeout(struct lttcomm_sock *sock)
+{
+	return connect(sock->fd, (struct sockaddr *) &sock->sockaddr.addr.sin6,
+			sizeof(sock->sockaddr.addr.sin6));
+}
+
+/*
+ * Return time_a - time_b  in milliseconds.
+ */
+static
+unsigned long time_diff_ms(struct timespec *time_a,
+		struct timespec *time_b)
+{
+	time_t sec_diff;
+	long nsec_diff;
+	unsigned long result_ms;
+
+	sec_diff = time_a->tv_sec - time_b->tv_sec;
+	nsec_diff = time_a->tv_nsec - time_b->tv_nsec;
+
+	result_ms = sec_diff * MSEC_PER_SEC;
+	result_ms += nsec_diff / NSEC_PER_MSEC;
+	return result_ms;
+}
+
+static
+int connect_with_timeout(struct lttcomm_sock *sock)
+{
+	unsigned long timeout = lttcomm_get_network_timeout();
+	int ret, flags, connect_ret;
+	struct timespec orig_time, cur_time;
+
+	ret = fcntl(sock->fd, F_GETFL, 0);
+	if (ret == -1) {
+		PERROR("fcntl");
+		return -1;
+	}
+	flags = ret;
+
+	/* Set socket to nonblock */
+	ret = fcntl(sock->fd, F_SETFL, flags | O_NONBLOCK);
+	if (ret == -1) {
+		PERROR("fcntl");
+		return -1;
+	}
+
+	ret = clock_gettime(CLOCK_MONOTONIC, &orig_time);
+	if (ret == -1) {
+		PERROR("clock_gettime");
+		return -1;
+	}
+
+	connect_ret = connect(sock->fd,
+		(struct sockaddr *) &sock->sockaddr.addr.sin6,
+		sizeof(sock->sockaddr.addr.sin6));
+	if (connect_ret == -1 && errno != EAGAIN
+			&& errno != EWOULDBLOCK
+			&& errno != EINPROGRESS) {
+		goto error;
+	} else if (!connect_ret) {
+		/* Connect succeeded */
+		goto success;
+	}
+
+	/*
+	 * Perform poll loop following EINPROGRESS recommendation from
+	 * connect(2) man page.
+	 */
+	do {
+		struct pollfd fds;
+
+		fds.fd = sock->fd;
+		fds.events = POLLOUT;
+		fds.revents = 0;
+		ret = poll(&fds, 1, RECONNECT_DELAY);
+		if (ret < 0) {
+			goto error;
+		} else if (ret > 0) {
+			int optval;
+			socklen_t optval_len = sizeof(optval);
+
+			if (!(fds.revents & POLLOUT)) {
+				/* Either hup or error */
+				errno = EPIPE;
+				goto error;
+			}
+			/* got something */
+			ret = getsockopt(sock->fd, SOL_SOCKET,
+				SO_ERROR, &optval, &optval_len);
+			if (ret) {
+				goto error;
+			}
+			if (!optval) {
+				connect_ret = 0;
+				goto success;
+			} else {
+				goto error;
+			}
+		}
+		/* ret == 0: timeout */
+		ret = clock_gettime(CLOCK_MONOTONIC, &cur_time);
+		if (ret == -1) {
+			PERROR("clock_gettime");
+			connect_ret = ret;
+			goto error;
+		}
+	} while (time_diff_ms(&cur_time, &orig_time) < timeout);
+
+	/* Timeout */
+	errno = ETIMEDOUT;
+	connect_ret = -1;
+
+success:
+	/* Restore initial flags */
+	ret = fcntl(sock->fd, F_SETFL, flags);
+	if (ret == -1) {
+		PERROR("fcntl");
+		/* Continue anyway */
+	}
+error:
+	return connect_ret;
+}
+
 /*
  * Connect PF_INET socket.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_connect_inet6_sock(struct lttcomm_sock *sock)
 {
 	int ret, closeret;
 
-	ret = connect(sock->fd, (struct sockaddr *) &sock->sockaddr.addr.sin6,
-			sizeof(sock->sockaddr.addr.sin6));
+	if (lttcomm_get_network_timeout()) {
+		ret = connect_with_timeout(sock);
+	} else {
+		ret = connect_no_timeout(sock);
+	}
 	if (ret < 0) {
-		/*
-		 * Don't print message on connect error, because connect is used in
-		 * normal execution to detect if sessiond is alive.
-		 */
+		PERROR("connect inet6");
 		goto error_connect;
 	}
 
@@ -125,7 +267,7 @@ error_connect:
  * Do an accept(2) on the sock and return the new lttcomm socket. The socket
  * MUST be bind(2) before.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 struct lttcomm_sock *lttcomm_accept_inet6_sock(struct lttcomm_sock *sock)
 {
 	int new_fd;
@@ -169,7 +311,7 @@ error:
 /*
  * Make the socket listen using LTTNG_SESSIOND_COMM_MAX_LISTEN.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_listen_inet6_sock(struct lttcomm_sock *sock, int backlog)
 {
 	int ret;
@@ -200,7 +342,7 @@ end:
  *
  * Return the size of received data.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 ssize_t lttcomm_recvmsg_inet6_sock(struct lttcomm_sock *sock, void *buf,
 		size_t len, int flags)
 {
@@ -243,7 +385,7 @@ ssize_t lttcomm_recvmsg_inet6_sock(struct lttcomm_sock *sock, void *buf,
  *
  * Return the size of sent data.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 ssize_t lttcomm_sendmsg_inet6_sock(struct lttcomm_sock *sock, void *buf,
 		size_t len, int flags)
 {
@@ -286,7 +428,7 @@ ssize_t lttcomm_sendmsg_inet6_sock(struct lttcomm_sock *sock, void *buf,
 /*
  * Shutdown cleanly and close.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_close_inet6_sock(struct lttcomm_sock *sock)
 {
 	int ret;

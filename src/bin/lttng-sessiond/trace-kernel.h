@@ -65,6 +65,8 @@ struct ltt_kernel_channel {
 	struct ltt_kernel_event_list events_list;
 	struct ltt_kernel_stream_list stream_list;
 	struct cds_list_head list;
+	/* Session pointer which has a reference to this object. */
+	struct ltt_kernel_session *session;
 };
 
 /* Metadata */
@@ -77,8 +79,11 @@ struct ltt_kernel_metadata {
 struct ltt_kernel_stream {
 	int fd;
 	int state;
+	int cpu;
 	/* Format is %s_%d respectively channel name and CPU number. */
 	char name[DEFAULT_STREAM_NAME_LEN];
+	uint64_t tracefile_size;
+	uint64_t tracefile_count;
 	struct cds_list_head list;
 };
 
@@ -89,7 +94,6 @@ struct ltt_kernel_session {
 	int consumer_fds_sent;
 	unsigned int channel_count;
 	unsigned int stream_count_global;
-	char *trace_path;
 	struct ltt_kernel_metadata *metadata;
 	struct ltt_kernel_channel_list channel_list;
 	/* UID/GID of the user owning the session */
@@ -104,9 +108,13 @@ struct ltt_kernel_session {
 	struct consumer_output *consumer;
 	struct consumer_output *tmp_consumer;
 	/* Tracing session id */
-	unsigned int id;
+	uint64_t id;
 	/* Session is started and active */
 	unsigned int started;
+	/* Tell or not if the session has to output the traces. */
+	unsigned int output_traces;
+	unsigned int snapshot_mode;
+	unsigned int has_non_default_channel;
 };
 
 /*
@@ -120,8 +128,9 @@ struct ltt_kernel_channel *trace_kernel_get_channel_by_name(
 /*
  * Create functions malloc() the data structure.
  */
-struct ltt_kernel_session *trace_kernel_create_session(char *path);
-struct ltt_kernel_channel *trace_kernel_create_channel(struct lttng_channel *chan, char *path);
+struct ltt_kernel_session *trace_kernel_create_session(void);
+struct ltt_kernel_channel *trace_kernel_create_channel(
+		struct lttng_channel *chan);
 struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev);
 struct ltt_kernel_metadata *trace_kernel_create_metadata(void);
 struct ltt_kernel_stream *trace_kernel_create_stream(const char *name,

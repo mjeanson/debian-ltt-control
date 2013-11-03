@@ -44,6 +44,7 @@
 #include <common/defaults.h>
 #include <common/common.h>
 #include <common/consumer.h>
+#include <common/consumer-timer.h>
 #include <common/compat/poll.h>
 #include <common/sessiond-comm/sessiond-comm.h>
 
@@ -51,8 +52,10 @@
 
 /* TODO : support UST (all direct kernel-ctl accesses). */
 
-/* the two threads (receive fd, poll and metadata) */
-static pthread_t data_thread, metadata_thread, sessiond_thread;
+/* threads (channel handling, poll, metadata, sessiond) */
+
+static pthread_t channel_thread, data_thread, metadata_thread, sessiond_thread;
+static pthread_t metadata_timer_thread;
 
 /* to count the number of times the user pressed ctrl+c */
 static int sigintcount = 0;
@@ -294,7 +297,7 @@ int main(int argc, char **argv)
 	/* Set up max poll set size */
 	lttng_poll_set_max_size();
 
-	if (strlen(command_sock_path) == 0) {
+	if (*command_sock_path == '\0') {
 		switch (opt_type) {
 		case LTTNG_CONSUMER_KERNEL:
 			snprintf(command_sock_path, PATH_MAX, DEFAULT_KCONSUMERD_CMD_SOCK_PATH,
@@ -330,7 +333,7 @@ int main(int argc, char **argv)
 	}
 
 	lttng_consumer_set_command_sock_path(ctx, command_sock_path);
-	if (strlen(error_sock_path) == 0) {
+	if (*error_sock_path == '\0') {
 		switch (opt_type) {
 		case LTTNG_CONSUMER_KERNEL:
 			snprintf(error_sock_path, PATH_MAX, DEFAULT_KCONSUMERD_ERR_SOCK_PATH,
@@ -363,12 +366,37 @@ int main(int argc, char **argv)
 	}
 	lttng_consumer_set_error_sock(ctx, ret);
 
+	/*
+	 * For UST consumer, we block RT signals used for periodical metadata flush
+	 * in main and create a dedicated thread to handle these signals.
+	 */
+	switch (opt_type) {
+	case LTTNG_CONSUMER32_UST:
+	case LTTNG_CONSUMER64_UST:
+		consumer_signal_init();
+		break;
+	default:
+		break;
+	}
+	ctx->type = opt_type;
+
+	/* Initialize communication library */
+	lttcomm_init();
+
+	/* Create thread to manage channels */
+	ret = pthread_create(&channel_thread, NULL, consumer_thread_channel_poll,
+			(void *) ctx);
+	if (ret != 0) {
+		perror("pthread_create");
+		goto error;
+	}
+
 	/* Create thread to manage the polling/writing of trace metadata */
 	ret = pthread_create(&metadata_thread, NULL, consumer_thread_metadata_poll,
 			(void *) ctx);
 	if (ret != 0) {
 		perror("pthread_create");
-		goto error;
+		goto metadata_error;
 	}
 
 	/* Create thread to manage the polling/writing of trace data */
@@ -387,6 +415,28 @@ int main(int argc, char **argv)
 		goto sessiond_error;
 	}
 
+	switch (opt_type) {
+	case LTTNG_CONSUMER32_UST:
+	case LTTNG_CONSUMER64_UST:
+		/* Create the thread to manage the metadata periodic timers */
+		ret = pthread_create(&metadata_timer_thread, NULL,
+				consumer_timer_metadata_thread, (void *) ctx);
+		if (ret != 0) {
+			perror("pthread_create");
+			goto metadata_timer_error;
+		}
+
+		ret = pthread_detach(metadata_timer_thread);
+		if (ret) {
+			errno = ret;
+			perror("pthread_detach");
+		}
+		break;
+	default:
+		break;
+	}
+
+metadata_timer_error:
 	ret = pthread_join(sessiond_thread, &status);
 	if (ret != 0) {
 		perror("pthread_join");
@@ -407,6 +457,13 @@ data_error:
 		goto error;
 	}
 
+metadata_error:
+	ret = pthread_join(channel_thread, &status);
+	if (ret != 0) {
+		perror("pthread_join");
+		goto error;
+	}
+
 	if (!ret) {
 		ret = EXIT_SUCCESS;
 		lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_EXIT_SUCCESS);
@@ -415,7 +472,9 @@ data_error:
 
 error:
 	ret = EXIT_FAILURE;
-	lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_EXIT_FAILURE);
+	if (ctx) {
+		lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_EXIT_FAILURE);
+	}
 
 end:
 	lttng_consumer_destroy(ctx);

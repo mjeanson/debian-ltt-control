@@ -39,9 +39,6 @@
 // data is a pointer to a 'SParserParam' structure
 //#define YYPARSE_PARAM	parser_ctx
 
-// the argument for the 'yylex' function
-#define YYLEX_PARAM	((struct filter_parser_ctx *) parser_ctx)->scanner
-
 #ifndef YY_TYPEDEF_YY_SCANNER_T
 #define YY_TYPEDEF_YY_SCANNER_T
 typedef void* yyscan_t;
@@ -121,6 +118,7 @@ struct filter_node {
 				AST_EXP_CONSTANT,
 				AST_EXP_FLOAT_CONSTANT,
 				AST_EXP_IDENTIFIER,
+				AST_EXP_GLOBAL_IDENTIFIER,
 				AST_EXP_NESTED,
 			} type;
 			enum ast_link_type post_op;	/* reverse */

@@ -27,6 +27,8 @@
 #include "filter-ir.h"
 #include "filter-ast.h"
 
+#include <common/macros.h>
+
 #ifndef max_t
 #define max_t(type, a, b)	((type) ((a) > (b) ? (a) : (b)))
 #endif
@@ -105,11 +107,14 @@ int32_t bytecode_reserve(struct lttng_filter_bytecode_alloc **fb, uint32_t align
 		return -EINVAL;
 
 	if (new_alloc_len > old_alloc_len) {
+		struct lttng_filter_bytecode_alloc *newptr;
+
 		new_alloc_len =
 			max_t(uint32_t, 1U << get_count_order(new_alloc_len), old_alloc_len << 1);
-		*fb = realloc(*fb, new_alloc_len);
-		if (!*fb)
+		newptr = realloc(*fb, new_alloc_len);
+		if (!newptr)
 			return -ENOMEM;
+		*fb = newptr;
 		/* We zero directly the memory from start of allocation. */
 		memset(&((char *) *fb)[old_alloc_len], 0, new_alloc_len - old_alloc_len);
 		(*fb)->alloc_len = new_alloc_len;
@@ -237,7 +242,8 @@ int visit_node_load(struct filter_parser_ctx *ctx, struct ir_op *node)
 		free(insn);
 		return ret;
 	}
-	case IR_DATA_FIELD_REF:
+	case IR_DATA_FIELD_REF:	/* fall-through */
+	case IR_DATA_GET_CONTEXT_REF:
 	{
 		struct load_op *insn;
 		uint32_t insn_len = sizeof(struct load_op)
@@ -249,7 +255,17 @@ int visit_node_load(struct filter_parser_ctx *ctx, struct ir_op *node)
 		insn = calloc(insn_len, 1);
 		if (!insn)
 			return -ENOMEM;
-		insn->op = FILTER_OP_LOAD_FIELD_REF;
+		switch(node->data_type) {
+		case IR_DATA_FIELD_REF:
+			insn->op = FILTER_OP_LOAD_FIELD_REF;
+			break;
+		case IR_DATA_GET_CONTEXT_REF:
+			insn->op = FILTER_OP_GET_CONTEXT_REF;
+			break;
+		default:
+			free(insn);
+			return -EINVAL;
+		}
 		ref_offset.offset = (uint16_t) -1U;
 		memcpy(insn->data, &ref_offset, sizeof(ref_offset));
 		/* reloc_offset points to struct load_op */
@@ -409,11 +425,13 @@ int visit_node_logical(struct filter_parser_ctx *ctx, struct ir_op *node)
 	if (ret)
 		return ret;
 	/* Cast to s64 if float or field ref */
-	if (node->u.binary.left->data_type == IR_DATA_FIELD_REF
+	if ((node->u.binary.left->data_type == IR_DATA_FIELD_REF
+				|| node->u.binary.left->data_type == IR_DATA_GET_CONTEXT_REF)
 			|| node->u.binary.left->data_type == IR_DATA_FLOAT) {
 		struct cast_op cast_insn;
 
-		if (node->u.binary.left->data_type == IR_DATA_FIELD_REF) {
+		if (node->u.binary.left->data_type == IR_DATA_FIELD_REF
+				|| node->u.binary.left->data_type == IR_DATA_GET_CONTEXT_REF) {
 			cast_insn.op = FILTER_OP_CAST_TO_S64;
 		} else {
 			cast_insn.op = FILTER_OP_CAST_DOUBLE_TO_S64;
@@ -446,11 +464,13 @@ int visit_node_logical(struct filter_parser_ctx *ctx, struct ir_op *node)
 	if (ret)
 		return ret;
 	/* Cast to s64 if float or field ref */
-	if (node->u.binary.right->data_type == IR_DATA_FIELD_REF
+	if ((node->u.binary.right->data_type == IR_DATA_FIELD_REF
+				|| node->u.binary.right->data_type == IR_DATA_GET_CONTEXT_REF)
 			|| node->u.binary.right->data_type == IR_DATA_FLOAT) {
 		struct cast_op cast_insn;
 
-		if (node->u.binary.right->data_type == IR_DATA_FIELD_REF) {
+		if (node->u.binary.right->data_type == IR_DATA_FIELD_REF
+				|| node->u.binary.right->data_type == IR_DATA_GET_CONTEXT_REF) {
 			cast_insn.op = FILTER_OP_CAST_TO_S64;
 		} else {
 			cast_insn.op = FILTER_OP_CAST_DOUBLE_TO_S64;
@@ -497,7 +517,7 @@ int recursive_visit_gen_bytecode(struct filter_parser_ctx *ctx,
 	}
 }
 
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 void filter_bytecode_free(struct filter_parser_ctx *ctx)
 {
 	free(ctx->bytecode);
@@ -506,7 +526,7 @@ void filter_bytecode_free(struct filter_parser_ctx *ctx)
 	ctx->bytecode_reloc = NULL;
 }
 
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int filter_visitor_bytecode_generate(struct filter_parser_ctx *ctx)
 {
 	int ret;

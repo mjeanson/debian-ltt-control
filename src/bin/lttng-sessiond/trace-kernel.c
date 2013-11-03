@@ -35,10 +35,15 @@ struct ltt_kernel_channel *trace_kernel_get_channel_by_name(
 {
 	struct ltt_kernel_channel *chan;
 
-	if (session == NULL) {
-		ERR("Undefine session");
-		goto error;
-	}
+	assert(session);
+	assert(name);
+
+	/*
+	 * If we receive an empty string for channel name, it means the
+	 * default channel name is requested.
+	 */
+	if (name[0] == '\0')
+		name = DEFAULT_CHANNEL_NAME;
 
 	DBG("Trying to find channel %s", name);
 
@@ -49,7 +54,6 @@ struct ltt_kernel_channel *trace_kernel_get_channel_by_name(
 		}
 	}
 
-error:
 	return NULL;
 }
 
@@ -61,10 +65,8 @@ struct ltt_kernel_event *trace_kernel_get_event_by_name(
 {
 	struct ltt_kernel_event *ev;
 
-	if (channel == NULL) {
-		ERR("Undefine channel");
-		goto error;
-	}
+	assert(name);
+	assert(channel);
 
 	cds_list_for_each_entry(ev, &channel->events_list.head, list) {
 		if (strcmp(name, ev->event->name) == 0) {
@@ -74,7 +76,6 @@ struct ltt_kernel_event *trace_kernel_get_event_by_name(
 		}
 	}
 
-error:
 	return NULL;
 }
 
@@ -83,7 +84,7 @@ error:
  *
  * Return pointer to structure or NULL.
  */
-struct ltt_kernel_session *trace_kernel_create_session(char *path)
+struct ltt_kernel_session *trace_kernel_create_session(void)
 {
 	struct ltt_kernel_session *lks = NULL;
 
@@ -115,25 +116,6 @@ struct ltt_kernel_session *trace_kernel_create_session(char *path)
 	 */
 	lks->tmp_consumer = NULL;
 
-	if (path && strlen(path) > 0) {
-		int ret;
-
-		/* Use the default consumer output which is the tracing session path. */
-		ret = snprintf(lks->consumer->dst.trace_path, PATH_MAX,
-				"%s" DEFAULT_KERNEL_TRACE_DIR, path);
-		if (ret < 0) {
-			PERROR("snprintf consumer trace path");
-			goto error;
-		}
-
-		/* Set session path */
-		ret = asprintf(&lks->trace_path, "%s" DEFAULT_KERNEL_TRACE_DIR, path);
-		if (ret < 0) {
-			PERROR("asprintf kernel traces path");
-			goto error;
-		}
-	}
-
 	return lks;
 
 error:
@@ -149,9 +131,11 @@ alloc_error:
  * Return pointer to structure or NULL.
  */
 struct ltt_kernel_channel *trace_kernel_create_channel(
-		struct lttng_channel *chan, char *path)
+		struct lttng_channel *chan)
 {
 	struct ltt_kernel_channel *lkc;
+
+	assert(chan);
 
 	lkc = zmalloc(sizeof(struct ltt_kernel_channel));
 	if (lkc == NULL) {
@@ -162,9 +146,20 @@ struct ltt_kernel_channel *trace_kernel_create_channel(
 	lkc->channel = zmalloc(sizeof(struct lttng_channel));
 	if (lkc->channel == NULL) {
 		PERROR("lttng_channel zmalloc");
+		free(lkc);
 		goto error;
 	}
 	memcpy(lkc->channel, chan, sizeof(struct lttng_channel));
+
+	/*
+	 * If we receive an empty string for channel name, it means the
+	 * default channel name is requested.
+	 */
+	if (chan->name[0] == '\0') {
+		strncpy(lkc->channel->name, DEFAULT_CHANNEL_NAME,
+			sizeof(lkc->channel->name));
+	}
+	lkc->channel->name[LTTNG_KERNEL_SYM_NAME_LEN - 1] = '\0';
 
 	lkc->fd = -1;
 	lkc->stream_count = 0;
@@ -191,6 +186,8 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev)
 	struct ltt_kernel_event *lke;
 	struct lttng_kernel_event *attr;
 
+	assert(ev);
+
 	lke = zmalloc(sizeof(struct ltt_kernel_event));
 	attr = zmalloc(sizeof(struct lttng_kernel_event));
 	if (lke == NULL || attr == NULL) {
@@ -210,7 +207,6 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev)
 	case LTTNG_EVENT_FUNCTION:
 		attr->instrumentation = LTTNG_KERNEL_KRETPROBE;
 		attr->u.kretprobe.addr = ev->attr.probe.addr;
-		attr->u.kretprobe.offset = ev->attr.probe.offset;
 		attr->u.kretprobe.offset = ev->attr.probe.offset;
 		strncpy(attr->u.kretprobe.symbol_name,
 				ev->attr.probe.symbol_name, LTTNG_KERNEL_SYM_NAME_LEN);
@@ -274,8 +270,8 @@ struct ltt_kernel_metadata *trace_kernel_create_metadata(void)
 	chan->attr.overwrite = DEFAULT_CHANNEL_OVERWRITE;
 	chan->attr.subbuf_size = default_get_metadata_subbuf_size();
 	chan->attr.num_subbuf = DEFAULT_METADATA_SUBBUF_NUM;
-	chan->attr.switch_timer_interval = DEFAULT_CHANNEL_SWITCH_TIMER;
-	chan->attr.read_timer_interval = DEFAULT_CHANNEL_READ_TIMER;
+	chan->attr.switch_timer_interval = DEFAULT_KERNEL_CHANNEL_SWITCH_TIMER;
+	chan->attr.read_timer_interval = DEFAULT_KERNEL_CHANNEL_READ_TIMER;
 	chan->attr.output = DEFAULT_KERNEL_CHANNEL_OUTPUT;
 
 	/* Init metadata */
@@ -302,6 +298,8 @@ struct ltt_kernel_stream *trace_kernel_create_stream(const char *name,
 	int ret;
 	struct ltt_kernel_stream *lks;
 
+	assert(name);
+
 	lks = zmalloc(sizeof(struct ltt_kernel_stream));
 	if (lks == NULL) {
 		PERROR("kernel stream zmalloc");
@@ -319,6 +317,7 @@ struct ltt_kernel_stream *trace_kernel_create_stream(const char *name,
 	/* Init stream */
 	lks->fd = -1;
 	lks->state = 0;
+	lks->cpu = count;
 
 	return lks;
 
@@ -331,6 +330,8 @@ error:
  */
 void trace_kernel_destroy_stream(struct ltt_kernel_stream *stream)
 {
+	assert(stream);
+
 	DBG("[trace] Closing stream fd %d", stream->fd);
 	/* Close kernel fd */
 	if (stream->fd >= 0) {
@@ -352,6 +353,8 @@ void trace_kernel_destroy_stream(struct ltt_kernel_stream *stream)
  */
 void trace_kernel_destroy_event(struct ltt_kernel_event *event)
 {
+	assert(event);
+
 	if (event->fd >= 0) {
 		int ret;
 
@@ -380,6 +383,8 @@ void trace_kernel_destroy_channel(struct ltt_kernel_channel *channel)
 	struct ltt_kernel_stream *stream, *stmp;
 	struct ltt_kernel_event *event, *etmp;
 	int ret;
+
+	assert(channel);
 
 	DBG("[trace] Closing channel fd %d", channel->fd);
 	/* Close kernel fd */
@@ -413,6 +418,8 @@ void trace_kernel_destroy_channel(struct ltt_kernel_channel *channel)
  */
 void trace_kernel_destroy_metadata(struct ltt_kernel_metadata *metadata)
 {
+	assert(metadata);
+
 	DBG("[trace] Closing metadata fd %d", metadata->fd);
 	/* Close kernel fd */
 	if (metadata->fd >= 0) {
@@ -430,11 +437,15 @@ void trace_kernel_destroy_metadata(struct ltt_kernel_metadata *metadata)
 
 /*
  * Cleanup kernel session structure
+ *
+ * Should *NOT* be called with RCU read-side lock held.
  */
 void trace_kernel_destroy_session(struct ltt_kernel_session *session)
 {
 	struct ltt_kernel_channel *channel, *ctmp;
 	int ret;
+
+	assert(session);
 
 	DBG("[trace] Closing session fd %d", session->fd);
 	/* Close kernel fds */
@@ -465,6 +476,5 @@ void trace_kernel_destroy_session(struct ltt_kernel_session *session)
 	consumer_destroy_output(session->consumer);
 	consumer_destroy_output(session->tmp_consumer);
 
-	free(session->trace_path);
 	free(session);
 }

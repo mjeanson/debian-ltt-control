@@ -67,6 +67,7 @@ enum context_type {
 	CONTEXT_VPPID        = 9,
 	CONTEXT_PTHREAD_ID   = 10,
 	CONTEXT_HOSTNAME     = 11,
+	CONTEXT_IP           = 12,
 };
 
 /*
@@ -203,6 +204,7 @@ const struct ctx_opts {
 	{ "ppid", CONTEXT_PPID },
 	{ "vppid", CONTEXT_VPPID },
 	{ "hostname", CONTEXT_HOSTNAME },
+	{ "ip", CONTEXT_IP },
 	/* Perf options */
 	PERF_HW(cpu-cycles, CPU_CYCLES),
 	PERF_HW(cycles, CPU_CYCLES),
@@ -383,7 +385,9 @@ static int add_context(char *session_name)
 		if (context.ctx == LTTNG_EVENT_CONTEXT_PERF_COUNTER) {
 			context.u.perf_counter.type = type->opt->u.perf.type;
 			context.u.perf_counter.config = type->opt->u.perf.config;
-			strcpy(context.u.perf_counter.name, type->opt->symbol);
+			strncpy(context.u.perf_counter.name, type->opt->symbol,
+				LTTNG_SYMBOL_NAME_LEN);
+			context.u.perf_counter.name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
 			/* Replace : and - by _ */
 			while ((ptr = strchr(context.u.perf_counter.name, '-')) != NULL) {
 				*ptr = '_';
@@ -476,7 +480,7 @@ int cmd_add_context(int argc, const char **argv)
 				ret = CMD_ERROR;
 				goto end;
 			} else {
-				cds_list_add(&type->list, &ctx_type_list.head);
+				cds_list_add_tail(&type->list, &ctx_type_list.head);
 			}
 			break;
 		case OPT_USERSPACE:

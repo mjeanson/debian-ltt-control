@@ -35,16 +35,11 @@ struct ltt_ust_ht_key {
 	enum lttng_ust_loglevel_type loglevel;
 };
 
-/* UST Stream list */
-struct ltt_ust_stream_list {
-	unsigned int count;
-	struct cds_list_head head;
-};
-
 /* Context hash table nodes */
 struct ltt_ust_context {
 	struct lttng_ust_context ctx;
 	struct lttng_ht_node_ulong node;
+	struct cds_list_head list;
 };
 
 /* UST event */
@@ -55,26 +50,18 @@ struct ltt_ust_event {
 	struct lttng_ust_filter_bytecode *filter;
 };
 
-/* UST stream */
-struct ltt_ust_stream {
-	int handle;
-	char pathname[PATH_MAX];
-	/* Format is %s_%d respectively channel name and CPU number. */
-	char name[DEFAULT_STREAM_NAME_LEN];
-	struct lttng_ust_object_data *obj;
-	/* Using a list of streams to keep order. */
-	struct cds_list_head list;
-};
-
 /* UST channel */
 struct ltt_ust_channel {
+	uint64_t id;	/* unique id per session. */
 	unsigned int enabled;
 	char name[LTTNG_UST_SYM_NAME_LEN];
-	char pathname[PATH_MAX];
-	struct lttng_ust_channel attr;
+	struct lttng_ust_channel_attr attr;
 	struct lttng_ht *ctx;
+	struct cds_list_head ctx_list;
 	struct lttng_ht *events;
 	struct lttng_ht_node_str node;
+	uint64_t tracefile_size;
+	uint64_t tracefile_count;
 };
 
 /* UST Metadata */
@@ -82,42 +69,21 @@ struct ltt_ust_metadata {
 	int handle;
 	struct lttng_ust_object_data *obj;
 	char pathname[PATH_MAX];              /* Trace file path name */
-	struct lttng_ust_channel attr;
+	struct lttng_ust_channel_attr attr;
 	struct lttng_ust_object_data *stream_obj;
 };
 
 /* UST domain global (LTTNG_DOMAIN_UST) */
 struct ltt_ust_domain_global {
 	struct lttng_ht *channels;
-};
-
-/* UST domain pid (LTTNG_DOMAIN_UST_PID) */
-struct ltt_ust_domain_pid {
-	pid_t pid;
-	struct lttng_ht *channels;
-	struct lttng_ht_node_ulong node;
-};
-
-/* UST domain exec name (LTTNG_DOMAIN_UST_EXEC_NAME) */
-struct ltt_ust_domain_exec {
-	char exec_name[LTTNG_UST_SYM_NAME_LEN];
-	struct lttng_ht *channels;
-	struct lttng_ht_node_str node;
+	struct cds_list_head registry_buffer_uid_list;
 };
 
 /* UST session */
 struct ltt_ust_session {
-	int id;    /* Unique identifier of session */
+	uint64_t id;    /* Unique identifier of session */
 	int start_trace;
-	char pathname[PATH_MAX];
 	struct ltt_ust_domain_global domain_global;
-	/*
-	 * Those two hash tables contains data for a specific UST domain and each
-	 * contains a HT of channels. See ltt_ust_domain_exec and
-	 * ltt_ust_domain_pid data structures.
-	 */
-	struct lttng_ht *domain_pid;
-	struct lttng_ht *domain_exec;
 	/* UID/GID of the user owning the session */
 	uid_t uid;
 	gid_t gid;
@@ -131,7 +97,50 @@ struct ltt_ust_session {
 	struct consumer_output *tmp_consumer;
 	/* Sequence number for filters so the tracer knows the ordering. */
 	uint64_t filter_seq_num;
+	/* This indicates which type of buffer this session is set for. */
+	enum lttng_buffer_type buffer_type;
+	/* If set to 1, the buffer_type can not be changed anymore. */
+	int buffer_type_changed;
+	/* For per UID buffer, every buffer reg object is kept of this session */
+	struct cds_list_head buffer_reg_uid_list;
+	/* Next channel ID available for a newly registered channel. */
+	uint64_t next_channel_id;
+	/* Once this value reaches UINT32_MAX, no more id can be allocated. */
+	uint64_t used_channel_id;
+	/* Tell or not if the session has to output the traces. */
+	unsigned int output_traces;
+	unsigned int snapshot_mode;
+	unsigned int has_non_default_channel;
 };
+
+/*
+ * Validate that the id has reached the maximum allowed or not.
+ *
+ * Return 0 if NOT else 1.
+ */
+static inline int trace_ust_is_max_id(uint64_t id)
+{
+	return (id == UINT64_MAX) ? 1 : 0;
+}
+
+/*
+ * Return next available channel id and increment the used counter. The
+ * trace_ust_is_max_id function MUST be called before in order to validate if
+ * the maximum number of IDs have been reached. If not, it is safe to call this
+ * function.
+ *
+ * Return a unique channel ID. If max is reached, the used_channel_id counter
+ * is returned.
+ */
+static inline uint64_t trace_ust_get_next_chan_id(struct ltt_ust_session *s)
+{
+	if (trace_ust_is_max_id(s->used_channel_id)) {
+		return s->used_channel_id;
+	}
+
+	s->used_channel_id++;
+	return s->next_channel_id++;
+}
 
 #ifdef HAVE_LIBLTTNG_UST_CTL
 
@@ -150,15 +159,15 @@ struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 /*
  * Create functions malloc() the data structure.
  */
-struct ltt_ust_session *trace_ust_create_session(char *path,
-		unsigned int session_id, struct lttng_domain *domain);
-struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr,
-		char *path);
+struct ltt_ust_session *trace_ust_create_session(uint64_t session_id);
+struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr);
 struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
 		struct lttng_filter_bytecode *filter);
 struct ltt_ust_metadata *trace_ust_create_metadata(char *path);
 struct ltt_ust_context *trace_ust_create_context(
 		struct lttng_event_context *ctx);
+void trace_ust_delete_channel(struct lttng_ht *ht,
+		struct ltt_ust_channel *channel);
 
 /*
  * Destroy functions free() the data structure and remove from linked list if
@@ -189,14 +198,12 @@ struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 }
 
 static inline
-struct ltt_ust_session *trace_ust_create_session(char *path, pid_t pid,
-		struct lttng_domain *domain)
+struct ltt_ust_session *trace_ust_create_session(unsigned int session_id)
 {
 	return NULL;
 }
 static inline
-struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr,
-		char *path)
+struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr)
 {
 	return NULL;
 }
@@ -241,6 +248,12 @@ static inline struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
 		char *name, struct lttng_filter_bytecode *filter, int loglevel)
 {
 	return NULL;
+}
+static inline
+void trace_ust_delete_channel(struct lttng_ht *ht,
+		struct ltt_ust_channel *channel)
+{
+	return;
 }
 
 #endif /* HAVE_LIBLTTNG_UST_CTL */

@@ -20,8 +20,12 @@
 
 #include <urcu/list.h>
 
+#include <common/hashtable/hashtable.h>
+
+#include "snapshot.h"
 #include "trace-kernel.h"
-#include "trace-ust.h"
+
+struct ltt_ust_session;
 
 /*
  * Tracing session list
@@ -43,7 +47,7 @@ struct ltt_session_list {
 	 * Session unique ID generator. The session list lock MUST be
 	 * upon update and read of this counter.
 	 */
-	unsigned int next_uuid;
+	uint64_t next_uuid;
 
 	/* Linked list head */
 	struct cds_list_head head;
@@ -55,7 +59,6 @@ struct ltt_session_list {
  */
 struct ltt_session {
 	char name[NAME_MAX];
-	char path[PATH_MAX];
 	struct ltt_kernel_session *kernel_session;
 	struct ltt_ust_session *ust_session;
 	/*
@@ -66,7 +69,7 @@ struct ltt_session {
 	pthread_mutex_t lock;
 	struct cds_list_head list;
 	int enabled;	/* enabled/started flag */
-	unsigned int id;		/* session unique identifier */
+	uint64_t id;		/* session unique identifier */
 	/* UID/GID of the user owning the session */
 	uid_t uid;
 	gid_t gid;
@@ -83,15 +86,23 @@ struct ltt_session {
 	 */
 	struct consumer_output *consumer;
 
-	/* Indicates whether or not we have to spawn consumer(s) */
-	unsigned int start_consumer;
-
 	/* Did a start command occured before the kern/ust session creation? */
 	unsigned int started;
+
+	/* Snapshot representation in a session. */
+	struct snapshot snapshot;
+	/* Indicate if the session has to output the traces or not. */
+	unsigned int output_traces;
+	/*
+	 * This session is in snapshot mode. This means that every channel enabled
+	 * will be set in overwrite mode and mmap. It is considered exclusively for
+	 * snapshot purposes.
+	 */
+	unsigned int snapshot_mode;
 };
 
 /* Prototypes */
-int session_create(char *name, char *path, uid_t uid, gid_t gid);
+int session_create(char *name, uid_t uid, gid_t gid);
 int session_destroy(struct ltt_session *session);
 
 void session_lock(struct ltt_session *session);

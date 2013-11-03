@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#include <inttypes.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -24,6 +25,7 @@
 #include <common/sessiond-comm/sessiond-comm.h>
 
 #include "channel.h"
+#include "lttng-sessiond.h"
 #include "kernel.h"
 #include "ust-ctl.h"
 #include "utils.h"
@@ -32,7 +34,8 @@
 /*
  * Return allocated channel attributes.
  */
-struct lttng_channel *channel_new_default_attr(int dom)
+struct lttng_channel *channel_new_default_attr(int dom,
+		enum lttng_buffer_type type)
 {
 	struct lttng_channel *chan;
 
@@ -48,26 +51,43 @@ struct lttng_channel *channel_new_default_attr(int dom)
 		goto error;
 	}
 
+	/* Same for all domains. */
 	chan->attr.overwrite = DEFAULT_CHANNEL_OVERWRITE;
-	chan->attr.switch_timer_interval = DEFAULT_CHANNEL_SWITCH_TIMER;
-	chan->attr.read_timer_interval = DEFAULT_CHANNEL_READ_TIMER;
+	chan->attr.tracefile_size = DEFAULT_CHANNEL_TRACEFILE_SIZE;
+	chan->attr.tracefile_count = DEFAULT_CHANNEL_TRACEFILE_COUNT;
 
 	switch (dom) {
 	case LTTNG_DOMAIN_KERNEL:
+		assert(type == LTTNG_BUFFER_GLOBAL);
 		chan->attr.subbuf_size =
 			default_get_kernel_channel_subbuf_size();
 		chan->attr.num_subbuf = DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM;
 		chan->attr.output = DEFAULT_KERNEL_CHANNEL_OUTPUT;
+		chan->attr.switch_timer_interval = DEFAULT_KERNEL_CHANNEL_SWITCH_TIMER;
+		chan->attr.read_timer_interval = DEFAULT_KERNEL_CHANNEL_READ_TIMER;
 		break;
 	case LTTNG_DOMAIN_UST:
-#if 0
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-#endif
-		chan->attr.subbuf_size = default_get_ust_channel_subbuf_size();
-		chan->attr.num_subbuf = DEFAULT_UST_CHANNEL_SUBBUF_NUM;
-		chan->attr.output = DEFAULT_UST_CHANNEL_OUTPUT;
+		switch (type) {
+		case LTTNG_BUFFER_PER_UID:
+			chan->attr.subbuf_size = default_get_ust_uid_channel_subbuf_size();
+			chan->attr.num_subbuf = DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM;
+			chan->attr.output = DEFAULT_UST_UID_CHANNEL_OUTPUT;
+			chan->attr.switch_timer_interval =
+				DEFAULT_UST_UID_CHANNEL_SWITCH_TIMER;
+			chan->attr.read_timer_interval =
+				DEFAULT_UST_UID_CHANNEL_READ_TIMER;
+			break;
+		case LTTNG_BUFFER_PER_PID:
+		default:
+			chan->attr.subbuf_size = default_get_ust_pid_channel_subbuf_size();
+			chan->attr.num_subbuf = DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM;
+			chan->attr.output = DEFAULT_UST_PID_CHANNEL_OUTPUT;
+			chan->attr.switch_timer_interval =
+				DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER;
+			chan->attr.read_timer_interval =
+				DEFAULT_UST_PID_CHANNEL_READ_TIMER;
+			break;
+		}
 		break;
 	default:
 		goto error;	/* Not implemented */
@@ -90,11 +110,17 @@ int channel_kernel_disable(struct ltt_kernel_session *ksession,
 	int ret;
 	struct ltt_kernel_channel *kchan;
 
+	assert(ksession);
+	assert(channel_name);
+
 	kchan = trace_kernel_get_channel_by_name(channel_name, ksession);
 	if (kchan == NULL) {
 		ret = LTTNG_ERR_KERN_CHAN_NOT_FOUND;
 		goto error;
-	} else if (kchan->enabled == 1) {
+	}
+
+	/* Only if channel is enabled disable it. */
+	if (kchan->enabled == 1) {
 		ret = kernel_disable_channel(kchan);
 		if (ret < 0 && ret != -EEXIST) {
 			ret = LTTNG_ERR_KERN_CHAN_DISABLE_FAIL;
@@ -115,6 +141,9 @@ int channel_kernel_enable(struct ltt_kernel_session *ksession,
 		struct ltt_kernel_channel *kchan)
 {
 	int ret;
+
+	assert(ksession);
+	assert(kchan);
 
 	if (kchan->enabled == 0) {
 		ret = kernel_enable_channel(kchan);
@@ -142,9 +171,12 @@ int channel_kernel_create(struct ltt_kernel_session *ksession,
 	int ret;
 	struct lttng_channel *defattr = NULL;
 
+	assert(ksession);
+
 	/* Creating channel attributes if needed */
 	if (attr == NULL) {
-		defattr = channel_new_default_attr(LTTNG_DOMAIN_KERNEL);
+		defattr = channel_new_default_attr(LTTNG_DOMAIN_KERNEL,
+				LTTNG_BUFFER_GLOBAL);
 		if (defattr == NULL) {
 			ret = LTTNG_ERR_FATAL;
 			goto error;
@@ -152,8 +184,14 @@ int channel_kernel_create(struct ltt_kernel_session *ksession,
 		attr = defattr;
 	}
 
+	if (ksession->snapshot_mode) {
+		/* Force channel attribute for snapshot mode. */
+		attr->attr.overwrite = 1;
+		attr->attr.output = LTTNG_EVENT_MMAP;
+	}
+
 	/* Channel not found, creating it */
-	ret = kernel_create_channel(ksession, attr, ksession->trace_path);
+	ret = kernel_create_channel(ksession, attr);
 	if (ret < 0) {
 		ret = LTTNG_ERR_KERN_CHAN_FAIL;
 		goto error;
@@ -175,10 +213,13 @@ error:
 /*
  * Enable UST channel for session and domain.
  */
-int channel_ust_enable(struct ltt_ust_session *usess, int domain,
+int channel_ust_enable(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan)
 {
 	int ret = LTTNG_OK;
+
+	assert(usess);
+	assert(uchan);
 
 	/* If already enabled, everything is OK */
 	if (uchan->enabled) {
@@ -187,51 +228,40 @@ int channel_ust_enable(struct ltt_ust_session *usess, int domain,
 		goto end;
 	}
 
-	switch (domain) {
-	case LTTNG_DOMAIN_UST:
-		DBG2("Channel %s being enabled in UST global domain", uchan->name);
+	DBG2("Channel %s being enabled in UST domain", uchan->name);
 
-		/*
-		 * Enable channel for UST global domain on all applications. Ignore
-		 * return value here since whatever error we got, it means that the
-		 * channel was not created on one or many registered applications and
-		 * we can not report this to the user yet. However, at this stage, the
-		 * channel was successfully created on the session daemon side so the
-		 * enable-channel command is a success.
-		 */
-		(void) ust_app_create_channel_glb(usess, uchan);
-		break;
-#if 0
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-#endif
-	default:
-		ret = LTTNG_ERR_UND;
-		goto error;
-	}
+	/*
+	 * Enable channel for UST global domain on all applications. Ignore return
+	 * value here since whatever error we got, it means that the channel was
+	 * not created on one or many registered applications and we can not report
+	 * this to the user yet. However, at this stage, the channel was
+	 * successfully created on the session daemon side so the enable-channel
+	 * command is a success.
+	 */
+	(void) ust_app_enable_channel_glb(usess, uchan);
 
 	uchan->enabled = 1;
 	DBG2("Channel %s enabled successfully", uchan->name);
 
 end:
-error:
 	return ret;
 }
 
 /*
  * Create UST channel for session and domain.
  */
-int channel_ust_create(struct ltt_ust_session *usess, int domain,
-		struct lttng_channel *attr)
+int channel_ust_create(struct ltt_ust_session *usess,
+		struct lttng_channel *attr, enum lttng_buffer_type type)
 {
 	int ret = LTTNG_OK;
 	struct ltt_ust_channel *uchan = NULL;
 	struct lttng_channel *defattr = NULL;
 
+	assert(usess);
+
 	/* Creating channel attributes if needed */
 	if (attr == NULL) {
-		defattr = channel_new_default_attr(domain);
+		defattr = channel_new_default_attr(LTTNG_DOMAIN_UST, type);
 		if (defattr == NULL) {
 			ret = LTTNG_ERR_FATAL;
 			goto error;
@@ -239,22 +269,33 @@ int channel_ust_create(struct ltt_ust_session *usess, int domain,
 		attr = defattr;
 	}
 
-	if (attr->attr.subbuf_size < DEFAULT_UST_CHANNEL_SUBBUF_SIZE) {
+	if (usess->snapshot_mode) {
+		/* Force channel attribute for snapshot mode. */
+		attr->attr.overwrite = 1;
+		attr->attr.output = LTTNG_EVENT_MMAP;
+	}
+
+	/*
+	 * Validate UST buffer size and number of buffers: must both be power of 2
+	 * and nonzero. We validate right here for UST, because applications will
+	 * not report the error to the user (unlike kernel tracing).
+	 */
+	if (!attr->attr.subbuf_size ||
+			(attr->attr.subbuf_size & (attr->attr.subbuf_size - 1))) {
 		ret = LTTNG_ERR_INVALID;
 		goto error;
 	}
 
 	/*
-	 * Validate UST buffer size and number of buffers: must both be
-	 * power of 2 and nonzero. We validate right here for UST,
-	 * because applications will not report the error to the user
-	 * (unlike kernel tracing).
+	 * Invalid subbuffer size if it's lower then the page size.
 	 */
-	if (!attr->attr.subbuf_size || (attr->attr.subbuf_size & (attr->attr.subbuf_size - 1))) {
+	if (attr->attr.subbuf_size < page_size) {
 		ret = LTTNG_ERR_INVALID;
 		goto error;
 	}
-	if (!attr->attr.num_subbuf || (attr->attr.num_subbuf & (attr->attr.num_subbuf - 1))) {
+
+	if (!attr->attr.num_subbuf ||
+			(attr->attr.num_subbuf & (attr->attr.num_subbuf - 1))) {
 		ret = LTTNG_ERR_INVALID;
 		goto error;
 	}
@@ -264,31 +305,55 @@ int channel_ust_create(struct ltt_ust_session *usess, int domain,
 		goto error;
 	}
 
+	/*
+	 * The tracefile_size should not be < to the subbuf_size, otherwise
+	 * we won't be able to write the packets on disk
+	 */
+	if ((attr->attr.tracefile_size > 0) &&
+			(attr->attr.tracefile_size < attr->attr.subbuf_size)) {
+		ret = LTTNG_ERR_INVALID;
+		goto error;
+	}
+
+	/* Validate buffer type. */
+	switch (type) {
+	case LTTNG_BUFFER_PER_PID:
+		break;
+	case LTTNG_BUFFER_PER_UID:
+		break;
+	default:
+		ret = LTTNG_ERR_BUFFER_NOT_SUPPORTED;
+		goto error;
+	}
+
 	/* Create UST channel */
-	uchan = trace_ust_create_channel(attr, usess->pathname);
+	uchan = trace_ust_create_channel(attr);
 	if (uchan == NULL) {
 		ret = LTTNG_ERR_FATAL;
 		goto error;
 	}
 	uchan->enabled = 1;
+	if (trace_ust_is_max_id(usess->used_channel_id)) {
+		ret = LTTNG_ERR_UST_CHAN_FAIL;
+		goto error;
+	}
+	uchan->id = trace_ust_get_next_chan_id(usess);
 
-	switch (domain) {
-	case LTTNG_DOMAIN_UST:
-		DBG2("Channel %s being created in UST global domain", uchan->name);
+	DBG2("Channel %s is being created for UST with buffer %d and id %" PRIu64,
+			uchan->name, type, uchan->id);
 
-		/* Enable channel for global domain */
-		ret = ust_app_create_channel_glb(usess, uchan);
-		break;
-#if 0
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-#endif
-	default:
-		ret = LTTNG_ERR_UND;
+	/* Flag session buffer type. */
+	if (!usess->buffer_type_changed) {
+		usess->buffer_type = type;
+		usess->buffer_type_changed = 1;
+	} else if (usess->buffer_type != type) {
+		/* Buffer type was already set. Refuse to create channel. */
+		ret = LTTNG_ERR_BUFFER_TYPE_MISMATCH;
 		goto error_free_chan;
 	}
 
+	/* Enable channel for global domain */
+	ret = ust_app_create_channel_glb(usess, uchan);
 	if (ret < 0 && ret != -LTTNG_UST_ERR_EXIST) {
 		ret = LTTNG_ERR_UST_CHAN_FAIL;
 		goto error_free_chan;
@@ -318,10 +383,13 @@ error:
 /*
  * Disable UST channel for session and domain.
  */
-int channel_ust_disable(struct ltt_ust_session *usess, int domain,
+int channel_ust_disable(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan)
 {
 	int ret = LTTNG_OK;
+
+	assert(usess);
+	assert(uchan);
 
 	/* Already disabled */
 	if (uchan->enabled == 0) {
@@ -329,23 +397,9 @@ int channel_ust_disable(struct ltt_ust_session *usess, int domain,
 		goto end;
 	}
 
-	/* Get the right channel's hashtable */
-	switch (domain) {
-	case LTTNG_DOMAIN_UST:
-		DBG2("Channel %s being disabled in UST global domain", uchan->name);
-		/* Disable channel for global domain */
-		ret = ust_app_disable_channel_glb(usess, uchan);
-		break;
-#if 0
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-#endif
-	default:
-		ret = LTTNG_ERR_UND;
-		goto error;
-	}
-
+	DBG2("Channel %s being disabled in UST global domain", uchan->name);
+	/* Disable channel for global domain */
+	ret = ust_app_disable_channel_glb(usess, uchan);
 	if (ret < 0 && ret != -LTTNG_UST_ERR_EXIST) {
 		ret = LTTNG_ERR_UST_CHAN_DISABLE_FAIL;
 		goto error;

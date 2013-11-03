@@ -33,6 +33,7 @@
 #include <common/sessiond-comm/sessiond-comm.h>
 #include <common/uri.h>
 #include <common/utils.h>
+#include <lttng/snapshot.h>
 
 static char *opt_output_path;
 static char *opt_session_name;
@@ -40,6 +41,8 @@ static char *opt_url;
 static char *opt_ctrl_url;
 static char *opt_data_url;
 static int opt_no_consumer;
+static int opt_no_output;
+static int opt_snapshot;
 static int opt_disable_consumer;
 
 enum {
@@ -52,11 +55,13 @@ static struct poptOption long_options[] = {
 	{"help", 'h', POPT_ARG_NONE, NULL, OPT_HELP, NULL, NULL},
 	{"output", 'o', POPT_ARG_STRING, &opt_output_path, 0, NULL, NULL},
 	{"list-options", 0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
-	{"set-uri",        'U', POPT_ARG_STRING, &opt_url, 0, 0, 0},
-	{"ctrl-uri",       'C', POPT_ARG_STRING, &opt_ctrl_url, 0, 0, 0},
-	{"data-uri",       'D', POPT_ARG_STRING, &opt_data_url, 0, 0, 0},
-	{"no-consumer",      0, POPT_ARG_VAL, &opt_no_consumer, 1, 0, 0},
+	{"set-url",        'U', POPT_ARG_STRING, &opt_url, 0, 0, 0},
+	{"ctrl-url",       'C', POPT_ARG_STRING, &opt_ctrl_url, 0, 0, 0},
+	{"data-url",       'D', POPT_ARG_STRING, &opt_data_url, 0, 0, 0},
+	{"no-output",       0, POPT_ARG_VAL, &opt_no_output, 1, 0, 0},
+	{"no-consumer",     0, POPT_ARG_VAL, &opt_no_consumer, 1, 0, 0},
 	{"disable-consumer", 0, POPT_ARG_VAL, &opt_disable_consumer, 1, 0, 0},
+	{"snapshot",        0, POPT_ARG_VAL, &opt_snapshot, 1, 0, 0},
 	{0, 0, 0, 0, 0, 0, 0}
 };
 
@@ -80,6 +85,12 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "  -h, --help           Show this help\n");
 	fprintf(ofp, "      --list-options   Simple listing of options\n");
 	fprintf(ofp, "  -o, --output PATH    Specify output path for traces\n");
+	fprintf(ofp, "      --no-output      Traces will not be outputted\n");
+	fprintf(ofp, "      --snapshot       Set the session in snapshot mode.\n");
+	fprintf(ofp, "                       Created in no-output mode and uses the URL,\n");
+	fprintf(ofp, "                       if one, as the default snapshot output.\n");
+	fprintf(ofp, "                       Every channel will be set in overwrite mode\n");
+	fprintf(ofp, "                       and with mmap output (splice not supported).\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Extended Options:\n");
 	fprintf(ofp, "\n");
@@ -91,9 +102,6 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "                       You can change it with the enable-consumer cmd\n");
 	fprintf(ofp, "  -C, --ctrl-url=URL   Set control path URL. (Must use -D also)\n");
 	fprintf(ofp, "  -D, --data-url=URL   Set data path URL. (Must use -C also)\n");
-	fprintf(ofp, "      --no-consumer    Don't activate a consumer for this session.\n");
-	fprintf(ofp, "      --disable-consumer\n");
-	fprintf(ofp, "                       Disable consumer for this session.\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Please refer to the man page (lttng(1)) for more information on network\n");
 	fprintf(ofp, "streaming mechanisms and explanation of the control and data port\n");
@@ -170,76 +178,43 @@ error:
 	return ret;
 }
 
-/*
- * For a session name, enable the consumer.
- */
-static int enable_consumer(const char *session_name)
+static int add_snapshot_output(const char *session_name, const char *ctrl_url,
+		const char *data_url)
 {
 	int ret;
-	struct lttng_handle *handle;
-	struct lttng_domain dom;
+	struct lttng_snapshot_output *output = NULL;
 
 	assert(session_name);
 
-	/*
-	 * Set handle with the session name and the domain set to 0. This means to
-	 * the session daemon that the next action applies on the tracing session
-	 * rather then the domain specific session.
-	 *
-	 * XXX: This '0' value should be a domain enum value.
-	 */
-	memset(&dom, 0, sizeof(dom));
-
-	handle = lttng_create_handle(session_name, 0);
-	if (handle == NULL) {
+	output = lttng_snapshot_output_create();
+	if (!output) {
 		ret = CMD_FATAL;
-		goto error;
+		goto error_create;
 	}
 
-	ret = lttng_enable_consumer(handle);
+	if (ctrl_url) {
+		ret = lttng_snapshot_output_set_ctrl_url(ctrl_url, output);
+		if (ret < 0) {
+			goto error;
+		}
+	}
+
+	if (data_url) {
+		ret = lttng_snapshot_output_set_data_url(data_url, output);
+		if (ret < 0) {
+			goto error;
+		}
+	}
+
+	/* This call, if successful, populates the id of the output object. */
+	ret = lttng_snapshot_add_output(session_name, output);
 	if (ret < 0) {
 		goto error;
 	}
 
-	MSG("Consumer enabled for session %s", session_name);
-
 error:
-	lttng_destroy_handle(handle);
-	return ret;
-}
-
-/*
- * For a session name, disable the consumer.
- */
-static int disable_consumer(const char *session_name)
-{
-	int ret;
-	struct lttng_handle *handle;
-
-	assert(session_name);
-
-	/*
-	 * Set handle with the session name and the domain set to 0. This means to
-	 * the session daemon that the next action applies on the tracing session
-	 * rather then the domain specific session.
-	 *
-	 * XXX: This '0' value should be a domain enum value.
-	 */
-	handle = lttng_create_handle(session_name, 0);
-	if (handle == NULL) {
-		ret = CMD_FATAL;
-		goto error;
-	}
-
-	ret = lttng_disable_consumer(handle);
-	if (ret < 0) {
-		goto error;
-	}
-	free(handle);
-
-	MSG("Consumer disabled for session %s", session_name);
-
-error:
+	lttng_snapshot_output_destroy(output);
+error_create:
 	return ret;
 }
 
@@ -254,7 +229,7 @@ static int create_session(void)
 	int ret;
 	char *session_name = NULL, *traces_path = NULL, *alloc_path = NULL;
 	char *alloc_url = NULL, *url = NULL, datetime[16];
-	char session_name_date[NAME_MAX], *print_str_url = NULL;
+	char session_name_date[NAME_MAX + 17], *print_str_url = NULL;
 	time_t rawtime;
 	struct tm *timeinfo;
 
@@ -274,9 +249,22 @@ static int create_session(void)
 		session_name = session_name_date;
 		DBG("Auto session name set to %s", session_name_date);
 	} else {
-		if (strncmp(opt_session_name, DEFAULT_SESSION_NAME,
+		if (strlen(opt_session_name) > NAME_MAX) {
+			ERR("Session name too long. Length must be lower or equal to %d",
+					NAME_MAX);
+			ret = LTTNG_ERR_SESSION_FAIL;
+			goto error;
+		}
+		/*
+		 * Check if the session name begins with "auto-" or is exactly "auto".
+		 * Both are reserved for the default session name. See bug #449 to
+		 * understand why we need to check both here.
+		 */
+		if ((strncmp(opt_session_name, DEFAULT_SESSION_NAME "-",
+					strlen(DEFAULT_SESSION_NAME) + 1) == 0) ||
+				(strncmp(opt_session_name, DEFAULT_SESSION_NAME,
 					strlen(DEFAULT_SESSION_NAME)) == 0 &&
-				strlen(opt_session_name) == strlen(DEFAULT_SESSION_NAME)) {
+				strlen(opt_session_name) == strlen(DEFAULT_SESSION_NAME))) {
 			ERR("%s is a reserved keyword for default session(s)",
 					DEFAULT_SESSION_NAME);
 			ret = CMD_ERROR;
@@ -291,10 +279,7 @@ static int create_session(void)
 		}
 	}
 
-	if (opt_no_consumer) {
-		url = NULL;
-		print_str_url = "";
-	} else if (opt_output_path != NULL) {
+	if (opt_output_path != NULL) {
 		traces_path = utils_expand_path(opt_output_path);
 		if (traces_path == NULL) {
 			ret = CMD_ERROR;
@@ -314,9 +299,9 @@ static int create_session(void)
 	} else if (opt_url) { /* Handling URL (-U opt) */
 		url = opt_url;
 		print_str_url = url;
-	} else if (opt_ctrl_url == NULL && opt_data_url == NULL) {
+	} else if (!opt_no_output) {
 		/* Auto output path */
-		alloc_path = config_get_default_path();
+		alloc_path = utils_get_home_dir();
 		if (alloc_path == NULL) {
 			ERR("HOME path not found.\n \
 					Please specify an output path using -o, --output PATH");
@@ -335,48 +320,70 @@ static int create_session(void)
 		}
 
 		url = alloc_url;
-		print_str_url = alloc_url + strlen("file://");
+		if (!opt_data_url && !opt_ctrl_url) {
+			print_str_url = alloc_url + strlen("file://");
+		}
+	} else {
+		/* No output means --no-output or --snapshot mode. */
+		url = NULL;
 	}
 
-	ret = _lttng_create_session_ext(session_name, url, datetime);
+	if ((!opt_ctrl_url && opt_data_url) || (opt_ctrl_url && !opt_data_url)) {
+		ERR("You need both control and data URL.");
+		ret = CMD_ERROR;
+		goto error;
+	}
+
+	if (opt_snapshot) {
+		/* No output by default. */
+		const char *snapshot_url = NULL;
+
+		if (opt_url) {
+			snapshot_url = url;
+		} else if (!opt_data_url && !opt_ctrl_url) {
+			/* This is the session path that we need to use as output. */
+			snapshot_url = url;
+		}
+		ret = lttng_create_session_snapshot(session_name, snapshot_url);
+	} else {
+		ret = _lttng_create_session_ext(session_name, url, datetime);
+	}
 	if (ret < 0) {
 		/* Don't set ret so lttng can interpret the sessiond error. */
 		switch (-ret) {
 		case LTTNG_ERR_EXIST_SESS:
 			WARN("Session %s already exists", session_name);
 			break;
+		default:
+			break;
 		}
 		goto error;
-	}
-
-	MSG("Session %s created.", session_name);
-	if (print_str_url) {
-		MSG("Traces will be written in %s", print_str_url);
 	}
 
 	if (opt_ctrl_url && opt_data_url) {
-		/* Setting up control URI (-C or/and -D opt) */
-		ret = set_consumer_url(session_name, opt_ctrl_url, opt_data_url);
+		if (opt_snapshot) {
+			ret = add_snapshot_output(session_name, opt_ctrl_url,
+					opt_data_url);
+		} else {
+			/* Setting up control URI (-C or/and -D opt) */
+			ret = set_consumer_url(session_name, opt_ctrl_url, opt_data_url);
+		}
 		if (ret < 0) {
+			/* Destroy created session because the URL are not valid. */
+			lttng_destroy_session(session_name);
 			goto error;
 		}
-
-		ret = enable_consumer(session_name);
-		if (ret < 0) {
-			goto error;
-		}
-	} else if ((!opt_ctrl_url && opt_data_url) ||
-			(opt_ctrl_url && !opt_data_url)) {
-		ERR("You need both control and data URL.");
-		ret = CMD_ERROR;
-		goto error;
 	}
 
-	if (opt_disable_consumer && !opt_no_consumer) {
-		ret = disable_consumer(session_name);
-		if (ret < 0) {
-			goto error;
+	MSG("Session %s created.", session_name);
+	if (print_str_url && !opt_snapshot) {
+		MSG("Traces will be written in %s", print_str_url);
+	} else if (opt_snapshot) {
+		if (print_str_url) {
+			MSG("Default snapshot output set to: %s", print_str_url);
 		}
+		MSG("Snapshot mode set. Every channel enabled for that session will "
+				"be set in overwrite mode and mmap output.");
 	}
 
 	/* Init lttng session config */
@@ -386,17 +393,11 @@ static int create_session(void)
 		goto error;
 	}
 
-
 	ret = CMD_SUCCESS;
 
 error:
-	if (alloc_url) {
-		free(alloc_url);
-	}
-
-	if (traces_path) {
-		free(traces_path);
-	}
+	free(alloc_url);
+	free(traces_path);
 	free(alloc_path);
 
 	if (ret < 0) {
@@ -431,6 +432,18 @@ int cmd_create(int argc, const char **argv)
 			ret = CMD_UNDEFINED;
 			goto end;
 		}
+	}
+
+	if (opt_no_consumer) {
+		MSG("The option --no-consumer is obsolete. Use --no-output now.");
+		ret = CMD_WARNING;
+		goto end;
+	}
+
+	if (opt_disable_consumer) {
+		MSG("The option --disable-consumer is obsolete.");
+		ret = CMD_WARNING;
+		goto end;
 	}
 
 	opt_session_name = (char*) poptGetArg(pc);
