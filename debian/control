@@ -3,7 +3,7 @@ Section: libs
 Priority: extra
 Maintainer: Jon Bernard <jbernard@debian.org>
 Build-Depends: debhelper (>= 9), libpopt-dev, liburcu-dev (>= 0.7.4),
-  liblttng-ust-dev (>= 2.1.1-2), dh-autoreconf
+  liblttng-ust-dev (>= 2.3.0), dh-autoreconf
 Standards-Version: 3.9.5
 Vcs-Git: git://git.debian.org/git/collab-maint/ltt-control.git
 Vcs-Browser: http://git.debian.org/?p=collab-maint/ltt-control.git;a=summary
