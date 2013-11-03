@@ -1,3 +1,15 @@
+ltt-control (2.3.0-1) unstable; urgency=low
+
+  * [c75fa17] New upstream version 2.3.0 (Closes: #728644)
+  * [f5d8090] Bump standards version, no changes necessary
+  * [660a665] Make lttng-modules-dkms a suggestion instead of requirement
+    (Closes: #714385)
+  * [b6a3c4a] Update build dependency on ust
+  * [87626e5] Restrict architectures to match that of ust
+  * [fec17a8] Remove debian patch, include upstream
+
+ -- Jon Bernard <jbernard@debian.org>  Sun, 03 Nov 2013 15:18:56 -0500
+
 ltt-control (2.1.1-2) unstable; urgency=low
 
   * [08f3c8b] Use dh-autoreconf to call autoreconf before building.
