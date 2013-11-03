@@ -138,14 +138,55 @@ error:
 }
 
 /*
+ * Set default URI attribute which is basically the given stream type and the
+ * default port if none is set in the URI.
+ */
+static void set_default_uri_attr(struct lttng_uri *uri,
+		enum lttng_stream_type stype)
+{
+	uri->stype = stype;
+	if (uri->dtype != LTTNG_DST_PATH && uri->port == 0) {
+		uri->port = (stype == LTTNG_STREAM_CONTROL) ?
+			DEFAULT_NETWORK_CONTROL_PORT : DEFAULT_NETWORK_DATA_PORT;
+	}
+}
+
+/*
+ * Compare two URL destination.
+ *
+ * Return 0 is equal else is not equal.
+ */
+static int compare_destination(struct lttng_uri *ctrl, struct lttng_uri *data)
+{
+	int ret;
+
+	assert(ctrl);
+	assert(data);
+
+	switch (ctrl->dtype) {
+	case LTTNG_DST_IPV4:
+		ret = strncmp(ctrl->dst.ipv4, data->dst.ipv4, sizeof(ctrl->dst.ipv4));
+		break;
+	case LTTNG_DST_IPV6:
+		ret = strncmp(ctrl->dst.ipv6, data->dst.ipv6, sizeof(ctrl->dst.ipv6));
+		break;
+	default:
+		ret = -1;
+		break;
+	}
+
+	return ret;
+}
+
+/*
  * Build a string URL from a lttng_uri object.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int uri_to_str_url(struct lttng_uri *uri, char *dst, size_t size)
 {
 	int ipver, ret;
 	const char *addr;
-	char proto[4], port[7];
+	char proto[5], port[7];
 
 	assert(uri);
 	assert(dst);
@@ -177,7 +218,7 @@ int uri_to_str_url(struct lttng_uri *uri, char *dst, size_t size)
  *
  * Return 0 if equal else 1.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int uri_compare(struct lttng_uri *uri1, struct lttng_uri *uri2)
 {
 	return memcmp(uri1, uri2, sizeof(struct lttng_uri));
@@ -186,19 +227,16 @@ int uri_compare(struct lttng_uri *uri1, struct lttng_uri *uri2)
 /*
  * Free URI memory.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 void uri_free(struct lttng_uri *uri)
 {
-	/* Safety check */
-	if (uri != NULL) {
-		free(uri);
-	}
+	free(uri);
 }
 
 /*
  * Return an allocated URI.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 struct lttng_uri *uri_create(void)
 {
 	struct lttng_uri *uri;
@@ -227,7 +265,7 @@ struct lttng_uri *uri_create(void)
  * This code was originally licensed GPLv2 so we acknolwedge the Free Software
  * Foundation here for the work and to make sure we are compliant with it.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 ssize_t uri_parse(const char *str_uri, struct lttng_uri **uris)
 {
 	int ret, i = 0;
@@ -475,5 +513,136 @@ free_error:
 	free(addr_f);
 	free(tmp_uris);
 error:
+	return -1;
+}
+
+/*
+ * Parse a string URL and creates URI(s) returning the size of the populated
+ * array.
+ */
+LTTNG_HIDDEN
+ssize_t uri_parse_str_urls(const char *ctrl_url, const char *data_url,
+		struct lttng_uri **uris)
+{
+	unsigned int equal = 1, idx = 0;
+	/* Add the "file://" size to the URL maximum size */
+	char url[PATH_MAX + 7];
+	ssize_t size_ctrl = 0, size_data = 0, size;
+	struct lttng_uri *ctrl_uris = NULL, *data_uris = NULL;
+	struct lttng_uri *tmp_uris = NULL;
+
+	/* No URL(s) is allowed. This means that the consumer will be disabled. */
+	if (ctrl_url == NULL && data_url == NULL) {
+		return 0;
+	}
+
+	/* Check if URLs are equal and if so, only use the control URL */
+	if ((ctrl_url && *ctrl_url != '\0') && (data_url && *data_url != '\0')) {
+		equal = !strcmp(ctrl_url, data_url);
+	}
+
+	/*
+	 * Since we allow the str_url to be a full local filesystem path, we are
+	 * going to create a valid file:// URL if it's the case.
+	 *
+	 * Check if first character is a '/' or else reject the URL.
+	 */
+	if (ctrl_url && ctrl_url[0] == '/') {
+		int ret;
+
+		ret = snprintf(url, sizeof(url), "file://%s", ctrl_url);
+		if (ret < 0) {
+			PERROR("snprintf file url");
+			goto parse_error;
+		}
+		ctrl_url = url;
+	}
+
+	/* Parse the control URL if there is one */
+	if (ctrl_url && *ctrl_url != '\0') {
+		size_ctrl = uri_parse(ctrl_url, &ctrl_uris);
+		if (size_ctrl < 1) {
+			ERR("Unable to parse the URL %s", ctrl_url);
+			goto parse_error;
+		}
+
+		/* At this point, we know there is at least one URI in the array */
+		set_default_uri_attr(&ctrl_uris[0], LTTNG_STREAM_CONTROL);
+
+		if (ctrl_uris[0].dtype == LTTNG_DST_PATH &&
+				(data_url && *data_url != '\0')) {
+			ERR("Can not have a data URL when destination is file://");
+			goto error;
+		}
+
+		/* URL are not equal but the control URL uses a net:// protocol */
+		if (size_ctrl == 2) {
+			if (!equal) {
+				ERR("Control URL uses the net:// protocol and the data URL is "
+						"different. Not allowed.");
+				goto error;
+			} else {
+				set_default_uri_attr(&ctrl_uris[1], LTTNG_STREAM_DATA);
+				/*
+				 * The data_url and ctrl_url are equal and the ctrl_url
+				 * contains a net:// protocol so we just skip the data part.
+				 */
+				data_url = NULL;
+			}
+		}
+	}
+
+	if (data_url && *data_url != '\0') {
+		int ret;
+
+		/* We have to parse the data URL in this case */
+		size_data = uri_parse(data_url, &data_uris);
+		if (size_data < 1) {
+			ERR("Unable to parse the URL %s", data_url);
+			goto error;
+		} else if (size_data == 2) {
+			ERR("Data URL can not be set with the net[4|6]:// protocol");
+			goto error;
+		}
+
+		set_default_uri_attr(&data_uris[0], LTTNG_STREAM_DATA);
+
+		ret = compare_destination(&ctrl_uris[0], &data_uris[0]);
+		if (ret != 0) {
+			ERR("Control and data destination mismatch");
+			goto error;
+		}
+	}
+
+	/* Compute total size */
+	size = size_ctrl + size_data;
+
+	tmp_uris = zmalloc(sizeof(struct lttng_uri) * size);
+	if (tmp_uris == NULL) {
+		PERROR("zmalloc uris");
+		goto error;
+	}
+
+	if (ctrl_uris) {
+		/* It's possible the control URIs array contains more than one URI */
+		memcpy(tmp_uris, ctrl_uris, sizeof(struct lttng_uri) * size_ctrl);
+		++idx;
+		free(ctrl_uris);
+	}
+
+	if (data_uris) {
+		memcpy(&tmp_uris[idx], data_uris, sizeof(struct lttng_uri));
+		free(data_uris);
+	}
+
+	*uris = tmp_uris;
+
+	return size;
+
+error:
+	free(ctrl_uris);
+	free(data_uris);
+	free(tmp_uris);
+parse_error:
 	return -1;
 }

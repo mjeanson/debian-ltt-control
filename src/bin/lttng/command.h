@@ -31,6 +31,7 @@ enum cmd_error_code {
 	CMD_UNDEFINED,
 	CMD_FATAL,
 	CMD_WARNING,
+	CMD_UNSUPPORTED,
 };
 
 struct cmd_struct {
@@ -54,5 +55,6 @@ extern int cmd_calibrate(int argc, const char **argv);
 extern int cmd_view(int argc, const char **argv);
 extern int cmd_enable_consumer(int argc, const char **argv);
 extern int cmd_disable_consumer(int argc, const char **argv);
+extern int cmd_snapshot(int argc, const char **argv);
 
 #endif /* _LTTNG_CMD_H */

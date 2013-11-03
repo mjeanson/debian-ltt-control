@@ -23,6 +23,8 @@
 
 #include <common/defaults.h>
 #include <common/error.h>
+#include <common/macros.h>
+#include <common/utils.h>
 
 #include "poll.h"
 
@@ -39,6 +41,11 @@ static int resize_poll_event(struct compat_poll_event_array *array,
 	struct pollfd *ptr;
 
 	assert(array);
+
+	/* Refuse to resize the array more than the max size. */
+	if (new_size > poll_max_size) {
+		goto error;
+	}
 
 	ptr = realloc(array->events, new_size * sizeof(*ptr));
 	if (ptr == NULL) {
@@ -163,7 +170,9 @@ int compat_poll_add(struct lttng_poll_event *events, int fd,
 	/* Check for a needed resize of the array. */
 	if (current->nb_fd > current->alloc_size) {
 		/* Expand it by a power of two of the current size. */
-		new_size = current->alloc_size << 1UL;
+		new_size = max_t(int,
+				1U << utils_get_count_order_u32(current->nb_fd),
+				current->alloc_size << 1UL);
 		ret = resize_poll_event(current, new_size);
 		if (ret < 0) {
 			goto error;
@@ -200,11 +209,6 @@ int compat_poll_del(struct lttng_poll_event *events, int fd)
 	/* Ease our life a bit. */
 	current = &events->current;
 
-	/* Safety check on size */
-	if (new_size > poll_max_size) {
-		new_size = poll_max_size;
-	}
-
 	/* Check if we need to shrink it down. */
 	if ((current->nb_fd << 1UL) <= current->alloc_size &&
 			current->nb_fd >= current->init_size) {
@@ -212,7 +216,9 @@ int compat_poll_del(struct lttng_poll_event *events, int fd)
 		 * Shrink if nb_fd multiplied by two is <= than the actual size and we
 		 * are above the initial size.
 		 */
-		new_size = current->alloc_size >> 1UL;
+		new_size = max_t(int,
+				utils_get_count_order_u32(current->nb_fd) >> 1U,
+				current->alloc_size >> 1U);
 		ret = resize_poll_event(current, new_size);
 		if (ret < 0) {
 			goto error;

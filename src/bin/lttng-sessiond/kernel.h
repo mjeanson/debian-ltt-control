@@ -19,6 +19,7 @@
 #define _LTT_KERNEL_CTL_H
 
 #include "session.h"
+#include "snapshot.h"
 #include "trace-kernel.h"
 
 /*
@@ -34,7 +35,7 @@ int kernel_add_channel_context(struct ltt_kernel_channel *chan,
 		struct lttng_kernel_context *ctx);
 int kernel_create_session(struct ltt_session *session, int tracer_fd);
 int kernel_create_channel(struct ltt_kernel_session *session,
-		struct lttng_channel *chan, char *path);
+		struct lttng_channel *chan);
 int kernel_create_event(struct lttng_event *ev, struct ltt_kernel_channel *channel);
 int kernel_disable_channel(struct ltt_kernel_channel *chan);
 int kernel_disable_event(struct ltt_kernel_event *event);
@@ -52,6 +53,9 @@ void kernel_wait_quiescent(int fd);
 int kernel_calibrate(int fd, struct lttng_kernel_calibrate *calibrate);
 int kernel_validate_version(int tracer_fd);
 void kernel_destroy_session(struct ltt_kernel_session *ksess);
+void kernel_destroy_channel(struct ltt_kernel_channel *kchan);
+int kernel_snapshot_record(struct ltt_kernel_session *ksess,
+		struct snapshot_output *output, int wait, unsigned int nb_streams);
 
 int init_kernel_workarounds(void);
 

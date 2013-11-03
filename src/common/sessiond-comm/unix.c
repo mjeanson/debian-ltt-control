@@ -27,15 +27,14 @@
 #include <unistd.h>
 #include <errno.h>
 
-#include <common/defaults.h>
-#include <common/error.h>
+#include <common/common.h>
 
 #include "unix.h"
 
 /*
  * Connect to unix socket using the path name.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_connect_unix_sock(const char *pathname)
 {
 	struct sockaddr_un sun;
@@ -77,7 +76,7 @@ error:
  * Do an accept(2) on the sock and return the new file descriptor. The socket
  * MUST be bind(2) before.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_accept_unix_sock(int sock)
 {
 	int new_fd;
@@ -97,7 +96,7 @@ int lttcomm_accept_unix_sock(int sock)
  * Creates a AF_UNIX local socket using pathname bind the socket upon creation
  * and return the fd.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_create_unix_sock(const char *pathname)
 {
 	struct sockaddr_un sun;
@@ -126,13 +125,18 @@ int lttcomm_create_unix_sock(const char *pathname)
 	return fd;
 
 error:
+	if (fd >= 0) {
+		if (close(fd) < 0) {
+			PERROR("close create unix sock");
+		}
+	}
 	return ret;
 }
 
 /*
  * Make the socket listen using LTTNG_SESSIOND_COMM_MAX_LISTEN.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_listen_unix_sock(int sock)
 {
 	int ret;
@@ -151,7 +155,7 @@ int lttcomm_listen_unix_sock(int sock)
  *
  * Return the size of received data.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 ssize_t lttcomm_recv_unix_sock(int sock, void *buf, size_t len)
 {
 	struct msghdr msg;
@@ -190,7 +194,7 @@ ssize_t lttcomm_recv_unix_sock(int sock, void *buf, size_t len)
  *
  * Return the size of sent data.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 ssize_t lttcomm_send_unix_sock(int sock, void *buf, size_t len)
 {
 	struct msghdr msg;
@@ -221,7 +225,7 @@ ssize_t lttcomm_send_unix_sock(int sock, void *buf, size_t len)
 /*
  * Shutdown cleanly a unix socket.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_close_unix_sock(int sock)
 {
 	int ret, closeret;
@@ -245,7 +249,7 @@ int lttcomm_close_unix_sock(int sock)
  *
  * Returns the size of data sent, or negative error value.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 ssize_t lttcomm_send_fds_unix_sock(int sock, int *fds, size_t nb_fd)
 {
 	struct msghdr msg;
@@ -301,7 +305,7 @@ ssize_t lttcomm_send_fds_unix_sock(int sock, int *fds, size_t nb_fd)
  * Expect at most "nb_fd" file descriptors. Returns the number of fd
  * actually received in nb_fd.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 ssize_t lttcomm_recv_fds_unix_sock(int sock, int *fds, size_t nb_fd)
 {
 	struct iovec iov[1];
@@ -367,7 +371,7 @@ end:
  *
  * Returns the size of data sent, or negative error value.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 ssize_t lttcomm_send_creds_unix_sock(int sock, void *buf, size_t len)
 {
 	struct msghdr msg;
@@ -424,7 +428,7 @@ ssize_t lttcomm_send_creds_unix_sock(int sock, void *buf, size_t len)
  *
  * Returns the size of received data, or negative error value.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 ssize_t lttcomm_recv_creds_unix_sock(int sock, void *buf, size_t len,
 		lttng_sock_cred *creds)
 {
@@ -514,7 +518,7 @@ end:
  * Set socket option to use credentials passing.
  */
 #ifdef __linux__
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_setsockopt_creds_unix_sock(int sock)
 {
 	int ret, on = 1;
@@ -527,7 +531,7 @@ int lttcomm_setsockopt_creds_unix_sock(int sock)
 	return ret;
 }
 #elif (defined(__FreeBSD__) || defined(__CYGWIN__))
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int lttcomm_setsockopt_creds_unix_sock(int sock)
 {
 	return 0;
@@ -535,45 +539,3 @@ int lttcomm_setsockopt_creds_unix_sock(int sock)
 #else
 #error "Please implement credential support for your OS."
 #endif /* __linux__ */
-
-/*
- * Set socket reciving timeout.
- */
-__attribute__((visibility("hidden")))
-int lttcomm_setsockopt_rcv_timeout(int sock, unsigned int sec)
-{
-	int ret;
-	struct timeval tv;
-
-	tv.tv_sec = sec;
-	tv.tv_usec = 0;
-
-	ret = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-	if (ret < 0) {
-		PERROR("setsockopt SO_RCVTIMEO");
-		ret = -errno;
-	}
-
-	return ret;
-}
-
-/*
- * Set socket sending timeout.
- */
-__attribute__((visibility("hidden")))
-int lttcomm_setsockopt_snd_timeout(int sock, unsigned int sec)
-{
-	int ret;
-	struct timeval tv;
-
-	tv.tv_sec = sec;
-	tv.tv_usec = 0;
-
-	ret = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-	if (ret < 0) {
-		PERROR("setsockopt SO_SNDTIMEO");
-		ret = -errno;
-	}
-
-	return ret;
-}

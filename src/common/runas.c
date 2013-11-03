@@ -30,7 +30,8 @@
 #include <sched.h>
 #include <sys/signal.h>
 
-#include <common/error.h>
+#include <common/common.h>
+#include <common/utils.h>
 #include <common/compat/mman.h>
 #include <common/compat/clone.h>
 
@@ -84,56 +85,12 @@ int _mkdir_recursive(void *_data)
 {
 	struct run_as_mkdir_data *data = _data;
 	const char *path;
-	char *p, tmp[PATH_MAX];
-	struct stat statbuf;
 	mode_t mode;
-	size_t len;
-	int ret;
 
 	path = data->path;
 	mode = data->mode;
 
-	ret = snprintf(tmp, sizeof(tmp), "%s", path);
-	if (ret < 0) {
-		PERROR("snprintf mkdir");
-		goto error;
-	}
-
-	len = ret;
-	if (tmp[len - 1] == '/') {
-		tmp[len - 1] = 0;
-	}
-
-	for (p = tmp + 1; *p; p++) {
-		if (*p == '/') {
-			*p = 0;
-			ret = stat(tmp, &statbuf);
-			if (ret < 0) {
-				ret = mkdir(tmp, mode);
-				if (ret < 0) {
-					if (!(errno == EEXIST)) {
-						PERROR("mkdir recursive");
-						ret = -errno;
-						goto error;
-					}
-				}
-			}
-			*p = '/';
-		}
-	}
-
-	ret = mkdir(tmp, mode);
-	if (ret < 0) {
-		if (!(errno == EEXIST)) {
-			PERROR("mkdir recursive last piece");
-			ret = -errno;
-		} else {
-			ret = 0;
-		}
-	}
-
-error:
-	return ret;
+	return utils_mkdir_recursive(path, mode);
 }
 
 static
@@ -173,14 +130,16 @@ int child_run_as(void *_data)
 		ret = setegid(data->gid);
 		if (ret < 0) {
 			PERROR("setegid");
-			return EXIT_FAILURE;
+			sendret.i = -1;
+			goto write_return;
 		}
 	}
 	if (data->uid != geteuid()) {
 		ret = seteuid(data->uid);
 		if (ret < 0) {
 			PERROR("seteuid");
-			return EXIT_FAILURE;
+			sendret.i = -1;
+			goto write_return;
 		}
 	}
 	/*
@@ -188,6 +147,8 @@ int child_run_as(void *_data)
 	 */
 	umask(0);
 	sendret.i = (*data->cmd)(data->data);
+
+write_return:
 	/* send back return value */
 	writeleft = sizeof(sendret);
 	index = 0;
@@ -340,7 +301,7 @@ int run_as(int (*cmd)(void *data), void *data, uid_t uid, gid_t gid)
 	}
 }
 
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int run_as_mkdir_recursive(const char *path, mode_t mode, uid_t uid, gid_t gid)
 {
 	struct run_as_mkdir_data data;
@@ -352,7 +313,7 @@ int run_as_mkdir_recursive(const char *path, mode_t mode, uid_t uid, gid_t gid)
 	return run_as(_mkdir_recursive, &data, uid, gid);
 }
 
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int run_as_mkdir(const char *path, mode_t mode, uid_t uid, gid_t gid)
 {
 	struct run_as_mkdir_data data;
@@ -368,7 +329,7 @@ int run_as_mkdir(const char *path, mode_t mode, uid_t uid, gid_t gid)
  * Note: open_run_as is currently not working. We'd need to pass the fd
  * opened in the child to the parent.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int run_as_open(const char *path, int flags, mode_t mode, uid_t uid, gid_t gid)
 {
 	struct run_as_open_data data;

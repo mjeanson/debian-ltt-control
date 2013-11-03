@@ -21,247 +21,56 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <common/common.h>
 #include <common/consumer.h>
 #include <common/defaults.h>
 
 #include "consumer.h"
+#include "health.h"
 #include "ust-consumer.h"
+#include "buffer-registry.h"
+#include "session.h"
 
 /*
- * Send a single channel to the consumer using command ADD_CHANNEL.
+ * Return allocated full pathname of the session using the consumer trace path
+ * and subdir if available. On a successful allocation, the directory of the
+ * trace is created with the session credentials.
+ *
+ * The caller can safely free(3) the returned value. On error, NULL is
+ * returned.
  */
-static int send_channel(struct consumer_socket *sock,
-		struct ust_app_channel *uchan)
-{
-	int ret, fd;
-	struct lttcomm_consumer_msg msg;
-
-	/* Safety net */
-	assert(uchan);
-	assert(sock);
-
-	if (sock->fd < 0) {
-		ret = -EINVAL;
-		goto error;
-	}
-
-	DBG2("Sending channel %s to UST consumer", uchan->name);
-
-	consumer_init_channel_comm_msg(&msg,
-			LTTNG_CONSUMER_ADD_CHANNEL,
-			uchan->obj->shm_fd,
-			uchan->attr.subbuf_size,
-			uchan->obj->memory_map_size,
-			uchan->name,
-			uchan->streams.count);
-
-	health_code_update(&health_thread_cmd);
-
-	ret = consumer_send_channel(sock, &msg);
-	if (ret < 0) {
-		goto error;
-	}
-
-	health_code_update(&health_thread_cmd);
-
-	fd = uchan->obj->shm_fd;
-	ret = consumer_send_fds(sock, &fd, 1);
-	if (ret < 0) {
-		goto error;
-	}
-
-	health_code_update(&health_thread_cmd);
-
-error:
-	return ret;
-}
-
-/*
- * Send a single stream to the consumer using ADD_STREAM command.
- */
-static int send_channel_stream(struct consumer_socket *sock,
-		struct ust_app_channel *uchan, struct ust_app_session *usess,
-		struct ltt_ust_stream *stream, struct consumer_output *consumer,
-		const char *pathname)
-{
-	int ret, fds[2];
-	struct lttcomm_consumer_msg msg;
-
-	/* Safety net */
-	assert(uchan);
-	assert(usess);
-	assert(stream);
-	assert(consumer);
-	assert(sock);
-
-	DBG2("Sending stream %d of channel %s to kernel consumer",
-			stream->obj->shm_fd, uchan->name);
-
-	consumer_init_stream_comm_msg(&msg,
-			LTTNG_CONSUMER_ADD_STREAM,
-			uchan->obj->shm_fd,
-			stream->obj->shm_fd,
-			LTTNG_CONSUMER_ACTIVE_STREAM,
-			DEFAULT_UST_CHANNEL_OUTPUT,
-			stream->obj->memory_map_size,
-			usess->uid,
-			usess->gid,
-			consumer->net_seq_index,
-			0, /* Metadata flag unset */
-			stream->name,
-			pathname,
-			usess->id);
-
-	health_code_update(&health_thread_cmd);
-
-	/* Send stream and file descriptor */
-	fds[0] = stream->obj->shm_fd;
-	fds[1] = stream->obj->wait_fd;
-	ret = consumer_send_stream(sock, consumer, &msg, fds, 2);
-	if (ret < 0) {
-		goto error;
-	}
-
-	health_code_update(&health_thread_cmd);
-
-error:
-	return ret;
-}
-
-/*
- * Send all stream fds of UST channel to the consumer.
- */
-static int send_channel_streams(struct consumer_socket *sock,
-		struct ust_app_channel *uchan, struct ust_app_session *usess,
-		struct consumer_output *consumer)
+static char *setup_trace_path(struct consumer_output *consumer,
+		struct ust_app_session *ua_sess)
 {
 	int ret;
-	char tmp_path[PATH_MAX];
-	const char *pathname;
-	struct ltt_ust_stream *stream, *tmp;
+	char *pathname;
 
-	assert(sock);
-
-	DBG("Sending streams of channel %s to UST consumer", uchan->name);
-
-	ret = send_channel(sock, uchan);
-	if (ret < 0) {
-		goto error;
-	}
-
-	/* Get the right path name destination */
-	if (consumer->type == CONSUMER_DST_LOCAL) {
-		/* Set application path to the destination path */
-		ret = snprintf(tmp_path, sizeof(tmp_path), "%s/%s/%s",
-				consumer->dst.trace_path, consumer->subdir, usess->path);
-		if (ret < 0) {
-			PERROR("snprintf stream path");
-			goto error;
-		}
-		pathname = tmp_path;
-		DBG3("UST local consumer tracefile path: %s", pathname);
-	} else {
-		ret = snprintf(tmp_path, sizeof(tmp_path), "%s/%s",
-				consumer->subdir, usess->path);
-		if (ret < 0) {
-			PERROR("snprintf stream path");
-			goto error;
-		}
-		pathname = tmp_path;
-		DBG3("UST network consumer subdir path: %s", pathname);
-	}
-
-	cds_list_for_each_entry_safe(stream, tmp, &uchan->streams.head, list) {
-		if (!stream->obj->shm_fd) {
-			continue;
-		}
-
-		ret = send_channel_stream(sock, uchan, usess, stream, consumer,
-				pathname);
-		if (ret < 0) {
-			goto error;
-		}
-	}
-
-	DBG("UST consumer channel streams sent");
-
-	return 0;
-
-error:
-	return ret;
-}
-
-/*
- * Sending metadata to the consumer with command ADD_CHANNEL and ADD_STREAM.
- */
-static int send_metadata(struct consumer_socket *sock,
-		struct ust_app_session *usess, struct consumer_output *consumer)
-{
-	int ret, fd, fds[2];
-	char tmp_path[PATH_MAX];
-	const char *pathname;
-	struct lttcomm_consumer_msg msg;
-
-	/* Safety net */
-	assert(usess);
 	assert(consumer);
-	assert(sock);
+	assert(ua_sess);
 
-	if (sock->fd < 0) {
-		ERR("Consumer socket is negative (%d)", sock->fd);
-		return -EINVAL;
-	}
+	health_code_update();
 
-	if (usess->metadata->obj->shm_fd == 0) {
-		ERR("Metadata obj shm_fd is 0");
-		ret = -1;
+	/* Allocate our self the string to make sure we never exceed PATH_MAX. */
+	pathname = zmalloc(PATH_MAX);
+	if (!pathname) {
 		goto error;
 	}
-
-	DBG("UST consumer sending metadata stream fd");
-
-	consumer_init_channel_comm_msg(&msg,
-			LTTNG_CONSUMER_ADD_CHANNEL,
-			usess->metadata->obj->shm_fd,
-			usess->metadata->attr.subbuf_size,
-			usess->metadata->obj->memory_map_size,
-			"metadata",
-			1);
-
-	health_code_update(&health_thread_cmd);
-
-	ret = consumer_send_channel(sock, &msg);
-	if (ret < 0) {
-		goto error;
-	}
-
-	health_code_update(&health_thread_cmd);
-
-	/* Sending metadata shared memory fd */
-	fd = usess->metadata->obj->shm_fd;
-	ret = consumer_send_fds(sock, &fd, 1);
-	if (ret < 0) {
-		goto error;
-	}
-
-	health_code_update(&health_thread_cmd);
 
 	/* Get correct path name destination */
 	if (consumer->type == CONSUMER_DST_LOCAL) {
 		/* Set application path to the destination path */
-		ret = snprintf(tmp_path, sizeof(tmp_path), "%s/%s/%s",
-				consumer->dst.trace_path, consumer->subdir, usess->path);
+		ret = snprintf(pathname, PATH_MAX, "%s%s%s",
+				consumer->dst.trace_path, consumer->subdir, ua_sess->path);
 		if (ret < 0) {
-			PERROR("snprintf stream path");
+			PERROR("snprintf channel path");
 			goto error;
 		}
-		pathname = tmp_path;
 
-		/* Create directory */
+		/* Create directory. Ignore if exist. */
 		ret = run_as_mkdir_recursive(pathname, S_IRWXU | S_IRWXG,
-				usess->uid, usess->gid);
+				ua_sess->euid, ua_sess->egid);
 		if (ret < 0) {
 			if (ret != -EEXIST) {
 				ERR("Trace directory creation error");
@@ -269,100 +78,415 @@ static int send_metadata(struct consumer_socket *sock,
 			}
 		}
 	} else {
-		ret = snprintf(tmp_path, sizeof(tmp_path), "%s/%s",
-				consumer->subdir, usess->path);
+		ret = snprintf(pathname, PATH_MAX, "%s%s", consumer->subdir,
+				ua_sess->path);
 		if (ret < 0) {
-			PERROR("snprintf metadata path");
+			PERROR("snprintf channel path");
 			goto error;
 		}
-		pathname = tmp_path;
 	}
 
-	consumer_init_stream_comm_msg(&msg,
-			LTTNG_CONSUMER_ADD_STREAM,
-			usess->metadata->obj->shm_fd,
-			usess->metadata->stream_obj->shm_fd,
-			LTTNG_CONSUMER_ACTIVE_STREAM,
-			DEFAULT_UST_CHANNEL_OUTPUT,
-			usess->metadata->stream_obj->memory_map_size,
-			usess->uid,
-			usess->gid,
-			consumer->net_seq_index,
-			1, /* Flag metadata set */
-			"metadata",
+	return pathname;
+
+error:
+	free(pathname);
+	return NULL;
+}
+
+/*
+ * Send a single channel to the consumer using command ADD_CHANNEL.
+ *
+ * Consumer socket lock MUST be acquired before calling this.
+ */
+static int ask_channel_creation(struct ust_app_session *ua_sess,
+		struct ust_app_channel *ua_chan, struct consumer_output *consumer,
+		struct consumer_socket *socket, struct ust_registry_session *registry)
+{
+	int ret;
+	uint32_t chan_id;
+	uint64_t key, chan_reg_key;
+	char *pathname = NULL;
+	struct lttcomm_consumer_msg msg;
+	struct ust_registry_channel *chan_reg;
+
+	assert(ua_sess);
+	assert(ua_chan);
+	assert(socket);
+	assert(consumer);
+	assert(registry);
+
+	DBG2("Asking UST consumer for channel");
+
+	/* Get and create full trace path of session. */
+	if (ua_sess->output_traces) {
+		pathname = setup_trace_path(consumer, ua_sess);
+		if (!pathname) {
+			ret = -1;
+			goto error;
+		}
+	}
+
+	/* Depending on the buffer type, a different channel key is used. */
+	if (ua_sess->buffer_type == LTTNG_BUFFER_PER_UID) {
+		chan_reg_key = ua_chan->tracing_channel_id;
+	} else {
+		chan_reg_key = ua_chan->key;
+	}
+
+	if (ua_chan->attr.type == LTTNG_UST_CHAN_METADATA) {
+		chan_id = -1U;
+	} else {
+		chan_reg = ust_registry_channel_find(registry, chan_reg_key);
+		assert(chan_reg);
+		chan_id = chan_reg->chan_id;
+	}
+
+	consumer_init_ask_channel_comm_msg(&msg,
+			ua_chan->attr.subbuf_size,
+			ua_chan->attr.num_subbuf,
+			ua_chan->attr.overwrite,
+			ua_chan->attr.switch_timer_interval,
+			ua_chan->attr.read_timer_interval,
+			(int) ua_chan->attr.output,
+			(int) ua_chan->attr.type,
+			ua_sess->tracing_id,
 			pathname,
-			usess->id);
+			ua_chan->name,
+			ua_sess->euid,
+			ua_sess->egid,
+			consumer->net_seq_index,
+			ua_chan->key,
+			registry->uuid,
+			chan_id,
+			ua_chan->tracefile_size,
+			ua_chan->tracefile_count,
+			ua_sess->id,
+			ua_sess->output_traces,
+			ua_sess->uid);
 
-	health_code_update(&health_thread_cmd);
+	health_code_update();
 
-	/* Send stream and file descriptor */
-	fds[0] = usess->metadata->stream_obj->shm_fd;
-	fds[1] = usess->metadata->stream_obj->wait_fd;
-	ret = consumer_send_stream(sock, consumer, &msg, fds, 2);
+	ret = consumer_socket_send(socket, &msg, sizeof(msg));
 	if (ret < 0) {
 		goto error;
 	}
 
-	health_code_update(&health_thread_cmd);
+	ret = consumer_recv_status_channel(socket, &key,
+			&ua_chan->expected_stream_count);
+	if (ret < 0) {
+		goto error;
+	}
+	/* Communication protocol error. */
+	assert(key == ua_chan->key);
+	/* We need at least one where 1 stream for 1 cpu. */
+	if (ua_sess->output_traces) {
+		assert(ua_chan->expected_stream_count > 0);
+	}
+
+	DBG2("UST ask channel %" PRIu64 " successfully done with %u stream(s)", key,
+			ua_chan->expected_stream_count);
+
+error:
+	free(pathname);
+	health_code_update();
+	return ret;
+}
+
+/*
+ * Ask consumer to create a channel for a given session.
+ *
+ * Returns 0 on success else a negative value.
+ */
+int ust_consumer_ask_channel(struct ust_app_session *ua_sess,
+		struct ust_app_channel *ua_chan, struct consumer_output *consumer,
+		struct consumer_socket *socket, struct ust_registry_session *registry)
+{
+	int ret;
+
+	assert(ua_sess);
+	assert(ua_chan);
+	assert(consumer);
+	assert(socket);
+	assert(registry);
+
+	if (!consumer->enabled) {
+		ret = -LTTNG_ERR_NO_CONSUMER;
+		DBG3("Consumer is disabled");
+		goto error;
+	}
+
+	pthread_mutex_lock(socket->lock);
+
+	ret = ask_channel_creation(ua_sess, ua_chan, consumer, socket, registry);
+	if (ret < 0) {
+		goto error;
+	}
+
+error:
+	pthread_mutex_unlock(socket->lock);
+	return ret;
+}
+
+/*
+ * Send a get channel command to consumer using the given channel key.  The
+ * channel object is populated and the stream list.
+ *
+ * Return 0 on success else a negative value.
+ */
+int ust_consumer_get_channel(struct consumer_socket *socket,
+		struct ust_app_channel *ua_chan)
+{
+	int ret;
+	struct lttcomm_consumer_msg msg;
+
+	assert(ua_chan);
+	assert(socket);
+
+	msg.cmd_type = LTTNG_CONSUMER_GET_CHANNEL;
+	msg.u.get_channel.key = ua_chan->key;
+
+	pthread_mutex_lock(socket->lock);
+	health_code_update();
+
+	/* Send command and wait for OK reply. */
+	ret = consumer_send_msg(socket, &msg);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* First, get the channel from consumer. */
+	ret = ustctl_recv_channel_from_consumer(*socket->fd_ptr, &ua_chan->obj);
+	if (ret < 0) {
+		if (ret != -EPIPE) {
+			ERR("Error recv channel from consumer %d with ret %d",
+					*socket->fd_ptr, ret);
+		} else {
+			DBG3("UST app recv channel from consumer. Consumer is dead.");
+		}
+		goto error;
+	}
+
+	/* Next, get all streams. */
+	while (1) {
+		struct ust_app_stream *stream;
+
+		/* Create UST stream */
+		stream = ust_app_alloc_stream();
+		if (stream == NULL) {
+			ret = -ENOMEM;
+			goto error;
+		}
+
+		/* Stream object is populated by this call if successful. */
+		ret = ustctl_recv_stream_from_consumer(*socket->fd_ptr, &stream->obj);
+		if (ret < 0) {
+			free(stream);
+			if (ret == -LTTNG_UST_ERR_NOENT) {
+				DBG3("UST app consumer has no more stream available");
+				ret = 0;
+				break;
+			}
+			if (ret != -EPIPE) {
+				ERR("Recv stream from consumer %d with ret %d",
+						*socket->fd_ptr, ret);
+			} else {
+				DBG3("UST app recv stream from consumer. Consumer is dead.");
+			}
+			goto error;
+		}
+
+		/* Order is important this is why a list is used. */
+		cds_list_add_tail(&stream->list, &ua_chan->streams.head);
+		ua_chan->streams.count++;
+
+		DBG2("UST app stream %d received succesfully", ua_chan->streams.count);
+	}
+
+	/* This MUST match or else we have a synchronization problem. */
+	assert(ua_chan->expected_stream_count == ua_chan->streams.count);
+
+	/* Wait for confirmation that we can proceed with the streams. */
+	ret = consumer_recv_status_reply(socket);
+	if (ret < 0) {
+		goto error;
+	}
+
+error:
+	health_code_update();
+	pthread_mutex_unlock(socket->lock);
+	return ret;
+}
+
+/*
+ * Send a destroy channel command to consumer using the given channel key.
+ *
+ * Note that this command MUST be used prior to a successful
+ * LTTNG_CONSUMER_GET_CHANNEL because once this command is done successfully,
+ * the streams are dispatched to the consumer threads and MUST be teardown
+ * through the hang up process.
+ *
+ * Return 0 on success else a negative value.
+ */
+int ust_consumer_destroy_channel(struct consumer_socket *socket,
+		struct ust_app_channel *ua_chan)
+{
+	int ret;
+	struct lttcomm_consumer_msg msg;
+
+	assert(ua_chan);
+	assert(socket);
+
+	msg.cmd_type = LTTNG_CONSUMER_DESTROY_CHANNEL;
+	msg.u.destroy_channel.key = ua_chan->key;
+
+	pthread_mutex_lock(socket->lock);
+	health_code_update();
+
+	ret = consumer_send_msg(socket, &msg);
+	if (ret < 0) {
+		goto error;
+	}
+
+error:
+	health_code_update();
+	pthread_mutex_unlock(socket->lock);
+	return ret;
+}
+
+/*
+ * Send a given stream to UST tracer.
+ *
+ * On success return 0 else a negative value.
+ */
+int ust_consumer_send_stream_to_ust(struct ust_app *app,
+		struct ust_app_channel *channel, struct ust_app_stream *stream)
+{
+	int ret;
+
+	assert(app);
+	assert(stream);
+	assert(channel);
+
+	DBG2("UST consumer send stream to app %d", app->sock);
+
+	/* Relay stream to application. */
+	ret = ustctl_send_stream_to_ust(app->sock, channel->obj, stream->obj);
+	if (ret < 0) {
+		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
+			ERR("Error ustctl send stream %s to app pid: %d with ret %d",
+					stream->name, app->pid, ret);
+		} else {
+			DBG3("UST app send stream to ust failed. Application is dead.");
+		}
+		goto error;
+	}
+	channel->handle = channel->obj->handle;
 
 error:
 	return ret;
 }
 
 /*
- * Send all stream fds of the UST session to the consumer.
+ * Send channel previously received from the consumer to the UST tracer.
+ *
+ * On success return 0 else a negative value.
  */
-int ust_consumer_send_session(struct ust_app_session *usess,
-		struct consumer_output *consumer, struct consumer_socket *sock)
+int ust_consumer_send_channel_to_ust(struct ust_app *app,
+		struct ust_app_session *ua_sess, struct ust_app_channel *channel)
 {
-	int ret = 0;
-	struct lttng_ht_iter iter;
-	struct ust_app_channel *ua_chan;
+	int ret;
 
-	assert(usess);
+	assert(app);
+	assert(ua_sess);
+	assert(channel);
+	assert(channel->obj);
 
-	if (consumer == NULL || sock == NULL) {
-		/* There is no consumer so just ignoring the command. */
-		DBG("UST consumer does not exist. Not sending streams");
-		return 0;
-	}
+	DBG2("UST app send channel to sock %d pid %d (name: %s, key: %" PRIu64 ")",
+			app->sock, app->pid, channel->name, channel->tracing_channel_id);
 
-	DBG("Sending metadata stream fd to consumer on %d", sock->fd);
-
-	pthread_mutex_lock(sock->lock);
-
-	/* Sending metadata information to the consumer */
-	ret = send_metadata(sock, usess, consumer);
+	/* Send stream to application. */
+	ret = ustctl_send_channel_to_ust(app->sock, ua_sess->handle, channel->obj);
 	if (ret < 0) {
+		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
+			ERR("Error ustctl send channel %s to app pid: %d with ret %d",
+					channel->name, app->pid, ret);
+		} else {
+			DBG3("UST app send channel to ust failed. Application is dead.");
+		}
 		goto error;
 	}
 
-	/* Send each channel fd streams of session */
+error:
+	return ret;
+}
+
+/*
+ * Handle the metadata requests from the UST consumer
+ *
+ * Return 0 on success else a negative value.
+ */
+int ust_consumer_metadata_request(struct consumer_socket *socket)
+{
+	int ret;
+	ssize_t ret_push;
+	struct lttcomm_metadata_request_msg request;
+	struct buffer_reg_uid *reg_uid;
+	struct ust_registry_session *ust_reg;
+	struct lttcomm_consumer_msg msg;
+
+	assert(socket);
+
 	rcu_read_lock();
-	cds_lfht_for_each_entry(usess->channels->ht, &iter.iter, ua_chan,
-			node.node) {
-		/*
-		 * Indicate that the channel was not created on the tracer side so skip
-		 * sending unexisting streams.
-		 */
-		if (ua_chan->obj == NULL) {
-			continue;
-		}
+	pthread_mutex_lock(socket->lock);
 
-		ret = send_channel_streams(sock, ua_chan, usess, consumer);
-		if (ret < 0) {
-			rcu_read_unlock();
-			goto error;
-		}
+	health_code_update();
+
+	/* Wait for a metadata request */
+	ret = consumer_socket_recv(socket, &request, sizeof(request));
+	if (ret < 0) {
+		goto end;
 	}
-	rcu_read_unlock();
 
-	DBG("consumer fds (metadata and channel streams) sent");
+	DBG("Metadata request received for session %" PRIu64 ", key %" PRIu64,
+			request.session_id, request.key);
 
-	/* All good! */
+	reg_uid = buffer_reg_uid_find(request.session_id,
+			request.bits_per_long, request.uid);
+	if (reg_uid) {
+		ust_reg = reg_uid->registry->reg.ust;
+	} else {
+		struct buffer_reg_pid *reg_pid =
+			buffer_reg_pid_find(request.session_id_per_pid);
+		if (!reg_pid) {
+			DBG("PID registry not found for session id %" PRIu64,
+					request.session_id_per_pid);
+
+			msg.cmd_type = LTTNG_ERR_UND;
+			(void) consumer_send_msg(socket, &msg);
+			/*
+			 * This is possible since the session might have been destroyed
+			 * during a consumer metadata request. So here, return gracefully
+			 * because the destroy session will push the remaining metadata to
+			 * the consumer.
+			 */
+			ret = 0;
+			goto end;
+		}
+		ust_reg = reg_pid->registry->reg.ust;
+	}
+	assert(ust_reg);
+
+	ret_push = ust_app_push_metadata(ust_reg, socket, 1);
+	if (ret_push < 0) {
+		ERR("Pushing metadata");
+		ret = -1;
+		goto end;
+	}
+	DBG("UST Consumer metadata pushed successfully");
 	ret = 0;
 
-error:
-	pthread_mutex_unlock(sock->lock);
+end:
+	pthread_mutex_unlock(socket->lock);
+	rcu_read_unlock();
 	return ret;
 }

@@ -126,6 +126,7 @@ enum lttng_event_context_type {
 	LTTNG_EVENT_CONTEXT_VPPID             = 9,
 	LTTNG_EVENT_CONTEXT_PTHREAD_ID        = 10,
 	LTTNG_EVENT_CONTEXT_HOSTNAME          = 11,
+	LTTNG_EVENT_CONTEXT_IP                = 12,
 };
 
 enum lttng_calibrate_type {
@@ -139,16 +140,27 @@ enum lttng_health_component {
 	LTTNG_HEALTH_APP_REG,
 	LTTNG_HEALTH_KERNEL,
 	LTTNG_HEALTH_CONSUMER,
+	LTTNG_HEALTH_HT_CLEANUP,
+	LTTNG_HEALTH_APP_MANAGE_NOTIFY,
+	LTTNG_HEALTH_APP_REG_DISPATCH,
 	LTTNG_HEALTH_ALL,
+};
+
+/* Buffer type for a specific domain. */
+enum lttng_buffer_type {
+	LTTNG_BUFFER_PER_PID,	/* Only supported by UST being the default. */
+	LTTNG_BUFFER_PER_UID,	/* Only supported by UST. */
+	LTTNG_BUFFER_GLOBAL,	/* Only supported by the Kernel. */
 };
 
 /*
  * The structures should be initialized to zero before use.
  */
-#define LTTNG_DOMAIN_PADDING1              16
+#define LTTNG_DOMAIN_PADDING1              12
 #define LTTNG_DOMAIN_PADDING2              LTTNG_SYMBOL_NAME_LEN + 32
 struct lttng_domain {
 	enum lttng_domain_type type;
+	enum lttng_buffer_type buf_type;
 	char padding[LTTNG_DOMAIN_PADDING1];
 
 	union {
@@ -269,7 +281,7 @@ struct lttng_event_field {
  *
  * The structures should be initialized to zero before use.
  */
-#define LTTNG_CHANNEL_ATTR_PADDING1        LTTNG_SYMBOL_NAME_LEN + 32
+#define LTTNG_CHANNEL_ATTR_PADDING1        LTTNG_SYMBOL_NAME_LEN + 16
 struct lttng_channel_attr {
 	int overwrite;                      /* 1: overwrite, 0: discard */
 	uint64_t subbuf_size;               /* bytes */
@@ -277,6 +289,9 @@ struct lttng_channel_attr {
 	unsigned int switch_timer_interval; /* usec */
 	unsigned int read_timer_interval;   /* usec */
 	enum lttng_event_output output;     /* splice, mmap */
+	/* LTTng 2.1 padding limit */
+	uint64_t tracefile_size;            /* bytes */
+	uint64_t tracefile_count;           /* number of tracefiles */
 
 	char padding[LTTNG_CHANNEL_ATTR_PADDING1];
 };
@@ -311,12 +326,13 @@ struct lttng_calibrate {
  *
  * The structures should be initialized to zero before use.
  */
-#define LTTNG_SESSION_PADDING1             16
+#define LTTNG_SESSION_PADDING1             12
 struct lttng_session {
 	char name[NAME_MAX];
 	/* The path where traces are written */
 	char path[PATH_MAX];
 	uint32_t enabled;	/* enabled/started: 1, disabled/stopped: 0 */
+	uint32_t snapshot_mode;
 
 	char padding[LTTNG_SESSION_PADDING1];
 };
@@ -374,6 +390,21 @@ extern void lttng_destroy_handle(struct lttng_handle *handle);
  * NULL here.
  */
 extern int lttng_create_session(const char *name, const char *url);
+
+/*
+ * Create a tracing session that will exclusively be used for snapshot meaning
+ * the session will be in no output mode and every channel enabled for that
+ * session will be set in overwrite mode and in mmap output since splice is not
+ * supported.
+ *
+ * If an url is given, it will be used to create a default snapshot output
+ * using it as a destination. If NULL, no output will be defined and an
+ * add-output call will be needed.
+ *
+ * Name can't be NULL.
+ */
+extern int lttng_create_session_snapshot(const char *name,
+		const char *snapshot_url);
 
 /*
  * Destroy a tracing session.
@@ -590,12 +621,14 @@ extern int lttng_set_consumer_url(struct lttng_handle *handle,
 /*
  * Enable the consumer for a session and domain.
  */
-extern int lttng_enable_consumer(struct lttng_handle *handle);
+extern LTTNG_DEPRECATED("This call is now obsolete.")
+int lttng_enable_consumer(struct lttng_handle *handle);
 
 /*
  * Disable consumer for a session and domain.
  */
-extern int lttng_disable_consumer(struct lttng_handle *handle);
+extern LTTNG_DEPRECATED("This call is now obsolete.")
+int lttng_disable_consumer(struct lttng_handle *handle);
 
 /*
  * Check session daemon health for a specific component.

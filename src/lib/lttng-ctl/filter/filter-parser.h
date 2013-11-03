@@ -1,8 +1,8 @@
-/* A Bison parser, made by GNU Bison 2.5.  */
+/* A Bison parser, made by GNU Bison 2.7.12-4996.  */
 
 /* Bison interface for Yacc-like parsers in C
    
-      Copyright (C) 1984, 1989-1990, 2000-2011 Free Software Foundation, Inc.
+      Copyright (C) 1984, 1989-1990, 2000-2013 Free Software Foundation, Inc.
    
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -30,6 +30,15 @@
    This special exception was added by the Free Software Foundation in
    version 2.2 of Bison.  */
 
+#ifndef YY_YY_FILTER_PARSER_H_INCLUDED
+# define YY_YY_FILTER_PARSER_H_INCLUDED
+/* Enabling traces.  */
+#ifndef YYDEBUG
+# define YYDEBUG 1
+#endif
+#if YYDEBUG
+extern int yydebug;
+#endif
 
 /* Tokens.  */
 #ifndef YYTOKENTYPE
@@ -82,7 +91,8 @@
      OR_BIN = 300,
      NOT_BIN = 301,
      IDENTIFIER = 302,
-     ERROR = 303
+     GLOBAL_IDENTIFIER = 303,
+     ERROR = 304
    };
 #endif
 /* Tokens.  */
@@ -131,17 +141,16 @@
 #define OR_BIN 300
 #define NOT_BIN 301
 #define IDENTIFIER 302
-#define ERROR 303
-
+#define GLOBAL_IDENTIFIER 303
+#define ERROR 304
 
 
 
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 typedef union YYSTYPE
 {
-
-/* Line 2068 of yacc.c  */
-#line 317 "filter-parser.y"
+/* Line 2053 of yacc.c  */
+#line 320 "filter-parser.y"
 
 	long long ll;
 	char c;
@@ -149,9 +158,8 @@ typedef union YYSTYPE
 	struct filter_node *n;
 
 
-
-/* Line 2068 of yacc.c  */
-#line 155 "filter-parser.h"
+/* Line 2053 of yacc.c  */
+#line 163 "filter-parser.h"
 } YYSTYPE;
 # define YYSTYPE_IS_TRIVIAL 1
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
@@ -159,5 +167,18 @@ typedef union YYSTYPE
 #endif
 
 
+#ifdef YYPARSE_PARAM
+#if defined __STDC__ || defined __cplusplus
+int yyparse (void *YYPARSE_PARAM);
+#else
+int yyparse ();
+#endif
+#else /* ! YYPARSE_PARAM */
+#if defined __STDC__ || defined __cplusplus
+int yyparse (struct filter_parser_ctx *parser_ctx, yyscan_t scanner);
+#else
+int yyparse ();
+#endif
+#endif /* ! YYPARSE_PARAM */
 
-
+#endif /* !YY_YY_FILTER_PARSER_H_INCLUDED  */

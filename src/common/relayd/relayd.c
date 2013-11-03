@@ -32,7 +32,7 @@
 /*
  * Send command. Fill up the header and append the data.
  */
-static int send_command(struct lttcomm_sock *sock,
+static int send_command(struct lttcomm_relayd_sock *rsock,
 		enum lttcomm_relayd_command cmd, void *data, size_t size,
 		int flags)
 {
@@ -40,6 +40,10 @@ static int send_command(struct lttcomm_sock *sock,
 	struct lttcomm_relayd_hdr header;
 	char *buf;
 	uint64_t buf_size = sizeof(header);
+
+	if (rsock->sock.fd < 0) {
+		return -ECONNRESET;
+	}
 
 	if (data) {
 		buf_size += size;
@@ -65,7 +69,7 @@ static int send_command(struct lttcomm_sock *sock,
 		memcpy(buf + sizeof(header), data, size);
 	}
 
-	ret = sock->ops->sendmsg(sock, buf, buf_size, flags);
+	ret = rsock->sock.ops->sendmsg(&rsock->sock, buf, buf_size, flags);
 	if (ret < 0) {
 		ret = -errno;
 		goto error;
@@ -83,20 +87,24 @@ alloc_error:
  * Receive reply data on socket. This MUST be call after send_command or else
  * could result in unexpected behavior(s).
  */
-static int recv_reply(struct lttcomm_sock *sock, void *data, size_t size)
+static int recv_reply(struct lttcomm_relayd_sock *rsock, void *data, size_t size)
 {
 	int ret;
 
-	DBG3("Relayd waiting for reply of size %ld", size);
+	if (rsock->sock.fd < 0) {
+		return -ECONNRESET;
+	}
 
-	ret = sock->ops->recvmsg(sock, data, size, 0);
+	DBG3("Relayd waiting for reply of size %zu", size);
+
+	ret = rsock->sock.ops->recvmsg(&rsock->sock, data, size, 0);
 	if (ret <= 0 || ret != size) {
 		if (ret == 0) {
 			/* Orderly shutdown. */
-			DBG("Socket %d has performed an orderly shutdown", sock->fd);
+			DBG("Socket %d has performed an orderly shutdown", rsock->sock.fd);
 		} else {
-			DBG("Receiving reply failed on sock %d for size %lu with ret %d",
-					sock->fd, size, ret);
+			DBG("Receiving reply failed on sock %d for size %zu with ret %d",
+					rsock->sock.fd, size, ret);
 		}
 		/* Always return -1 here and the caller can use errno. */
 		ret = -1;
@@ -114,24 +122,24 @@ error:
  * On success, return 0 else a negative value which is either an errno error or
  * a lttng error code from the relayd.
  */
-int relayd_create_session(struct lttcomm_sock *sock, uint64_t *session_id)
+int relayd_create_session(struct lttcomm_relayd_sock *rsock, uint64_t *session_id)
 {
 	int ret;
 	struct lttcomm_relayd_status_session reply;
 
-	assert(sock);
+	assert(rsock);
 	assert(session_id);
 
 	DBG("Relayd create session");
 
 	/* Send command */
-	ret = send_command(sock, RELAYD_CREATE_SESSION, NULL, 0, 0);
+	ret = send_command(rsock, RELAYD_CREATE_SESSION, NULL, 0, 0);
 	if (ret < 0) {
 		goto error;
 	}
 
 	/* Receive response */
-	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	ret = recv_reply(rsock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
 	}
@@ -160,31 +168,48 @@ error:
  *
  * On success return 0 else return ret_code negative value.
  */
-int relayd_add_stream(struct lttcomm_sock *sock, const char *channel_name,
-		const char *pathname, uint64_t *stream_id)
+int relayd_add_stream(struct lttcomm_relayd_sock *rsock, const char *channel_name,
+		const char *pathname, uint64_t *stream_id,
+		uint64_t tracefile_size, uint64_t tracefile_count)
 {
 	int ret;
 	struct lttcomm_relayd_add_stream msg;
+	struct lttcomm_relayd_add_stream_2_2 msg_2_2;
 	struct lttcomm_relayd_status_stream reply;
 
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 	assert(channel_name);
 	assert(pathname);
 
 	DBG("Relayd adding stream for channel name %s", channel_name);
 
-	strncpy(msg.channel_name, channel_name, sizeof(msg.channel_name));
-	strncpy(msg.pathname, pathname, sizeof(msg.pathname));
+	/* Compat with relayd 2.1 */
+	if (rsock->minor == 1) {
+		strncpy(msg.channel_name, channel_name, sizeof(msg.channel_name));
+		strncpy(msg.pathname, pathname, sizeof(msg.pathname));
 
-	/* Send command */
-	ret = send_command(sock, RELAYD_ADD_STREAM, (void *) &msg, sizeof(msg), 0);
-	if (ret < 0) {
-		goto error;
+		/* Send command */
+		ret = send_command(rsock, RELAYD_ADD_STREAM, (void *) &msg, sizeof(msg), 0);
+		if (ret < 0) {
+			goto error;
+		}
+	} else {
+		/* Compat with relayd 2.2+ */
+		strncpy(msg_2_2.channel_name, channel_name, sizeof(msg_2_2.channel_name));
+		strncpy(msg_2_2.pathname, pathname, sizeof(msg_2_2.pathname));
+		msg_2_2.tracefile_size = htobe64(tracefile_size);
+		msg_2_2.tracefile_count = htobe64(tracefile_count);
+
+		/* Send command */
+		ret = send_command(rsock, RELAYD_ADD_STREAM, (void *) &msg_2_2, sizeof(msg_2_2), 0);
+		if (ret < 0) {
+			goto error;
+		}
 	}
 
 	/* Waiting for reply */
-	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	ret = recv_reply(rsock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
 	}
@@ -212,32 +237,34 @@ error:
 
 /*
  * Check version numbers on the relayd.
+ * If major versions are compatible, we assign minor_to_use to the
+ * minor version of the procotol we are going to use for this session.
  *
  * Return 0 if compatible else negative value.
  */
-int relayd_version_check(struct lttcomm_sock *sock, uint32_t major,
-		uint32_t minor)
+int relayd_version_check(struct lttcomm_relayd_sock *rsock)
 {
 	int ret;
 	struct lttcomm_relayd_version msg;
 
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 
-	DBG("Relayd version check for major.minor %u.%u", major, minor);
+	DBG("Relayd version check for major.minor %u.%u", rsock->major,
+			rsock->minor);
 
 	/* Prepare network byte order before transmission. */
-	msg.major = htobe32(major);
-	msg.minor = htobe32(minor);
+	msg.major = htobe32(rsock->major);
+	msg.minor = htobe32(rsock->minor);
 
 	/* Send command */
-	ret = send_command(sock, RELAYD_VERSION, (void *) &msg, sizeof(msg), 0);
+	ret = send_command(rsock, RELAYD_VERSION, (void *) &msg, sizeof(msg), 0);
 	if (ret < 0) {
 		goto error;
 	}
 
 	/* Receive response */
-	ret = recv_reply(sock, (void *) &msg, sizeof(msg));
+	ret = recv_reply(rsock, (void *) &msg, sizeof(msg));
 	if (ret < 0) {
 		goto error;
 	}
@@ -251,30 +278,28 @@ int relayd_version_check(struct lttcomm_sock *sock, uint32_t major,
 	 * communication is not possible. Only major version equal can talk to each
 	 * other. If the minor version differs, the lowest version is used by both
 	 * sides.
-	 *
-	 * For now, before 2.1.0 stable release, we don't have to check the minor
-	 * because this new mechanism with the relayd will only be available with
-	 * 2.1 and NOT 2.0.x.
 	 */
-	if (msg.major == major) {
-		/* Compatible */
-		ret = 0;
-		DBG2("Relayd version is compatible");
+	if (msg.major != rsock->major) {
+		/* Not compatible */
+		ret = -1;
+		DBG2("Relayd version is NOT compatible. Relayd version %u != %u (us)",
+				msg.major, rsock->major);
 		goto error;
 	}
 
 	/*
-	 * After 2.1.0 release, for the 2.2 release, at this point will have to
-	 * check the minor version in order for the session daemon to know which
-	 * structure to use to communicate with the relayd. If the relayd's minor
-	 * version is higher, it will adapt to our version so we can continue to
-	 * use the latest relayd communication data structure.
+	 * If the relayd's minor version is higher, it will adapt to our version so
+	 * we can continue to use the latest relayd communication data structure.
+	 * If the received minor version is higher, the relayd should adapt to us.
 	 */
+	if (rsock->minor > msg.minor) {
+		rsock->minor = msg.minor;
+	}
 
-	/* Version number not compatible */
-	DBG2("Relayd version is NOT compatible. Relayd version %u != %u (us)",
-			msg.major, major);
-	ret = -1;
+	/* Version number compatible */
+	DBG2("Relayd version is compatible, using protocol version %u.%u",
+			rsock->major, rsock->minor);
+	ret = 0;
 
 error:
 	return ret;
@@ -285,17 +310,17 @@ error:
  *
  * On success return 0 else return ret_code negative value.
  */
-int relayd_send_metadata(struct lttcomm_sock *sock, size_t len)
+int relayd_send_metadata(struct lttcomm_relayd_sock *rsock, size_t len)
 {
 	int ret;
 
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 
 	DBG("Relayd sending metadata of size %zu", len);
 
 	/* Send command */
-	ret = send_command(sock, RELAYD_SEND_METADATA, NULL, len, 0);
+	ret = send_command(rsock, RELAYD_SEND_METADATA, NULL, len, 0);
 	if (ret < 0) {
 		goto error;
 	}
@@ -313,44 +338,85 @@ error:
 }
 
 /*
- * Connect to relay daemon with an allocated lttcomm_sock.
+ * Connect to relay daemon with an allocated lttcomm_relayd_sock.
  */
-int relayd_connect(struct lttcomm_sock *sock)
+int relayd_connect(struct lttcomm_relayd_sock *rsock)
 {
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
+
+	if (!rsock->sock.ops) {
+		/*
+		 * Attempting a connect on a non-initialized socket.
+		 */
+		return -ECONNRESET;
+	}
 
 	DBG3("Relayd connect ...");
 
-	return sock->ops->connect(sock);
+	return rsock->sock.ops->connect(&rsock->sock);
 }
 
 /*
- * Close relayd socket with an allocated lttcomm_sock.
+ * Close relayd socket with an allocated lttcomm_relayd_sock.
+ *
+ * If no socket operations are found, simply return 0 meaning that everything
+ * is fine. Without operations, the socket can not possibly be opened or used.
+ * This is possible if the socket was allocated but not created. However, the
+ * caller could simply use it to store a valid file descriptor for instance
+ * passed over a Unix socket and call this to cleanup but still without a valid
+ * ops pointer.
+ *
+ * Return the close returned value. On error, a negative value is usually
+ * returned back from close(2).
  */
-int relayd_close(struct lttcomm_sock *sock)
+int relayd_close(struct lttcomm_relayd_sock *rsock)
 {
+	int ret;
+
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 
-	DBG3("Relayd closing socket %d", sock->fd);
+	/* An invalid fd is fine, return success. */
+	if (rsock->sock.fd < 0) {
+		ret = 0;
+		goto end;
+	}
 
-	return sock->ops->close(sock);
+	DBG3("Relayd closing socket %d", rsock->sock.fd);
+
+	if (rsock->sock.ops) {
+		ret = rsock->sock.ops->close(&rsock->sock);
+	} else {
+		/* Default call if no specific ops found. */
+		ret = close(rsock->sock.fd);
+		if (ret < 0) {
+			PERROR("relayd_close default close");
+		}
+	}
+	rsock->sock.fd = -1;
+
+end:
+	return ret;
 }
 
 /*
  * Send data header structure to the relayd.
  */
-int relayd_send_data_hdr(struct lttcomm_sock *sock,
+int relayd_send_data_hdr(struct lttcomm_relayd_sock *rsock,
 		struct lttcomm_relayd_data_hdr *hdr, size_t size)
 {
 	int ret;
 
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 	assert(hdr);
 
-	DBG3("Relayd sending data header of size %ld", size);
+	if (rsock->sock.fd < 0) {
+		return -ECONNRESET;
+	}
+
+	DBG3("Relayd sending data header of size %zu", size);
 
 	/* Again, safety net */
 	if (size == 0) {
@@ -358,7 +424,7 @@ int relayd_send_data_hdr(struct lttcomm_sock *sock,
 	}
 
 	/* Only send data header. */
-	ret = sock->ops->sendmsg(sock, hdr, size, 0);
+	ret = rsock->sock.ops->sendmsg(&rsock->sock, hdr, size, 0);
 	if (ret < 0) {
 		ret = -errno;
 		goto error;
@@ -376,7 +442,7 @@ error:
 /*
  * Send close stream command to the relayd.
  */
-int relayd_send_close_stream(struct lttcomm_sock *sock, uint64_t stream_id,
+int relayd_send_close_stream(struct lttcomm_relayd_sock *rsock, uint64_t stream_id,
 		uint64_t last_net_seq_num)
 {
 	int ret;
@@ -384,7 +450,7 @@ int relayd_send_close_stream(struct lttcomm_sock *sock, uint64_t stream_id,
 	struct lttcomm_relayd_generic_reply reply;
 
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 
 	DBG("Relayd closing stream id %" PRIu64, stream_id);
 
@@ -392,13 +458,13 @@ int relayd_send_close_stream(struct lttcomm_sock *sock, uint64_t stream_id,
 	msg.last_net_seq_num = htobe64(last_net_seq_num);
 
 	/* Send command */
-	ret = send_command(sock, RELAYD_CLOSE_STREAM, (void *) &msg, sizeof(msg), 0);
+	ret = send_command(rsock, RELAYD_CLOSE_STREAM, (void *) &msg, sizeof(msg), 0);
 	if (ret < 0) {
 		goto error;
 	}
 
 	/* Receive response */
-	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	ret = recv_reply(rsock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
 	}
@@ -425,7 +491,7 @@ error:
  *
  * Return 0 if NOT pending, 1 if so and a negative value on error.
  */
-int relayd_data_pending(struct lttcomm_sock *sock, uint64_t stream_id,
+int relayd_data_pending(struct lttcomm_relayd_sock *rsock, uint64_t stream_id,
 		uint64_t last_net_seq_num)
 {
 	int ret;
@@ -433,7 +499,7 @@ int relayd_data_pending(struct lttcomm_sock *sock, uint64_t stream_id,
 	struct lttcomm_relayd_generic_reply reply;
 
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 
 	DBG("Relayd data pending for stream id %" PRIu64, stream_id);
 
@@ -441,14 +507,14 @@ int relayd_data_pending(struct lttcomm_sock *sock, uint64_t stream_id,
 	msg.last_net_seq_num = htobe64(last_net_seq_num);
 
 	/* Send command */
-	ret = send_command(sock, RELAYD_DATA_PENDING, (void *) &msg,
+	ret = send_command(rsock, RELAYD_DATA_PENDING, (void *) &msg,
 			sizeof(msg), 0);
 	if (ret < 0) {
 		goto error;
 	}
 
 	/* Receive response */
-	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	ret = recv_reply(rsock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
 	}
@@ -473,7 +539,7 @@ error:
 /*
  * Check on the relayd side for a quiescent state on the control socket.
  */
-int relayd_quiescent_control(struct lttcomm_sock *sock,
+int relayd_quiescent_control(struct lttcomm_relayd_sock *rsock,
 		uint64_t metadata_stream_id)
 {
 	int ret;
@@ -481,20 +547,20 @@ int relayd_quiescent_control(struct lttcomm_sock *sock,
 	struct lttcomm_relayd_generic_reply reply;
 
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 
 	DBG("Relayd checking quiescent control state");
 
 	msg.stream_id = htobe64(metadata_stream_id);
 
 	/* Send command */
-	ret = send_command(sock, RELAYD_QUIESCENT_CONTROL, &msg, sizeof(msg), 0);
+	ret = send_command(rsock, RELAYD_QUIESCENT_CONTROL, &msg, sizeof(msg), 0);
 	if (ret < 0) {
 		goto error;
 	}
 
 	/* Receive response */
-	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	ret = recv_reply(rsock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
 	}
@@ -518,27 +584,27 @@ error:
 /*
  * Begin a data pending command for a specific session id.
  */
-int relayd_begin_data_pending(struct lttcomm_sock *sock, uint64_t id)
+int relayd_begin_data_pending(struct lttcomm_relayd_sock *rsock, uint64_t id)
 {
 	int ret;
 	struct lttcomm_relayd_begin_data_pending msg;
 	struct lttcomm_relayd_generic_reply reply;
 
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 
 	DBG("Relayd begin data pending");
 
 	msg.session_id = htobe64(id);
 
 	/* Send command */
-	ret = send_command(sock, RELAYD_BEGIN_DATA_PENDING, &msg, sizeof(msg), 0);
+	ret = send_command(rsock, RELAYD_BEGIN_DATA_PENDING, &msg, sizeof(msg), 0);
 	if (ret < 0) {
 		goto error;
 	}
 
 	/* Receive response */
-	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	ret = recv_reply(rsock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
 	}
@@ -564,7 +630,7 @@ error:
  * Return 0 on success and set is_data_inflight to 0 if no data is being
  * streamed or 1 if it is the case.
  */
-int relayd_end_data_pending(struct lttcomm_sock *sock, uint64_t id,
+int relayd_end_data_pending(struct lttcomm_relayd_sock *rsock, uint64_t id,
 		unsigned int *is_data_inflight)
 {
 	int ret;
@@ -572,20 +638,20 @@ int relayd_end_data_pending(struct lttcomm_sock *sock, uint64_t id,
 	struct lttcomm_relayd_generic_reply reply;
 
 	/* Code flow error. Safety net. */
-	assert(sock);
+	assert(rsock);
 
 	DBG("Relayd end data pending");
 
 	msg.session_id = htobe64(id);
 
 	/* Send command */
-	ret = send_command(sock, RELAYD_END_DATA_PENDING, &msg, sizeof(msg), 0);
+	ret = send_command(rsock, RELAYD_END_DATA_PENDING, &msg, sizeof(msg), 0);
 	if (ret < 0) {
 		goto error;
 	}
 
 	/* Receive response */
-	ret = recv_reply(sock, (void *) &reply, sizeof(reply));
+	ret = recv_reply(rsock, (void *) &reply, sizeof(reply));
 	if (ret < 0) {
 		goto error;
 	}

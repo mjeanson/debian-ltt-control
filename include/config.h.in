@@ -15,8 +15,14 @@
 /* Search for consumerd 64-bit libraries in this location. */
 #undef CONFIG_CONSUMERD64_LIBDIR
 
+/* LTTng system runtime directory */
+#undef CONFIG_LTTNG_SYSTEM_RUNDIR
+
 /* Location of the lttv GUI viewer executable. */
 #undef CONFIG_LTTV_GUI_BIN
+
+/* Location of the sessiond executable. */
+#undef CONFIG_SESSIOND_BIN
 
 /* Define to 1 if you have the <dlfcn.h> header file. */
 #undef HAVE_DLFCN_H
@@ -78,6 +84,9 @@
 /* Define to 1 if you have the <string.h> header file. */
 #undef HAVE_STRING_H
 
+/* Define to 1 if you have the `sync_file_range' function. */
+#undef HAVE_SYNC_FILE_RANGE
+
 /* Define to 1 if you have the `sysconf' function. */
 #undef HAVE_SYSCONF
 
@@ -104,6 +113,12 @@
 
 /* Has fmemopen support. */
 #undef LTTNG_HAVE_FMEMOPEN
+
+/* Has libc uuid support. */
+#undef LTTNG_HAVE_LIBC_UUID
+
+/* Has libuuid support. */
+#undef LTTNG_HAVE_LIBUUID
 
 /* Has open_memstream support. */
 #undef LTTNG_HAVE_OPEN_MEMSTREAM
@@ -142,8 +157,17 @@
 /* "" */
 #undef VERSION_DESCRIPTION
 
+/* LTTng-Tools major version number */
+#undef VERSION_MAJOR
+
+/* LTTng-Tools minor version number */
+#undef VERSION_MINOR
+
 /* "" */
 #undef VERSION_NAME
+
+/* LTTng-Tools patchlevel version number */
+#undef VERSION_PATCHLEVEL
 
 /* Define to 1 if `lex' declares `yytext' as a `char *' by default, not a
    `char[]'. */

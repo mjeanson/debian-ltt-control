@@ -69,7 +69,7 @@ static struct poptOption long_options[] = {
  */
 static void usage(FILE *ofp)
 {
-	fprintf(ofp, "usage: lttng disable-event NAME[,NAME2,...] [-k|-u] [OPTIONS]\n");
+	fprintf(ofp, "usage: lttng disable-event NAME[,NAME2,...] (-k | -u) [OPTIONS]\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Options:\n");
 	fprintf(ofp, "  -h, --help               Show this help\n");
@@ -82,6 +82,18 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "\n");
 }
 
+static
+const char *print_channel_name(const char *name)
+{
+	return name ? : DEFAULT_CHANNEL_NAME;
+}
+
+static
+const char *print_raw_channel_name(const char *name)
+{
+	return name ? : "<default>";
+}
+
 /*
  *  disable_events
  *
@@ -89,7 +101,7 @@ static void usage(FILE *ofp)
  */
 static int disable_events(char *session_name)
 {
-	int err, ret = CMD_SUCCESS, warn = 0;
+	int ret = CMD_SUCCESS, warn = 0;
 	char *event_name, *channel_name = NULL;
 	struct lttng_domain dom;
 
@@ -106,16 +118,7 @@ static int disable_events(char *session_name)
 		goto error;
 	}
 
-	/* Get channel name */
-	if (opt_channel_name == NULL) {
-		err = asprintf(&channel_name, DEFAULT_CHANNEL_NAME);
-		if (err < 0) {
-			ret = CMD_FATAL;
-			goto error;
-		}
-	} else {
-		channel_name = opt_channel_name;
-	}
+	channel_name = opt_channel_name;
 
 	handle = lttng_create_handle(session_name, &dom);
 	if (handle == NULL) {
@@ -126,12 +129,13 @@ static int disable_events(char *session_name)
 	if (opt_disable_all) {
 		ret = lttng_disable_event(handle, NULL, channel_name);
 		if (ret < 0) {
-			/* Don't set ret so lttng can interpret the sessiond error. */
+			ERR("%s", lttng_strerror(ret));
 			goto error;
 		}
 
 		MSG("All %s events are disabled in channel %s",
-				opt_kernel ? "kernel" : "UST", channel_name);
+				opt_kernel ? "kernel" : "UST",
+				print_channel_name(channel_name));
 		goto end;
 	}
 
@@ -143,11 +147,16 @@ static int disable_events(char *session_name)
 		ret = lttng_disable_event(handle, event_name, channel_name);
 		if (ret < 0) {
 			ERR("Event %s: %s (channel %s, session %s)", event_name,
-					lttng_strerror(ret), channel_name, session_name);
+					lttng_strerror(ret),
+					ret == -LTTNG_ERR_NEED_CHANNEL_NAME
+						? print_raw_channel_name(channel_name)
+						: print_channel_name(channel_name),
+					session_name);
 			warn = 1;
 		} else {
 			MSG("%s event %s disabled in channel %s for session %s",
-					opt_kernel ? "kernel" : "UST", event_name, channel_name,
+					opt_kernel ? "kernel" : "UST", event_name,
+					print_channel_name(channel_name),
 					session_name);
 		}
 
@@ -161,9 +170,6 @@ end:
 error:
 	if (warn) {
 		ret = CMD_WARNING;
-	}
-	if (opt_channel_name == NULL) {
-		free(channel_name);
 	}
 	lttng_destroy_handle(handle);
 

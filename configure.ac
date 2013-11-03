@@ -1,4 +1,4 @@
-AC_INIT([lttng-tools],[2.1.1],[dgoulet@efficios.com],[],[http://lttng.org])
+AC_INIT([lttng-tools],[2.3.0],[dgoulet@efficios.com],[],[http://lttng.org])
 AC_CONFIG_AUX_DIR([config])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
@@ -6,8 +6,20 @@ AC_CONFIG_MACRO_DIR([config])
 AM_INIT_AUTOMAKE([foreign dist-bzip2 no-dist-gzip])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
-version_name="Basse Messe"
-version_description="Light coloured German ale whose style was named after the city Cologne (Koln) where it was first brewed. It is a rather simple beer with lightly fruity aromas and a delicate hoppy fragrance. The beer has a pronounced malty taste with a subtle bitter aftertaste"
+# Compute minor/major/patchlevel version numbers
+AC_PROG_SED
+major_version=$(echo AC_PACKAGE_VERSION | sed 's/^\([[0-9]]\)*\.[[0-9]]*\.[[0-9]]*.*$/\1/')
+minor_version=$(echo AC_PACKAGE_VERSION | sed 's/^[[0-9]]*\.\([[0-9]]*\)\.[[0-9]]*.*$/\1/')
+patchlevel_version=$(echo AC_PACKAGE_VERSION | sed 's/^[[0-9]]*\.[[0-9]]*\.\([[0-9]]*\).*$/\1/')
+AC_SUBST([MAJOR_VERSION], [$major_version])
+AC_SUBST([MINOR_VERSION], [$minor_version])
+AC_SUBST([PATCHLEVEL_VERSION], [$patchlevel_version])
+AC_DEFINE_UNQUOTED([VERSION_MAJOR], $major_version, [LTTng-Tools major version number])
+AC_DEFINE_UNQUOTED([VERSION_MINOR], $minor_version, [LTTng-Tools minor version number])
+AC_DEFINE_UNQUOTED([VERSION_PATCHLEVEL], $patchlevel_version, [LTTng-Tools patchlevel version number])
+
+version_name="Dominus Vobiscum"
+version_description="A very succulent line-up of beers brewed at Microbrasserie Charlevoix. Elaborated starting from special malts and fermented with a Belgian yeast. These beers are refermented in bottle and will make you discover the richness of wheat, amber and triple styles."
 
 AC_DEFINE_UNQUOTED([VERSION_NAME], ["$version_name"], "")
 AC_DEFINE_UNQUOTED([VERSION_DESCRIPTION], ["$version_description"], "")
@@ -91,12 +103,28 @@ AC_ARG_WITH([consumerd64-libdir],
 	[CONSUMERD64_LIBDIR=''])
 AC_SUBST([CONSUMERD64_LIBDIR])
 
+AC_ARG_WITH([sessiond-bin],
+	AS_HELP_STRING([--with-sessiond-bin],
+	[Location of the sessiond executable (including the filename)]),
+	[SESSIOND_BIN="$withval"],
+	[SESSIOND_BIN=''])
+AC_SUBST([SESSIOND_BIN])
+
+AC_ARG_WITH([lttng-system-rundir],
+	AS_HELP_STRING([--with-lttng-system-rundir],
+	[Location of the system directory where the system-wide lttng-sessiond runtime files are kept. The default is "/var/run/lttng".]),
+	[LTTNG_SYSTEM_RUNDIR="$withval"],
+	[LTTNG_SYSTEM_RUNDIR="/var/run/lttng"])
+AC_SUBST([LTTNG_SYSTEM_RUNDIR])
+
 AC_DEFINE_UNQUOTED([CONFIG_CONSUMERD32_BIN], "$CONSUMERD32_BIN", [Location of the 32-bit consumerd executable.])
 AC_DEFINE_UNQUOTED([CONFIG_CONSUMERD64_BIN], "$CONSUMERD64_BIN", [Location of the 64-bit consumerd executable])
 AC_DEFINE_UNQUOTED([CONFIG_CONSUMERD32_LIBDIR], "$CONSUMERD32_LIBDIR", [Search for consumerd 32-bit libraries in this location.])
 AC_DEFINE_UNQUOTED([CONFIG_CONSUMERD64_LIBDIR], "$CONSUMERD64_LIBDIR", [Search for consumerd 64-bit libraries in this location.])
 AC_DEFINE_UNQUOTED([CONFIG_BABELTRACE_BIN], "$BABELTRACE_BIN", [Location of the babeltrace viewer executable.])
 AC_DEFINE_UNQUOTED([CONFIG_LTTV_GUI_BIN], "$LTTV_GUI_BIN", [Location of the lttv GUI viewer executable.])
+AC_DEFINE_UNQUOTED([CONFIG_SESSIOND_BIN], "$SESSIOND_BIN", [Location of the sessiond executable.])
+AC_DEFINE_UNQUOTED([CONFIG_LTTNG_SYSTEM_RUNDIR], ["$LTTNG_SYSTEM_RUNDIR"], [LTTng system runtime directory])
 
 # Check for pthread
 AC_CHECK_LIB([pthread], [pthread_create], [],
@@ -107,6 +135,27 @@ AC_CHECK_LIB([pthread], [pthread_create], [],
 AC_CHECK_LIB([popt], [poptGetContext], [],
 	[AC_MSG_ERROR([Cannot find libpopt. Use [LDFLAGS]=-Ldir to specify its location.])]
 )
+
+# Check for libuuid
+AC_CHECK_LIB([uuid], [uuid_generate],
+[
+	AC_DEFINE_UNQUOTED([LTTNG_HAVE_LIBUUID], 1, [Has libuuid support.])
+	have_libuuid=yes
+],
+[
+	# libuuid not found, check for uuid_create in libc.
+	AC_CHECK_LIB([c], [uuid_create],
+	[
+		AC_DEFINE_UNQUOTED([LTTNG_HAVE_LIBC_UUID], 1, [Has libc uuid support.])
+		have_libc_uuid=yes
+	],
+	[
+		AC_MSG_ERROR([Cannot find libuuid uuid_generate nor libc uuid_create. Use [LDFLAGS]=-Ldir to specify their location.])
+	])
+]
+)
+AM_CONDITIONAL([LTTNG_BUILD_WITH_LIBUUID], [test "x$have_libuuid" = "xyes"])
+AM_CONDITIONAL([LTTNG_BUILD_WITH_LIBC_UUID], [test "x$have_libc_uuid" = "xyes"])
 
 # URCU library version needed or newer
 liburcu_version=">= 0.7.2"
@@ -133,6 +182,19 @@ AC_CHECK_DECL([rcu_thread_online], [],
 AC_CHECK_DECL([caa_likely], [],
 	[AC_MSG_ERROR([liburcu $liburcu_version or newer is needed])], [[#include <urcu.h>]]
 )
+#Function added in urcu 0.7.0
+AC_CHECK_DECL([cmm_smp_mb__before_uatomic_or], [],
+        [AC_MSG_ERROR([liburcu $liburcu_version or newer is needed])], [[#include <urcu.h>]]
+)
+
+AC_ARG_WITH(lttng-ust-prefix,
+  AS_HELP_STRING([--with-lttng-ust-prefix=PATH],
+                 [Specify the installation prefix of the lttng-ust library.
+	          Headers must be in PATH/include; libraries in PATH/lib.]),
+		  [
+		    CPPFLAGS="$CPPFLAGS -I${withval}/include"
+		    LDFLAGS="$LDFLAGS -L${withval}/lib64 -L${withval}/lib"
+		  ])
 
 # Check liblttng-ust-ctl library
 AC_ARG_ENABLE(lttng-ust,
@@ -140,17 +202,17 @@ AC_ARG_ENABLE(lttng-ust,
 	lttng_ust_support=$enableval, lttng_ust_support=yes)
 
 AS_IF([test "x$lttng_ust_support" = "xyes"], [
-	AC_CHECK_LIB([lttng-ust-ctl], [ustctl_set_filter],
+	AC_CHECK_LIB([lttng-ust-ctl], [ustctl_recv_channel_from_consumer],
 		[
 			AC_DEFINE([HAVE_LIBLTTNG_UST_CTL], [1], [has LTTng-UST control support])
 			lttng_ust_ctl_found=yes
 		],
-		[AC_MSG_ERROR([Cannot find LTTng-UST 2.1.x. Use [LDFLAGS]=-Ldir to specify its location, or specify --disable-lttng-ust to build lttng-tools without LTTng-UST support.])],
+		[AC_MSG_ERROR([Cannot find LTTng-UST >= 2.2.x. Use --with-lttng-ust-prefix=PREFIX to specify its location, or specify --disable-lttng-ust to build lttng-tools without LTTng-UST support.])],
 		[-lurcu-common -lurcu-bp -lurcu-cds -lrt]
 	)
 ])
 AM_CONDITIONAL([HAVE_LIBLTTNG_UST_CTL], [test "x$lttng_ust_ctl_found" = xyes])
-AC_CHECK_FUNCS([sched_getcpu sysconf])
+AC_CHECK_FUNCS([sched_getcpu sysconf sync_file_range])
 
 # check for dlopen
 AC_CHECK_LIB([dl], [dlopen],
@@ -245,7 +307,19 @@ LT_INIT
 AC_PROG_YACC
 AC_PROG_LEX
 
-AC_DEFUN([AC_PROG_BISON], [AC_CHECK_PROGS(BISON, bison, bison)])
+if test ! -f "$srcdir/src/lib/lttng-ctl/filter/filter-parser.h"; then
+	if test x"$YACC" != "xbison -y"; then
+		AC_MSG_ERROR([[bison not found and is required when building from git.
+		Please install bison]])
+	fi
+fi
+
+if test ! -f "$srcdir/src/lib/lttng-ctl/filter/filter-lexer.c"; then
+	if test x"$LEX" != "xflex"; then
+		AC_MSG_ERROR([[flex not found and is required when building from git.
+		Please install flex]])
+	fi
+fi
 
 CFLAGS="-Wall $CFLAGS -g -fno-strict-aliasing"
 
@@ -268,6 +342,7 @@ AC_CONFIG_FILES([
 	extras/bindings/Makefile
 	extras/bindings/swig/Makefile
 	extras/bindings/swig/python/Makefile
+	extras/core-handler/Makefile
 	src/Makefile
 	src/common/Makefile
 	src/common/kernel-ctl/Makefile
@@ -281,25 +356,43 @@ AC_CONFIG_FILES([
 	src/lib/Makefile
 	src/lib/lttng-ctl/Makefile
 	src/lib/lttng-ctl/filter/Makefile
+	src/lib/lttng-ctl/lttng-ctl.pc
 	src/bin/Makefile
 	src/bin/lttng-consumerd/Makefile
 	src/bin/lttng-sessiond/Makefile
 	src/bin/lttng-relayd/Makefile
 	src/bin/lttng/Makefile
 	tests/Makefile
-	tests/kernel/Makefile
-	tests/tools/Makefile
-	tests/tools/streaming/Makefile
-	tests/tools/filtering/Makefile
-	tests/tools/health/Makefile
-	tests/ust/Makefile
-	tests/ust/nprocesses/Makefile
-	tests/ust/high-throughput/Makefile
-	tests/ust/low-throughput/Makefile
-	tests/ust/before-after/Makefile
-	tests/ust/multi-session/Makefile
-	tests/ust/overlap/Makefile
-	tests/ust/overlap/demo/Makefile
+	tests/regression/Makefile
+	tests/regression/kernel/Makefile
+	tests/regression/tools/Makefile
+	tests/regression/tools/streaming/Makefile
+	tests/regression/tools/filtering/Makefile
+	tests/regression/tools/health/Makefile
+	tests/regression/tools/tracefile-limits/Makefile
+	tests/regression/tools/snapshots/Makefile
+	tests/regression/ust/Makefile
+	tests/regression/ust/nprocesses/Makefile
+	tests/regression/ust/high-throughput/Makefile
+	tests/regression/ust/low-throughput/Makefile
+	tests/regression/ust/before-after/Makefile
+	tests/regression/ust/buffers-pid/Makefile
+	tests/regression/ust/periodical-metadata-flush/Makefile
+	tests/regression/ust/multi-session/Makefile
+	tests/regression/ust/overlap/Makefile
+	tests/regression/ust/overlap/demo/Makefile
+	tests/regression/ust/linking/Makefile
+	tests/regression/ust/daemon/Makefile
+	tests/regression/ust/exit-fast/Makefile
+	tests/regression/ust/fork/Makefile
+	tests/regression/ust/libc-wrapper/Makefile
+	tests/stress/Makefile
+	tests/unit/Makefile
+	tests/utils/Makefile
+	tests/utils/tap/Makefile
+	tests/utils/testapp/Makefile
+	tests/utils/testapp/gen-ust-events/Makefile
+	tests/utils/testapp/gen-ust-nevents/Makefile
 ])
 
 AC_OUTPUT
@@ -360,6 +453,15 @@ AS_ECHO("`eval eval echo $libdir`")
 
 # If we build the sessiond, print the paths it will use
 AS_IF([test "x$consumerd_only" = "xno"],[
+	AS_ECHO()
+	AS_ECHO_N("The lttng command will look for the lttng-sessiond executable at: ")
+	AS_IF([test "$SESSIOND_BIN" = ""],[
+		AS_ECHO_N("`eval eval echo $bindir`")
+		AS_ECHO("/lttng-sessiond")
+	],[
+		AS_ECHO("$SESSIOND_BIN")
+	])
+
 	AS_ECHO()
 	AS_ECHO("The sessiond daemon will look in the following directories: ")
 	AS_ECHO_N("32-bit consumerd executable at: ")

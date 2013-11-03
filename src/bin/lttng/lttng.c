@@ -47,6 +47,7 @@ enum {
 
 /* Getopt options. No first level command. */
 static struct option long_options[] = {
+	{"version",          0, NULL, 'V'},
 	{"help",             0, NULL, 'h'},
 	{"group",            1, NULL, 'g'},
 	{"verbose",          0, NULL, 'v'},
@@ -74,8 +75,9 @@ static struct cmd_struct commands[] =  {
 	{ "version", cmd_version},
 	{ "calibrate", cmd_calibrate},
 	{ "view", cmd_view},
-	{ "enable-consumer", cmd_enable_consumer},
-	{ "disable-consumer", cmd_disable_consumer},
+	{ "snapshot", cmd_snapshot},
+	{ "enable-consumer", cmd_enable_consumer}, /* OBSOLETE */
+	{ "disable-consumer", cmd_disable_consumer}, /* OBSOLETE */
 	{ NULL, NULL}	/* Array closure */
 };
 
@@ -85,6 +87,7 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "usage: lttng [OPTIONS] <COMMAND> [<ARGS>]\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Options:\n");
+	fprintf(ofp, "  -V, --version              Show version\n");
 	fprintf(ofp, "  -h, --help                 Show this help\n");
 	fprintf(ofp, "      --list-options         Simple listing of lttng options\n");
 	fprintf(ofp, "      --list-commands        Simple listing of lttng commands\n");
@@ -103,10 +106,9 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "    enable-event      Enable tracing event\n");
 	fprintf(ofp, "    disable-channel   Disable tracing channel\n");
 	fprintf(ofp, "    disable-event     Disable tracing event\n");
-	fprintf(ofp, "    enable-consumer   Enable local or streaming consumer\n");
-	fprintf(ofp, "    disable-consumer  Disable consumer\n");
 	fprintf(ofp, "    list              List possible tracing options\n");
 	fprintf(ofp, "    set-session       Set current session name\n");
+	fprintf(ofp, "    snapshot          Snapshot buffers of current session name\n");
 	fprintf(ofp, "    start             Start tracing\n");
 	fprintf(ofp, "    stop              Stop tracing\n");
 	fprintf(ofp, "    version           Show version information\n");
@@ -116,6 +118,12 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Please see the lttng(1) man page for full documentation.\n");
 	fprintf(ofp, "See http://lttng.org for updates, bug reports and news.\n");
+}
+
+static void version(FILE *ofp)
+{
+	fprintf(ofp, "%s (LTTng Trace Control) " VERSION" - " VERSION_NAME"\n",
+			progname);
 }
 
 /*
@@ -139,25 +147,6 @@ static void list_options(FILE *ofp)
 
 		i++;
 		option = &long_options[i];
-	}
-}
-
-/*
- *  list_commands
- *
- *  List commands line by line. This is mostly for bash auto completion and to
- *  avoid difficult parsing.
- */
-static void list_commands(FILE *ofp)
-{
-	int i = 0;
-	struct cmd_struct *cmd = NULL;
-
-	cmd = &commands[i];
-	while (cmd->name != NULL) {
-		fprintf(ofp, "%s\n", cmd->name);
-		i++;
-		cmd = &commands[i];
 	}
 }
 
@@ -274,7 +263,7 @@ static int handle_command(int argc, char **argv)
 	}
 
 	/* Command not found */
-	ret = -1;
+	ret = CMD_UNDEFINED;
 
 end:
 	return ret;
@@ -348,41 +337,44 @@ end:
 static int check_sessiond(void)
 {
 	int ret;
-	char *pathname = NULL, *alloc_pathname = NULL;
+	char *pathname = NULL;
 
 	ret = lttng_session_daemon_alive();
 	if (ret == 0) {	/* not alive */
 		/* Try command line option path */
-		if (opt_sessiond_path != NULL) {
-			ret = access(opt_sessiond_path, F_OK | X_OK);
-			if (ret < 0) {
-				ERR("No such file or access denied: %s", opt_sessiond_path);
-				goto end;
-			}
-			pathname = opt_sessiond_path;
-		} else {
-			/* Try LTTNG_SESSIOND_PATH env variable */
+		pathname = opt_sessiond_path;
+
+		/* Try LTTNG_SESSIOND_PATH env variable */
+		if (pathname == NULL) {
 			pathname = getenv(DEFAULT_SESSIOND_PATH_ENV);
 		}
 
-		/* Let's rock and roll */
+		/* Try with configured path */
 		if (pathname == NULL) {
-			ret = asprintf(&alloc_pathname, INSTALL_BIN_PATH "/lttng-sessiond");
-			if (ret < 0) {
-				perror("asprintf spawn sessiond");
-				goto end;
+			if (CONFIG_SESSIOND_BIN[0] != '\0') {
+				pathname = CONFIG_SESSIOND_BIN;
 			}
-			pathname = alloc_pathname;
+		}
+
+		/* Let's rock and roll while trying the default path */
+		if (pathname == NULL) {
+			pathname = INSTALL_BIN_PATH "/lttng-sessiond";
+		}
+
+		DBG("Session daemon at: %s", pathname);
+
+		/* Check existence and permissions */
+		ret = access(pathname, F_OK | X_OK);
+		if (ret < 0) {
+			ERR("No such file or access denied: %s", pathname);
+			goto end;
 		}
 
 		ret = spawn_sessiond(pathname);
-		free(alloc_pathname);
 		if (ret < 0) {
 			ERR("Problem occurred when starting %s", pathname);
-			goto end;
 		}
 	}
-
 end:
 	return ret;
 }
@@ -425,8 +417,12 @@ static int parse_args(int argc, char **argv)
 		clean_exit(EXIT_FAILURE);
 	}
 
-	while ((opt = getopt_long(argc, argv, "+hnvqg:", long_options, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "+Vhnvqg:", long_options, NULL)) != -1) {
 		switch (opt) {
+		case 'V':
+			version(stdout);
+			ret = 0;
+			goto end;
 		case 'h':
 			usage(stdout);
 			ret = 0;
@@ -451,7 +447,7 @@ static int parse_args(int argc, char **argv)
 			ret = 0;
 			goto end;
 		case OPT_DUMP_COMMANDS:
-			list_commands(stdout);
+			list_commands(commands, stdout);
 			ret = 0;
 			goto end;
 		default:
@@ -497,6 +493,9 @@ static int parse_args(int argc, char **argv)
 		break;
 	case CMD_FATAL:
 		ERR("Fatal error");
+		break;
+	case CMD_UNSUPPORTED:
+		ERR("Unsupported command");
 		break;
 	case -1:
 		usage(stderr);

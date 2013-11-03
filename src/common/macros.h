@@ -56,12 +56,20 @@
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
+#ifndef max_t
+#define max_t(type, a, b)	((type) max(a, b))
+#endif
+
 #ifndef min
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
 #ifndef LTTNG_PACKED
 #define LTTNG_PACKED __attribute__((__packed__))
+#endif
+
+#ifndef LTTNG_HIDDEN
+#define LTTNG_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
 #endif /* _MACROS_H */

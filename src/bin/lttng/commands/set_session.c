@@ -45,7 +45,7 @@ static struct poptOption long_options[] = {
  */
 static void usage(FILE *ofp)
 {
-	fprintf(ofp, "usage: lttng set-session NAME\n");
+	fprintf(ofp, "usage: lttng set-session NAME [OPTIONS]\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Options:\n");
 	fprintf(ofp, "  -h, --help               Show this help\n");
@@ -59,6 +59,13 @@ static void usage(FILE *ofp)
 static int set_session(void)
 {
 	int ret = CMD_SUCCESS;
+
+	if (opt_session_name && strlen(opt_session_name) > NAME_MAX) {
+		ERR("Session name too long. Length must be lower or equal to %d",
+			NAME_MAX);
+		ret = CMD_ERROR;
+		goto error;
+	}
 
 	ret = config_init(opt_session_name);
 	if (ret < 0) {

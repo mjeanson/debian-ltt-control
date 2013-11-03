@@ -24,10 +24,14 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <assert.h>
+#include <ctype.h>
 
 #include "../command.h"
+#include "../utils.h"
 
 #include <src/common/sessiond-comm/sessiond-comm.h>
+#include <src/common/utils.h>
 
 static char *opt_channels;
 static int opt_kernel;
@@ -35,11 +39,9 @@ static char *opt_session_name;
 static int opt_userspace;
 static struct lttng_channel chan;
 static char *opt_output;
-#if 0
-/* Not implemented yet */
-static char *opt_cmd_name;
-static pid_t opt_pid;
-#endif
+static int opt_buffer_uid;
+static int opt_buffer_pid;
+static int opt_buffer_global;
 
 enum {
 	OPT_HELP = 1,
@@ -51,6 +53,8 @@ enum {
 	OPT_READ_TIMER,
 	OPT_USERSPACE,
 	OPT_LIST_OPTIONS,
+	OPT_TRACEFILE_SIZE,
+	OPT_TRACEFILE_COUNT,
 };
 
 static struct lttng_handle *handle;
@@ -63,21 +67,20 @@ static struct poptOption long_options[] = {
 	{"help",           'h', POPT_ARG_NONE, 0, OPT_HELP, 0, 0},
 	{"session",        's', POPT_ARG_STRING, &opt_session_name, 0, 0, 0},
 	{"kernel",         'k', POPT_ARG_VAL, &opt_kernel, 1, 0, 0},
-#if 0
-	/* Not implemented yet */
-	{"userspace",      'u', POPT_ARG_STRING | POPT_ARGFLAG_OPTIONAL, &opt_cmd_name, OPT_USERSPACE, 0, 0},
-	{"pid",            'p', POPT_ARG_INT, &opt_pid, 0, 0, 0},
-#else
 	{"userspace",      'u', POPT_ARG_NONE, 0, OPT_USERSPACE, 0, 0},
-#endif
 	{"discard",        0,   POPT_ARG_NONE, 0, OPT_DISCARD, 0, 0},
 	{"overwrite",      0,   POPT_ARG_NONE, 0, OPT_OVERWRITE, 0, 0},
-	{"subbuf-size",    0,   POPT_ARG_DOUBLE, 0, OPT_SUBBUF_SIZE, 0, 0},
+	{"subbuf-size",    0,   POPT_ARG_STRING, 0, OPT_SUBBUF_SIZE, 0, 0},
 	{"num-subbuf",     0,   POPT_ARG_INT, 0, OPT_NUM_SUBBUF, 0, 0},
 	{"switch-timer",   0,   POPT_ARG_INT, 0, OPT_SWITCH_TIMER, 0, 0},
 	{"read-timer",     0,   POPT_ARG_INT, 0, OPT_READ_TIMER, 0, 0},
 	{"list-options",   0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{"output",         0,   POPT_ARG_STRING, &opt_output, 0, 0, 0},
+	{"buffers-uid",    0,	POPT_ARG_VAL, &opt_buffer_uid, 1, 0, 0},
+	{"buffers-pid",    0,	POPT_ARG_VAL, &opt_buffer_pid, 1, 0, 0},
+	{"buffers-global", 0,	POPT_ARG_VAL, &opt_buffer_global, 1, 0, 0},
+	{"tracefile-size", 'C',   POPT_ARG_INT, 0, OPT_TRACEFILE_SIZE, 0, 0},
+	{"tracefile-count", 'W',   POPT_ARG_INT, 0, OPT_TRACEFILE_COUNT, 0, 0},
 	{0, 0, 0, 0, 0, 0, 0}
 };
 
@@ -86,7 +89,7 @@ static struct poptOption long_options[] = {
  */
 static void usage(FILE *ofp)
 {
-	fprintf(ofp, "usage: lttng enable-channel NAME[,NAME2,...] [-u|-k] [OPTIONS]\n");
+	fprintf(ofp, "usage: lttng enable-channel NAME[,NAME2,...] (-u | -k) [OPTIONS]\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Options:\n");
 	fprintf(ofp, "  -h, --help               Show this help\n");
@@ -100,23 +103,43 @@ static void usage(FILE *ofp)
 		DEFAULT_CHANNEL_OVERWRITE ? "" : " (default)");
 	fprintf(ofp, "      --overwrite          Flight recorder mode%s\n",
 		DEFAULT_CHANNEL_OVERWRITE ? " (default)" : "");
-	fprintf(ofp, "      --subbuf-size SIZE   Subbuffer size in bytes\n");
-	fprintf(ofp, "                               (default: %zu, kernel default: %zu)\n",
-		default_get_channel_subbuf_size(),
-		default_get_kernel_channel_subbuf_size());
-	fprintf(ofp, "                               Needs to be a power of 2 for\n");
-        fprintf(ofp, "                               kernel and ust tracers\n");
+	fprintf(ofp, "      --subbuf-size SIZE   Subbuffer size in bytes {+k,+M,+G}\n");
+	fprintf(ofp, "                               (default UST uid: %zu, UST pid: %zu, kernel: %zu, metadata: %zu)\n",
+		default_get_ust_uid_channel_subbuf_size(),
+		default_get_ust_pid_channel_subbuf_size(),
+		default_get_kernel_channel_subbuf_size(),
+		default_get_metadata_subbuf_size());
+	fprintf(ofp, "                               Rounded up to the next power of 2.\n");
 	fprintf(ofp, "      --num-subbuf NUM     Number of subbufers\n");
-	fprintf(ofp, "                               (default: %u)\n",
-		DEFAULT_CHANNEL_SUBBUF_NUM);
-	fprintf(ofp, "                               Needs to be a power of 2 for\n");
-        fprintf(ofp, "                               kernel and ust tracers\n");
-	fprintf(ofp, "      --switch-timer USEC  Switch timer interval in usec (default: %u)\n",
-		DEFAULT_CHANNEL_SWITCH_TIMER);
-	fprintf(ofp, "      --read-timer USEC    Read timer interval in usec (default: %u)\n",
-		DEFAULT_CHANNEL_READ_TIMER);
+	fprintf(ofp, "                               (default UST uid: %u, UST pid: %u, kernel: %u, metadata: %u)\n",
+		DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM, DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM,
+		DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM, DEFAULT_METADATA_SUBBUF_NUM);
+	fprintf(ofp, "                               Rounded up to the next power of 2.\n");
+	fprintf(ofp, "      --switch-timer USEC  Switch timer interval in usec\n");
+	fprintf(ofp, "                               (default UST uid: %u, UST pid: %u, kernel: %u, metadata: %u)\n",
+		DEFAULT_UST_UID_CHANNEL_SWITCH_TIMER, DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER,
+		DEFAULT_KERNEL_CHANNEL_SWITCH_TIMER, DEFAULT_METADATA_SWITCH_TIMER);
+	fprintf(ofp, "      --read-timer USEC    Read timer interval in usec.\n");
+	fprintf(ofp, "                               (default UST uid: %u, UST pid: %u, kernel: %u, metadata: %u)\n",
+		DEFAULT_UST_UID_CHANNEL_READ_TIMER, DEFAULT_UST_UID_CHANNEL_READ_TIMER,
+		DEFAULT_KERNEL_CHANNEL_READ_TIMER, DEFAULT_METADATA_READ_TIMER);
 	fprintf(ofp, "      --output TYPE        Channel output type (Values: %s, %s)\n",
 			output_mmap, output_splice);
+	fprintf(ofp, "                               (default UST uid: %s, UST pid: %s, kernel: %s, metadata: %s)\n",
+			DEFAULT_UST_UID_CHANNEL_OUTPUT == LTTNG_EVENT_MMAP ? output_mmap : output_splice,
+			DEFAULT_UST_PID_CHANNEL_OUTPUT == LTTNG_EVENT_MMAP ? output_mmap : output_splice,
+			DEFAULT_KERNEL_CHANNEL_OUTPUT == LTTNG_EVENT_MMAP ? output_mmap : output_splice,
+			DEFAULT_METADATA_OUTPUT == LTTNG_EVENT_MMAP ? output_mmap : output_splice);
+	fprintf(ofp, "      --buffers-uid        Use per UID buffer (-u only)\n");
+	fprintf(ofp, "      --buffers-pid        Use per PID buffer (-u only)\n");
+	fprintf(ofp, "      --buffers-global     Use shared buffer for the whole system (-k only)\n");
+	fprintf(ofp, "  -C, --tracefile-size SIZE\n");
+	fprintf(ofp, "                           Maximum size of each tracefile within a stream (in bytes). 0 means unlimited.\n");
+	fprintf(ofp, "                               (default: %u)\n", DEFAULT_CHANNEL_TRACEFILE_SIZE);
+	fprintf(ofp, "  -W, --tracefile-count COUNT\n");
+	fprintf(ofp, "                           Used in conjunction with -C option, this will limit the number\n");
+	fprintf(ofp, "                           of files created to the specified count. 0 means unlimited.\n");
+	fprintf(ofp, "                               (default: %u)\n", DEFAULT_CHANNEL_TRACEFILE_COUNT);
 	fprintf(ofp, "\n");
 }
 
@@ -149,6 +172,12 @@ static void set_default_attr(struct lttng_domain *dom)
 	if (chan.attr.output == -1) {
 		chan.attr.output = default_attr.output;
 	}
+	if (chan.attr.tracefile_count == -1) {
+		chan.attr.tracefile_count = default_attr.tracefile_count;
+	}
+	if (chan.attr.tracefile_size == -1) {
+		chan.attr.tracefile_size = default_attr.tracefile_size;
+	}
 }
 
 /*
@@ -165,8 +194,24 @@ static int enable_channel(char *session_name)
 	/* Create lttng domain */
 	if (opt_kernel) {
 		dom.type = LTTNG_DOMAIN_KERNEL;
+		dom.buf_type = LTTNG_BUFFER_GLOBAL;
+		if (opt_buffer_uid || opt_buffer_pid) {
+			ERR("Buffer type not supported for domain -k");
+			ret = CMD_ERROR;
+			goto error;
+		}
 	} else if (opt_userspace) {
 		dom.type = LTTNG_DOMAIN_UST;
+		if (opt_buffer_pid) {
+			dom.buf_type = LTTNG_BUFFER_PER_PID;
+		} else {
+			if (opt_buffer_global) {
+				ERR("Buffer type not supported for domain -u");
+				ret = CMD_ERROR;
+				goto error;
+			}
+			dom.buf_type = LTTNG_BUFFER_PER_UID;
+		}
 	} else {
 		ERR("Please specify a tracer (-k/--kernel or -u/--userspace)");
 		ret = CMD_ERROR;
@@ -174,6 +219,20 @@ static int enable_channel(char *session_name)
 	}
 
 	set_default_attr(&dom);
+
+	if (chan.attr.tracefile_size == 0 && chan.attr.tracefile_count) {
+		ERR("Missing option --tracefile-size. "
+				"A file count without a size won't do anything.");
+		ret = CMD_ERROR;
+		goto error;
+	}
+
+	if ((chan.attr.tracefile_size > 0) &&
+			(chan.attr.tracefile_size < chan.attr.subbuf_size)) {
+		WARN("Tracefile size rounded up from (%" PRIu64 ") to subbuffer size (%" PRIu64 ")",
+				chan.attr.tracefile_size, chan.attr.subbuf_size);
+		chan.attr.tracefile_size = chan.attr.subbuf_size;
+	}
 
 	/* Setting channel output */
 	if (opt_output) {
@@ -210,7 +269,7 @@ static int enable_channel(char *session_name)
 			switch (-ret) {
 			case LTTNG_ERR_KERN_CHAN_EXIST:
 			case LTTNG_ERR_UST_CHAN_EXIST:
-				WARN("Channel %s: %s (session %s", channel_name,
+				WARN("Channel %s: %s (session %s)", channel_name,
 						lttng_strerror(ret), session_name);
 				goto error;
 			default:
@@ -261,6 +320,7 @@ int cmd_enable_channels(int argc, const char **argv)
 	int opt, ret = CMD_SUCCESS;
 	static poptContext pc;
 	char *session_name = NULL;
+	char *opt_arg = NULL;
 
 	init_channel_config();
 
@@ -281,28 +341,139 @@ int cmd_enable_channels(int argc, const char **argv)
 			DBG("Channel set to overwrite");
 			break;
 		case OPT_SUBBUF_SIZE:
-			/* TODO Replace atol with strtol and check for errors */
-			chan.attr.subbuf_size = atol(poptGetOptArg(pc));
+		{
+			uint64_t rounded_size;
+			int order;
+
+			/* Parse the size */
+			opt_arg = poptGetOptArg(pc);
+			if (utils_parse_size_suffix(opt_arg, &chan.attr.subbuf_size) < 0 || !chan.attr.subbuf_size) {
+				ERR("Wrong value in --subbuf-size parameter: %s", opt_arg);
+				ret = CMD_ERROR;
+				goto end;
+			}
+
+			order = get_count_order_u64(chan.attr.subbuf_size);
+			assert(order >= 0);
+			rounded_size = 1ULL << order;
+			if (rounded_size != chan.attr.subbuf_size) {
+				WARN("The subbuf size (%" PRIu64 ") is rounded to the next power of 2 (%" PRIu64 ")",
+						chan.attr.subbuf_size, rounded_size);
+				chan.attr.subbuf_size = rounded_size;
+			}
+
+			/* Should now be power of 2 */
+			assert(!((chan.attr.subbuf_size - 1) & chan.attr.subbuf_size));
+
 			DBG("Channel subbuf size set to %" PRIu64, chan.attr.subbuf_size);
 			break;
+		}
 		case OPT_NUM_SUBBUF:
-			/* TODO Replace atoi with strtol and check for errors */
-			chan.attr.num_subbuf = atoi(poptGetOptArg(pc));
+		{
+			uint64_t rounded_size;
+			int order;
+
+			errno = 0;
+			opt_arg = poptGetOptArg(pc);
+			chan.attr.num_subbuf = strtoull(opt_arg, NULL, 0);
+			if (errno != 0 || !chan.attr.num_subbuf || !isdigit(opt_arg[0])) {
+				ERR("Wrong value in --num-subbuf parameter: %s", opt_arg);
+				ret = CMD_ERROR;
+				goto end;
+			}
+
+			order = get_count_order_u64(chan.attr.num_subbuf);
+			assert(order >= 0);
+			rounded_size = 1ULL << order;
+			if (rounded_size != chan.attr.num_subbuf) {
+				WARN("The number of subbuffers (%" PRIu64 ") is rounded to the next power of 2 (%" PRIu64 ")",
+						chan.attr.num_subbuf, rounded_size);
+				chan.attr.num_subbuf = rounded_size;
+			}
+
+			/* Should now be power of 2 */
+			assert(!((chan.attr.num_subbuf - 1) & chan.attr.num_subbuf));
+
 			DBG("Channel subbuf num set to %" PRIu64, chan.attr.num_subbuf);
 			break;
+		}
 		case OPT_SWITCH_TIMER:
-			/* TODO Replace atoi with strtol and check for errors */
-			chan.attr.switch_timer_interval = atoi(poptGetOptArg(pc));
+		{
+			unsigned long v;
+
+			errno = 0;
+			opt_arg = poptGetOptArg(pc);
+			v = strtoul(opt_arg, NULL, 0);
+			if (errno != 0 || !isdigit(opt_arg[0])) {
+				ERR("Wrong value in --switch-timer parameter: %s", opt_arg);
+				ret = CMD_ERROR;
+				goto end;
+			}
+			if (v != (uint32_t) v) {
+				ERR("32-bit overflow in --switch-timer parameter: %s", opt_arg);
+				ret = CMD_ERROR;
+				goto end;
+			}
+			chan.attr.switch_timer_interval = (uint32_t) v;
 			DBG("Channel switch timer interval set to %d", chan.attr.switch_timer_interval);
 			break;
+		}
 		case OPT_READ_TIMER:
-			/* TODO Replace atoi with strtol and check for errors */
-			chan.attr.read_timer_interval = atoi(poptGetOptArg(pc));
+		{
+			unsigned long v;
+
+			errno = 0;
+			opt_arg = poptGetOptArg(pc);
+			v = strtoul(opt_arg, NULL, 0);
+			if (errno != 0 || !isdigit(opt_arg[0])) {
+				ERR("Wrong value in --read-timer parameter: %s", opt_arg);
+				ret = CMD_ERROR;
+				goto end;
+			}
+			if (v != (uint32_t) v) {
+				ERR("32-bit overflow in --read-timer parameter: %s", opt_arg);
+				ret = CMD_ERROR;
+				goto end;
+			}
+			chan.attr.read_timer_interval = (uint32_t) v;
 			DBG("Channel read timer interval set to %d", chan.attr.read_timer_interval);
 			break;
+		}
 		case OPT_USERSPACE:
 			opt_userspace = 1;
 			break;
+		case OPT_TRACEFILE_SIZE:
+			opt_arg = poptGetOptArg(pc);
+			if (utils_parse_size_suffix(opt_arg, &chan.attr.tracefile_size) < 0) {
+				ERR("Wrong value in --tracefile-size parameter: %s", opt_arg);
+				ret = CMD_ERROR;
+				goto end;
+			}
+			DBG("Maximum tracefile size set to %" PRIu64,
+					chan.attr.tracefile_size);
+			break;
+		case OPT_TRACEFILE_COUNT:
+		{
+			unsigned long v;
+
+			errno = 0;
+			opt_arg = poptGetOptArg(pc);
+			v = strtoul(opt_arg, NULL, 0);
+			if (errno != 0 || !isdigit(opt_arg[0])) {
+				ERR("Wrong value in --tracefile-count parameter: %s", opt_arg);
+				ret = CMD_ERROR;
+				goto end;
+			}
+			if (v != (uint32_t) v) {
+				ERR("32-bit overflow in --tracefile-count parameter: %s", opt_arg);
+				ret = CMD_ERROR;
+				goto end;
+			}
+			chan.attr.tracefile_count = (uint32_t) v;
+			DBG("Maximum tracefile count set to %" PRIu64,
+					chan.attr.tracefile_count);
+			break;
+		}
 		case OPT_LIST_OPTIONS:
 			list_cmd_options(stdout, long_options);
 			goto end;

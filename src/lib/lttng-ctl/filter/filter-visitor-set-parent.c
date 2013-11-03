@@ -29,6 +29,8 @@
 #include "filter-ast.h"
 #include "filter-parser.h"
 
+#include <common/macros.h>
+
 static
 int update_child(struct filter_node *parent,
 		struct filter_node *old_child,
@@ -91,7 +93,8 @@ int recursive_visit_set_parent(struct filter_node *node,
 			return -EINVAL;
 		case AST_EXP_NESTED:
 			return recursive_visit_set_parent(node->u.expression.u.child, node);
-		case AST_EXP_IDENTIFIER:
+		case AST_EXP_IDENTIFIER:	/* fall-through */
+		case AST_EXP_GLOBAL_IDENTIFIER:
 			{
 				struct filter_node *orig_node = node;
 
@@ -100,7 +103,8 @@ int recursive_visit_set_parent(struct filter_node *node,
 
 					prev = node->u.expression.prev;
 					if (prev->type != NODE_EXPRESSION ||
-						prev->u.expression.type != AST_EXP_IDENTIFIER) {
+						(prev->u.expression.type != AST_EXP_IDENTIFIER
+						&& prev->u.expression.type != AST_EXP_GLOBAL_IDENTIFIER)) {
 						fprintf(stderr, "[error] %s: expecting identifier before link\n", __func__);
 						return -EINVAL;
 					}
@@ -133,7 +137,7 @@ int recursive_visit_set_parent(struct filter_node *node,
 	return 0;
 }
 
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 int filter_visitor_set_parent(struct filter_parser_ctx *ctx)
 {
 	return recursive_visit_set_parent(&ctx->ast->root, NULL);

@@ -1,13 +1,29 @@
-SUBDIRS = . tools kernel
+SUBDIRS = utils regression unit stress
 
-AM_CFLAGS = -g -Wall
-AM_LDFLAGS = -lurcu -lurcu-cds
-
-EXTRA_DIST = run-report.py test_list.py utils.sh utils.h runall.sh
-
-if HAVE_LIBLTTNG_UST_CTL
-SUBDIRS += ust
-endif # HAVE_LIBLTTNG_UST_CTL
-
+if USE_PYTHON
 check-am:
-	./runall.sh
+	./run.sh unit_tests
+	./run.sh fast_regression
+	./run.sh with_bindings_regression
+else
+check-am:
+	./run.sh unit_tests
+	./run.sh fast_regression
+endif
+
+dist_noinst_SCRIPTS = run.sh unit_tests fast_regression long_regression root_regression with_bindings_regression
+EXTRA_DIST = run.sh unit_tests fast_regression long_regression root_regression with_bindings_regression
+
+all-local:
+	@if [ x"$(srcdir)" != x"$(builddir)" ]; then \
+		for script in $(EXTRA_DIST); do \
+			cp -f $(srcdir)/$$script $(builddir); \
+		done; \
+	fi
+
+clean-local:
+	@if [ x"$(srcdir)" != x"$(builddir)" ]; then \
+		for script in $(EXTRA_DIST); do \
+			rm -f $(builddir)/$$script; \
+		done; \
+	fi

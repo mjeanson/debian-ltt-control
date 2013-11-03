@@ -19,6 +19,7 @@
 #include <assert.h>
 
 #include <lttng/lttng-error.h>
+#include <common/common.h>
 
 #include "error.h"
 
@@ -39,7 +40,7 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_SESS_NOT_FOUND) ] = "Session name not found",
 	[ ERROR_INDEX(LTTNG_ERR_FATAL) ] = "Fatal error of the session daemon",
 	[ ERROR_INDEX(LTTNG_ERR_SELECT_SESS) ] = "A session MUST be selected",
-	[ ERROR_INDEX(LTTNG_ERR_EXIST_SESS) ] = "Session name already exist",
+	[ ERROR_INDEX(LTTNG_ERR_EXIST_SESS) ] = "Session name already exists",
 	[ ERROR_INDEX(LTTNG_ERR_NO_EVENT) ] = "Event not found",
 	[ ERROR_INDEX(LTTNG_ERR_CONNECT_FAIL) ] = "Unable to connect to Unix socket",
 	[ ERROR_INDEX(LTTNG_ERR_EPERM) ] = "Permission denied",
@@ -57,7 +58,7 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_KERN_DISABLE_FAIL) ] = "Disable kernel event failed",
 	[ ERROR_INDEX(LTTNG_ERR_KERN_META_FAIL) ] = "Opening metadata failed",
 	[ ERROR_INDEX(LTTNG_ERR_KERN_START_FAIL) ] = "Starting kernel trace failed",
-	[ ERROR_INDEX(LTTNG_ERR_KERN_STOP_FAIL) ] = "Stoping kernel trace failed",
+	[ ERROR_INDEX(LTTNG_ERR_KERN_STOP_FAIL) ] = "Stopping kernel trace failed",
 	[ ERROR_INDEX(LTTNG_ERR_KERN_CONSUMER_FAIL) ] = "Kernel consumer start failed",
 	[ ERROR_INDEX(LTTNG_ERR_KERN_STREAM_FAIL) ] = "Kernel create stream failed",
 	[ ERROR_INDEX(LTTNG_ERR_KERN_LIST_FAIL) ] = "Listing kernel events failed",
@@ -72,7 +73,7 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_UST_DISABLE_FAIL) ] = "Disable UST event failed",
 	[ ERROR_INDEX(LTTNG_ERR_UST_META_FAIL) ] = "Opening metadata failed",
 	[ ERROR_INDEX(LTTNG_ERR_UST_START_FAIL) ] = "Starting UST trace failed",
-	[ ERROR_INDEX(LTTNG_ERR_UST_STOP_FAIL) ] = "Stoping UST trace failed",
+	[ ERROR_INDEX(LTTNG_ERR_UST_STOP_FAIL) ] = "Stopping UST trace failed",
 	[ ERROR_INDEX(LTTNG_ERR_UST_CONSUMER64_FAIL) ] = "64-bit UST consumer start failed",
 	[ ERROR_INDEX(LTTNG_ERR_UST_CONSUMER32_FAIL) ] = "32-bit UST consumer start failed",
 	[ ERROR_INDEX(LTTNG_ERR_UST_STREAM_FAIL) ] = "UST create stream failed",
@@ -81,16 +82,18 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_UST_EVENT_NOT_FOUND)] = "UST event not found",
 	[ ERROR_INDEX(LTTNG_ERR_UST_CONTEXT_EXIST)] = "UST context already exist",
 	[ ERROR_INDEX(LTTNG_ERR_UST_CONTEXT_INVAL)] = "UST invalid context",
-	[ ERROR_INDEX(LTTNG_ERR_NEED_ROOT_SESSIOND) ] = "Tracing the kernel requires a root lttng-sessiond daemon and \"tracing\" group user membership",
+	[ ERROR_INDEX(LTTNG_ERR_NEED_ROOT_SESSIOND) ] = "Tracing the kernel requires a root lttng-sessiond daemon, as well as \"tracing\" group membership or root user ID for the lttng client.",
+	[ ERROR_INDEX(LTTNG_ERR_NO_UST) ] = "LTTng-UST tracer is not supported. Please rebuild lttng-tools with lttng-ust support enabled.",
 	[ ERROR_INDEX(LTTNG_ERR_TRACE_ALREADY_STARTED) ] = "Tracing already started",
 	[ ERROR_INDEX(LTTNG_ERR_TRACE_ALREADY_STOPPED) ] = "Tracing already stopped",
 	[ ERROR_INDEX(LTTNG_ERR_KERN_EVENT_ENOSYS) ] = "Kernel event type not supported",
+	[ ERROR_INDEX(LTTNG_ERR_NEED_CHANNEL_NAME) ] = "Non-default channel exists within session: channel name needs to be specified with '-c name'",
 	[ ERROR_INDEX(LTTNG_ERR_INVALID) ] = "Invalid parameter",
 	[ ERROR_INDEX(LTTNG_ERR_NO_USTCONSUMERD) ] = "No UST consumer detected",
 	[ ERROR_INDEX(LTTNG_ERR_NO_KERNCONSUMERD) ] = "No kernel consumer detected",
 	[ ERROR_INDEX(LTTNG_ERR_EVENT_EXIST_LOGLEVEL) ] = "Event already enabled with different loglevel",
 	[ ERROR_INDEX(LTTNG_ERR_URL_DATA_MISS) ] = "Missing data path URL",
-	[ ERROR_INDEX(LTTNG_ERR_URL_CTRL_MISS) ] = "Missing control data path URL",
+	[ ERROR_INDEX(LTTNG_ERR_URL_CTRL_MISS) ] = "Missing control path URL",
 	[ ERROR_INDEX(LTTNG_ERR_ENABLE_CONSUMER_FAIL) ] = "Enabling consumer failed",
 	[ ERROR_INDEX(LTTNG_ERR_RELAYD_CONNECT_FAIL) ] = "Unable to connect to lttng-relayd",
 	[ ERROR_INDEX(LTTNG_ERR_RELAYD_VERSION_FAIL) ] = "Relay daemon not compatible",
@@ -102,6 +105,14 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_SESSION_STARTED) ] = "Session is running",
 	[ ERROR_INDEX(LTTNG_ERR_NOT_SUPPORTED) ] = "Operation not supported",
 	[ ERROR_INDEX(LTTNG_ERR_UST_EVENT_ENABLED) ] = "UST event already enabled",
+	[ ERROR_INDEX(LTTNG_ERR_SET_URL) ] = "Error setting URL",
+	[ ERROR_INDEX(LTTNG_ERR_URL_EXIST) ] = "URL already exists",
+	[ ERROR_INDEX(LTTNG_ERR_BUFFER_NOT_SUPPORTED)] = "Buffer type not supported",
+	[ ERROR_INDEX(LTTNG_ERR_BUFFER_TYPE_MISMATCH)] = "Buffer type mismatch for session",
+	[ ERROR_INDEX(LTTNG_ERR_NOMEM)] = "Not enough memory",
+	[ ERROR_INDEX(LTTNG_ERR_SNAPSHOT_OUTPUT_EXIST) ] = "Snapshot output already exists",
+	[ ERROR_INDEX(LTTNG_ERR_START_SESSION_ONCE) ] = "Session needs to be started once",
+	[ ERROR_INDEX(LTTNG_ERR_SNAPSHOT_FAIL) ] = "Snapshot record failed",
 
 	/* Last element */
 	[ ERROR_INDEX(LTTNG_ERR_NR) ] = "Unknown error code"
@@ -113,7 +124,7 @@ static const char *error_string_array[] = {
  *
  * These code MUST be negative in other to treat that as an error value.
  */
-__attribute__((visibility("hidden")))
+LTTNG_HIDDEN
 const char *error_get_str(int32_t code)
 {
 	code = -code;

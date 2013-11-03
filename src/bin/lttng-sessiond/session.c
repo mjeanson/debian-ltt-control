@@ -17,6 +17,7 @@
 
 #define _GNU_SOURCE
 #include <limits.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,8 +55,10 @@ static struct ltt_session_list ltt_session_list = {
  * The caller MUST acquire the session list lock before.
  * Returns the unique identifier for the session.
  */
-static unsigned int add_session_list(struct ltt_session *ls)
+static uint64_t add_session_list(struct ltt_session *ls)
 {
+	assert(ls);
+
 	cds_list_add(&ls->list, &ltt_session_list.head);
 	return ltt_session_list.next_uuid++;
 }
@@ -67,6 +70,8 @@ static unsigned int add_session_list(struct ltt_session *ls)
  */
 static void del_session_list(struct ltt_session *ls)
 {
+	assert(ls);
+
 	cds_list_del(&ls->list);
 }
 
@@ -99,6 +104,8 @@ void session_unlock_list(void)
  */
 void session_lock(struct ltt_session *session)
 {
+	assert(session);
+
 	pthread_mutex_lock(&session->lock);
 }
 
@@ -107,6 +114,8 @@ void session_lock(struct ltt_session *session)
  */
 void session_unlock(struct ltt_session *session)
 {
+	assert(session);
+
 	pthread_mutex_unlock(&session->lock);
 }
 
@@ -118,6 +127,8 @@ void session_unlock(struct ltt_session *session)
 struct ltt_session *session_find_by_name(char *name)
 {
 	struct ltt_session *iter;
+
+	assert(name);
 
 	DBG2("Trying to find session by name %s", name);
 
@@ -137,22 +148,19 @@ found:
  * Delete session from the session list and free the memory.
  *
  * Return -1 if no session is found.  On success, return 1;
+ * Should *NOT* be called with RCU read-side lock held.
  */
 int session_destroy(struct ltt_session *session)
 {
 	/* Safety check */
-	if (session == NULL) {
-		ERR("Session pointer was null on session destroy");
-		return LTTNG_OK;
-	}
+	assert(session);
 
 	DBG("Destroying session %s", session->name);
 	del_session_list(session);
 	pthread_mutex_destroy(&session->lock);
 
-	rcu_read_lock();
 	consumer_destroy_output(session->consumer);
-	rcu_read_unlock();
+	snapshot_destroy(&session->snapshot);
 	free(session);
 
 	return LTTNG_OK;
@@ -161,7 +169,7 @@ int session_destroy(struct ltt_session *session)
 /*
  * Create a brand new session and add it to the session list.
  */
-int session_create(char *name, char *path, uid_t uid, gid_t gid)
+int session_create(char *name, uid_t uid, gid_t gid)
 {
 	int ret;
 	struct ltt_session *new_session;
@@ -186,19 +194,6 @@ int session_create(char *name, char *path, uid_t uid, gid_t gid)
 		goto error;
 	}
 
-	/* Define session system path */
-	if (path != NULL) {
-		if (snprintf(new_session->path, PATH_MAX, "%s", path) < 0) {
-			ret = LTTNG_ERR_FATAL;
-			goto error_asprintf;
-		}
-		new_session->start_consumer = 1;
-	} else {
-		/* No path indicates that there is no use for a consumer. */
-		new_session->start_consumer = 0;
-		new_session->path[0] = '\0';
-	}
-
 	/* Init kernel session */
 	new_session->kernel_session = NULL;
 	new_session->ust_session = NULL;
@@ -209,17 +204,10 @@ int session_create(char *name, char *path, uid_t uid, gid_t gid)
 	new_session->uid = uid;
 	new_session->gid = gid;
 
-	/* Mkdir if we have a valid path and length */
-	if (strlen(new_session->path) > 0) {
-		ret = run_as_mkdir_recursive(new_session->path, S_IRWXU | S_IRWXG,
-				new_session->uid, new_session->gid);
-		if (ret < 0) {
-			if (ret != -EEXIST) {
-				ERR("Trace directory creation error");
-				ret = LTTNG_ERR_CREATE_DIR_FAIL;
-				goto error;
-			}
-		}
+	ret = snapshot_init(&new_session->snapshot);
+	if (ret < 0) {
+		ret = LTTNG_ERR_NOMEM;
+		goto error;
 	}
 
 	/* Add new session to the session list */
@@ -232,16 +220,14 @@ int session_create(char *name, char *path, uid_t uid, gid_t gid)
 	 * up and, if valid, assign it to the session.
 	 */
 
-	DBG("Tracing session %s created in %s with ID %u by UID %d GID %d", name,
-			path, new_session->id, new_session->uid, new_session->gid);
+	DBG("Tracing session %s created with ID %" PRIu64 " by UID %d GID %d",
+			name, new_session->id, new_session->uid, new_session->gid);
 
 	return LTTNG_OK;
 
 error:
 error_asprintf:
-	if (new_session != NULL) {
-		free(new_session);
-	}
+	free(new_session);
 
 error_malloc:
 	return ret;

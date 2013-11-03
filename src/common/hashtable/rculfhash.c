@@ -570,6 +570,7 @@ void cds_lfht_resize_lazy_count(struct cds_lfht *ht, unsigned long size,
 
 static long nr_cpus_mask = -1;
 static long split_count_mask = -1;
+static int split_count_order = -1;
 
 #if defined(HAVE_SYSCONF)
 static void ht_init_nr_cpus_mask(void)
@@ -606,6 +607,8 @@ void alloc_split_items_count(struct cds_lfht *ht)
 			split_count_mask = DEFAULT_SPLIT_COUNT_MASK;
 		else
 			split_count_mask = nr_cpus_mask;
+		split_count_order =
+			cds_lfht_get_count_order_ulong(split_count_mask + 1);
 	}
 
 	assert(split_count_mask >= 0);
@@ -721,14 +724,39 @@ void check_resize(struct cds_lfht *ht, unsigned long size, uint32_t chain_len)
 	 * Use bucket-local length for small table expand and for
 	 * environments lacking per-cpu data support.
 	 */
-	if (count >= (1UL << COUNT_COMMIT_ORDER))
+	if (count >= (1UL << (COUNT_COMMIT_ORDER + split_count_order)))
 		return;
 	if (chain_len > 100)
 		dbg_printf("WARNING: large chain length: %u.\n",
 			   chain_len);
-	if (chain_len >= CHAIN_LEN_RESIZE_THRESHOLD)
-		cds_lfht_resize_lazy_grow(ht, size,
-			cds_lfht_get_count_order_u32(chain_len - (CHAIN_LEN_TARGET - 1)));
+	if (chain_len >= CHAIN_LEN_RESIZE_THRESHOLD) {
+		int growth;
+
+		/*
+		 * Ideal growth calculated based on chain length.
+		 */
+		growth = cds_lfht_get_count_order_u32(chain_len
+				- (CHAIN_LEN_TARGET - 1));
+		if ((ht->flags & CDS_LFHT_ACCOUNTING)
+				&& (size << growth)
+					>= (1UL << (COUNT_COMMIT_ORDER
+						+ split_count_order))) {
+			/*
+			 * If ideal growth expands the hash table size
+			 * beyond the "small hash table" sizes, use the
+			 * maximum small hash table size to attempt
+			 * expanding the hash table. This only applies
+			 * when node accounting is available, otherwise
+			 * the chain length is used to expand the hash
+			 * table in every case.
+			 */
+			growth = COUNT_COMMIT_ORDER + split_count_order
+				- cds_lfht_get_count_order_ulong(size);
+			if (growth <= 0)
+				return;
+		}
+		cds_lfht_resize_lazy_grow(ht, size, growth);
+	}
 }
 
 static
@@ -1733,10 +1761,25 @@ int cds_lfht_delete_bucket(struct cds_lfht *ht)
 int cds_lfht_destroy(struct cds_lfht *ht, pthread_attr_t **attr)
 {
 	int ret;
+#ifdef rcu_read_ongoing_mb
+	int was_online;
+#endif
 
 	/* Wait for in-flight resize operations to complete */
 	_CMM_STORE_SHARED(ht->in_progress_destroy, 1);
 	cmm_smp_mb();	/* Store destroy before load resize */
+#ifdef rcu_read_ongoing_mb
+	was_online = ht->flavor->read_ongoing();
+	if (was_online)
+		ht->flavor->thread_offline();
+	/* Calling with RCU read-side held is an error. */
+	if (ht->flavor->read_ongoing()) {
+		ret = -EINVAL;
+		if (was_online)
+			ht->flavor->thread_online();
+		goto end;
+	}
+#endif
 	while (uatomic_read(&ht->in_progress_resize))
 		poll(NULL, 0, 100);	/* wait for 100ms */
 	ret = cds_lfht_delete_bucket(ht);
@@ -1746,6 +1789,9 @@ int cds_lfht_destroy(struct cds_lfht *ht, pthread_attr_t **attr)
 	if (attr)
 		*attr = ht->resize_attr;
 	poison_free(ht);
+#ifdef rcu_read_ongoing_mb
+end:
+#endif
 	return ret;
 }
 
@@ -1874,13 +1920,34 @@ void resize_target_update_count(struct cds_lfht *ht,
 
 void cds_lfht_resize(struct cds_lfht *ht, unsigned long new_size)
 {
+#ifdef rcu_read_ongoing_mb
+	int was_online;
+
+	was_online = ht->flavor->read_ongoing();
+	if (was_online)
+		ht->flavor->thread_offline();
+	/* Calling with RCU read-side held is an error. */
+	if (ht->flavor->read_ongoing()) {
+		static int print_once;
+
+		if (!CMM_LOAD_SHARED(print_once))
+			fprintf(stderr, "[error] rculfhash: cds_lfht_resize "
+				"called with RCU read-side lock held.\n");
+		CMM_STORE_SHARED(print_once, 1);
+		assert(0);
+		goto end;
+	}
+#endif
 	resize_target_update_count(ht, new_size);
 	CMM_STORE_SHARED(ht->resize_initiated, 1);
-	ht->flavor->thread_offline();
 	pthread_mutex_lock(&ht->resize_mutex);
 	_do_cds_lfht_resize(ht);
 	pthread_mutex_unlock(&ht->resize_mutex);
-	ht->flavor->thread_online();
+#ifdef rcu_read_ongoing_mb
+end:
+	if (was_online)
+		ht->flavor->thread_online();
+#endif
 }
 
 static

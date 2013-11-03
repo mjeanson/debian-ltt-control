@@ -20,11 +20,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <common/common.h>
 #include <common/defaults.h>
 
+#include "buffer-registry.h"
 #include "trace-ust.h"
+#include "utils.h"
 
 /*
  * Match function for the events hash table lookup.
@@ -116,7 +119,8 @@ no_match:
 }
 
 /*
- * Find the channel in the hashtable.
+ * Find the channel in the hashtable and return channel pointer. RCU read side
+ * lock MUST be acquired before calling this.
  */
 struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 		char *name)
@@ -124,14 +128,18 @@ struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
 
-	rcu_read_lock();
+	/*
+	 * If we receive an empty string for channel name, it means the
+	 * default channel name is requested.
+	 */
+	if (name[0] == '\0')
+		name = DEFAULT_CHANNEL_NAME;
+
 	lttng_ht_lookup(ht, (void *)name, &iter);
 	node = lttng_ht_iter_get_node_str(&iter);
 	if (node == NULL) {
-		rcu_read_unlock();
 		goto error;
 	}
-	rcu_read_unlock();
 
 	DBG2("Trace UST channel %s found by name", name);
 
@@ -143,7 +151,8 @@ error:
 }
 
 /*
- * Find the event in the hashtable.
+ * Find the event in the hashtable and return event pointer. RCU read side lock
+ * MUST be acquired before calling this.
  */
 struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
 		char *name, struct lttng_filter_bytecode *filter, int loglevel)
@@ -180,8 +189,7 @@ error:
  *
  * Return pointer to structure or NULL.
  */
-struct ltt_ust_session *trace_ust_create_session(char *path,
-		unsigned int session_id, struct lttng_domain *domain)
+struct ltt_ust_session *trace_ust_create_session(uint64_t session_id)
 {
 	struct ltt_ust_session *lus;
 
@@ -196,9 +204,17 @@ struct ltt_ust_session *trace_ust_create_session(char *path,
 	lus->id = session_id;
 	lus->start_trace = 0;
 
-	/* Alloc UST domain hash tables */
-	lus->domain_pid = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
-	lus->domain_exec = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
+	/*
+	 * Default buffer type. This can be changed through an enable channel
+	 * requesting a different type. Note that this can only be changed once
+	 * during the session lifetime which is at the first enable channel and
+	 * only before start. The flag buffer_type_changed indicates the status.
+	 */
+	lus->buffer_type = LTTNG_BUFFER_PER_UID;
+	/* Once set to 1, the buffer_type is immutable for the session. */
+	lus->buffer_type_changed = 0;
+	/* Init it in case it get used after allocation. */
+	CDS_INIT_LIST_HEAD(&lus->buffer_reg_uid_list);
 
 	/* Alloc UST global domain channels' HT */
 	lus->domain_global.channels = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
@@ -216,36 +232,12 @@ struct ltt_ust_session *trace_ust_create_session(char *path,
 	 */
 	lus->tmp_consumer = NULL;
 
-	/* Use the default consumer output which is the tracing session path. */
-	if (path && strlen(path) > 0) {
-		int ret;
-
-		ret = snprintf(lus->consumer->dst.trace_path, PATH_MAX,
-				"%s" DEFAULT_UST_TRACE_DIR, path);
-		if (ret < 0) {
-			PERROR("snprintf UST consumer trace path");
-			goto error_path;
-		}
-
-		/* Set session path */
-		ret = snprintf(lus->pathname, PATH_MAX, "%s" DEFAULT_UST_TRACE_DIR,
-				path);
-		if (ret < 0) {
-			PERROR("snprintf kernel traces path");
-			goto error_path;
-		}
-	}
-
 	DBG2("UST trace session create successful");
 
 	return lus;
 
-error_path:
-	consumer_destroy_output(lus->consumer);
 error_consumer:
-	lttng_ht_destroy(lus->domain_global.channels);
-	lttng_ht_destroy(lus->domain_exec);
-	lttng_ht_destroy(lus->domain_pid);
+	ht_cleanup_push(lus->domain_global.channels);
 	free(lus);
 error:
 	return NULL;
@@ -256,11 +248,11 @@ error:
  *
  * Return pointer to structure or NULL.
  */
-struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *chan,
-		char *path)
+struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *chan)
 {
-	int ret;
 	struct ltt_ust_channel *luc;
+
+	assert(chan);
 
 	luc = zmalloc(sizeof(struct ltt_ust_channel));
 	if (luc == NULL) {
@@ -283,33 +275,34 @@ struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *chan,
 		break;
 	}
 
-	/* Copy channel name */
-	strncpy(luc->name, chan->name, sizeof(luc->name));
+	/*
+	 * If we receive an empty string for channel name, it means the
+	 * default channel name is requested.
+	 */
+	if (chan->name[0] == '\0') {
+		strncpy(luc->name, DEFAULT_CHANNEL_NAME, sizeof(luc->name));
+	} else {
+		/* Copy channel name */
+		strncpy(luc->name, chan->name, sizeof(luc->name));
+	}
 	luc->name[LTTNG_UST_SYM_NAME_LEN - 1] = '\0';
 
 	/* Init node */
 	lttng_ht_node_init_str(&luc->node, luc->name);
+	CDS_INIT_LIST_HEAD(&luc->ctx_list);
+
 	/* Alloc hash tables */
 	luc->events = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
 	luc->ctx = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
 
-	/* Set trace output path */
-	ret = snprintf(luc->pathname, PATH_MAX, "%s", path);
-	if (ret < 0) {
-		PERROR("asprintf ust create channel");
-		goto error_free_channel;
-	}
+	/* On-disk circular buffer parameters */
+	luc->tracefile_size = chan->attr.tracefile_size;
+	luc->tracefile_count = chan->attr.tracefile_count;
 
 	DBG2("Trace UST channel %s created", luc->name);
 
-	return luc;
-
-error_free_channel:
-	lttng_ht_destroy(luc->ctx);
-	lttng_ht_destroy(luc->events);
-	free(luc);
 error:
-	return NULL;
+	return luc;
 }
 
 /*
@@ -321,6 +314,8 @@ struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
 		struct lttng_filter_bytecode *filter)
 {
 	struct ltt_ust_event *lue;
+
+	assert(ev);
 
 	lue = zmalloc(sizeof(struct ltt_ust_event));
 	if (lue == NULL) {
@@ -396,6 +391,8 @@ struct ltt_ust_metadata *trace_ust_create_metadata(char *path)
 	int ret;
 	struct ltt_ust_metadata *lum;
 
+	assert(path);
+
 	lum = zmalloc(sizeof(struct ltt_ust_metadata));
 	if (lum == NULL) {
 		PERROR("ust metadata zmalloc");
@@ -406,13 +403,13 @@ struct ltt_ust_metadata *trace_ust_create_metadata(char *path)
 	lum->attr.overwrite = DEFAULT_CHANNEL_OVERWRITE;
 	lum->attr.subbuf_size = default_get_metadata_subbuf_size();
 	lum->attr.num_subbuf = DEFAULT_METADATA_SUBBUF_NUM;
-	lum->attr.switch_timer_interval = DEFAULT_CHANNEL_SWITCH_TIMER;
-	lum->attr.read_timer_interval = DEFAULT_CHANNEL_READ_TIMER;
+	lum->attr.switch_timer_interval = DEFAULT_METADATA_SWITCH_TIMER;
+	lum->attr.read_timer_interval = DEFAULT_METADATA_READ_TIMER;
 	lum->attr.output = LTTNG_UST_MMAP;
 
 	lum->handle = -1;
 	/* Set metadata trace path */
-	ret = snprintf(lum->pathname, PATH_MAX, "%s/metadata", path);
+	ret = snprintf(lum->pathname, PATH_MAX, "%s/" DEFAULT_METADATA_NAME, path);
 	if (ret < 0) {
 		PERROR("asprintf ust metadata");
 		goto error_free_metadata;
@@ -437,6 +434,8 @@ struct ltt_ust_context *trace_ust_create_context(
 	struct ltt_ust_context *uctx;
 	enum lttng_ust_context_type utype;
 
+	assert(ctx);
+
 	switch (ctx->ctx) {
 	case LTTNG_EVENT_CONTEXT_VTID:
 		utype = LTTNG_UST_CONTEXT_VTID;
@@ -449,6 +448,9 @@ struct ltt_ust_context *trace_ust_create_context(
 		break;
 	case LTTNG_EVENT_CONTEXT_PROCNAME:
 		utype = LTTNG_UST_CONTEXT_PROCNAME;
+		break;
+	case LTTNG_EVENT_CONTEXT_IP:
+		utype = LTTNG_UST_CONTEXT_IP;
 		break;
 	default:
 		ERR("Invalid UST context");
@@ -463,6 +465,7 @@ struct ltt_ust_context *trace_ust_create_context(
 
 	uctx->ctx.ctx = utype;
 	lttng_ht_node_init_ulong(&uctx->node, (unsigned long) uctx->ctx.ctx);
+	CDS_INIT_LIST_HEAD(&uctx->list);
 
 	return uctx;
 
@@ -491,15 +494,24 @@ static void destroy_contexts(struct lttng_ht *ht)
 	int ret;
 	struct lttng_ht_node_ulong *node;
 	struct lttng_ht_iter iter;
+	struct ltt_ust_context *ctx;
 
+	assert(ht);
+
+	rcu_read_lock();
 	cds_lfht_for_each_entry(ht->ht, &iter.iter, node, node) {
+		/* Remove from ordered list. */
+		ctx = caa_container_of(node, struct ltt_ust_context, node);
+		cds_list_del(&ctx->list);
+		/* Remove from channel's hash table. */
 		ret = lttng_ht_del(ht, &iter);
 		if (!ret) {
 			call_rcu(&node->head, destroy_context_rcu);
 		}
 	}
+	rcu_read_unlock();
 
-	lttng_ht_destroy(ht);
+	ht_cleanup_push(ht);
 }
 
 /*
@@ -507,6 +519,8 @@ static void destroy_contexts(struct lttng_ht *ht)
  */
 void trace_ust_destroy_event(struct ltt_ust_event *event)
 {
+	assert(event);
+
 	DBG2("Trace destroy UST event %s", event->attr.name);
 	free(event->filter);
 	free(event);
@@ -534,23 +548,29 @@ static void destroy_events(struct lttng_ht *events)
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
 
+	assert(events);
+
+	rcu_read_lock();
 	cds_lfht_for_each_entry(events->ht, &iter.iter, node, node) {
 		ret = lttng_ht_del(events, &iter);
 		assert(!ret);
 		call_rcu(&node->head, destroy_event_rcu);
 	}
+	rcu_read_unlock();
 
-	lttng_ht_destroy(events);
+	ht_cleanup_push(events);
 }
 
 /*
  * Cleanup ust channel structure.
+ *
+ * Should _NOT_ be called with RCU read lock held.
  */
-void trace_ust_destroy_channel(struct ltt_ust_channel *channel)
+static void _trace_ust_destroy_channel(struct ltt_ust_channel *channel)
 {
-	DBG2("Trace destroy UST channel %s", channel->name);
+	assert(channel);
 
-	rcu_read_lock();
+	DBG2("Trace destroy UST channel %s", channel->name);
 
 	/* Destroying all events of the channel */
 	destroy_events(channel->events);
@@ -558,8 +578,6 @@ void trace_ust_destroy_channel(struct ltt_ust_channel *channel)
 	destroy_contexts(channel->ctx);
 
 	free(channel);
-
-	rcu_read_unlock();
 }
 
 /*
@@ -572,7 +590,29 @@ static void destroy_channel_rcu(struct rcu_head *head)
 	struct ltt_ust_channel *channel =
 		caa_container_of(node, struct ltt_ust_channel, node);
 
-	trace_ust_destroy_channel(channel);
+	_trace_ust_destroy_channel(channel);
+}
+
+void trace_ust_destroy_channel(struct ltt_ust_channel *channel)
+{
+	call_rcu(&channel->node.head, destroy_channel_rcu);
+}
+
+/*
+ * Remove an UST channel from a channel HT.
+ */
+void trace_ust_delete_channel(struct lttng_ht *ht,
+		struct ltt_ust_channel *channel)
+{
+	int ret;
+	struct lttng_ht_iter iter;
+
+	assert(ht);
+	assert(channel);
+
+	iter.iter.node = &channel->node.node;
+	ret = lttng_ht_del(ht, &iter);
+	assert(!ret);
 }
 
 /*
@@ -580,6 +620,8 @@ static void destroy_channel_rcu(struct rcu_head *head)
  */
 void trace_ust_destroy_metadata(struct ltt_ust_metadata *metadata)
 {
+	assert(metadata);
+
 	if (!metadata->handle) {
 		return;
 	}
@@ -596,6 +638,8 @@ static void destroy_channels(struct lttng_ht *channels)
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
 
+	assert(channels);
+
 	rcu_read_lock();
 
 	cds_lfht_for_each_entry(channels->ht, &iter.iter, node, node) {
@@ -603,46 +647,9 @@ static void destroy_channels(struct lttng_ht *channels)
 		assert(!ret);
 		call_rcu(&node->head, destroy_channel_rcu);
 	}
-
-	lttng_ht_destroy(channels);
-
 	rcu_read_unlock();
-}
 
-/*
- * Cleanup UST pid domain.
- */
-static void destroy_domain_pid(struct lttng_ht *ht)
-{
-	int ret;
-	struct lttng_ht_iter iter;
-	struct ltt_ust_domain_pid *dpid;
-
-	cds_lfht_for_each_entry(ht->ht, &iter.iter, dpid, node.node) {
-		ret = lttng_ht_del(ht , &iter);
-		assert(!ret);
-		destroy_channels(dpid->channels);
-	}
-
-	lttng_ht_destroy(ht);
-}
-
-/*
- * Cleanup UST exec name domain.
- */
-static void destroy_domain_exec(struct lttng_ht *ht)
-{
-	int ret;
-	struct lttng_ht_iter iter;
-	struct ltt_ust_domain_exec *dexec;
-
-	cds_lfht_for_each_entry(ht->ht, &iter.iter, dexec, node.node) {
-		ret = lttng_ht_del(ht , &iter);
-		assert(!ret);
-		destroy_channels(dexec->channels);
-	}
-
-	lttng_ht_destroy(ht);
+	ht_cleanup_push(channels);
 }
 
 /*
@@ -650,32 +657,37 @@ static void destroy_domain_exec(struct lttng_ht *ht)
  */
 static void destroy_domain_global(struct ltt_ust_domain_global *dom)
 {
+	assert(dom);
+
 	destroy_channels(dom->channels);
 }
 
 /*
  * Cleanup ust session structure
+ *
+ * Should *NOT* be called with RCU read-side lock held.
  */
 void trace_ust_destroy_session(struct ltt_ust_session *session)
 {
-	/* Extra protection */
-	if (session == NULL) {
-		return;
-	}
+	struct buffer_reg_uid *reg, *sreg;
 
-	rcu_read_lock();
+	assert(session);
 
-	DBG2("Trace UST destroy session %u", session->id);
+	DBG2("Trace UST destroy session %" PRIu64, session->id);
 
 	/* Cleaning up UST domain */
 	destroy_domain_global(&session->domain_global);
-	destroy_domain_pid(session->domain_pid);
-	destroy_domain_exec(session->domain_exec);
+
+	/* Cleanup UID buffer registry object(s). */
+	cds_list_for_each_entry_safe(reg, sreg, &session->buffer_reg_uid_list,
+			lnode) {
+		cds_list_del(&reg->lnode);
+		buffer_reg_uid_remove(reg);
+		buffer_reg_uid_destroy(reg, session->consumer);
+	}
 
 	consumer_destroy_output(session->consumer);
 	consumer_destroy_output(session->tmp_consumer);
 
 	free(session);
-
-	rcu_read_unlock();
 }

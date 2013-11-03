@@ -22,6 +22,7 @@
 #define _LGPL_SOURCE
 #include <urcu.h>
 #include <urcu/wfqueue.h>
+#include <common/hashtable/hashtable.h>
 
 /*
  * Queue used to enqueue relay requests
@@ -60,6 +61,14 @@ struct relay_stream {
 	struct rcu_head rcu_node;
 	int fd;
 
+	char *path_name;
+	char *channel_name;
+	/* on-disk circular buffer of tracefiles */
+	uint64_t tracefile_size;
+	uint64_t tracefile_size_current;
+	uint64_t tracefile_count;
+	uint64_t tracefile_count_current;
+
 	/* Information telling us when to close the stream  */
 	unsigned int close_flag:1;
 	uint64_t last_net_seq_num;
@@ -79,6 +88,11 @@ struct relay_command {
 	struct rcu_head rcu_node;
 	enum connection_type type;
 	unsigned int version_check_done:1;
+	/* protocol version to use for this session */
+	uint32_t major;
+	uint32_t minor;
 };
+
+extern char *opt_output_path;
 
 #endif /* LTTNG_RELAYD_H */

@@ -20,7 +20,28 @@
 
 #include <popt.h>
 
+struct cmd_struct;
+
 char *get_session_name(void);
+void list_commands(struct cmd_struct *commands, FILE *ofp);
 void list_cmd_options(FILE *ofp, struct poptOption *options);
+
+/*
+ * Return the minimum order for which x <= (1UL << order).
+ * Return -1 if x is 0.
+ */
+int get_count_order_u32(uint32_t x);
+
+/*
+ * Return the minimum order for which x <= (1UL << order).
+ * Return -1 if x is 0.
+ */
+int get_count_order_u64(uint64_t x);
+
+/*
+ * Return the minimum order for which x <= (1UL << order).
+ * Return -1 if x is 0.
+ */
+int get_count_order_ulong(unsigned long x);
 
 #endif /* _LTTNG_UTILS_H */

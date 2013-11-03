@@ -1,6 +1,8 @@
 AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src \
 			  -DINSTALL_BIN_PATH=\""$(bindir)"\"
 
+AUTOMAKE_OPTIONS = subdir-objects
+
 bin_PROGRAMS = lttng
 
 lttng_SOURCES = command.h conf.c conf.h commands/start.c \
@@ -11,6 +13,7 @@ lttng_SOURCES = command.h conf.c conf.h commands/start.c \
 				commands/set_session.c commands/version.c \
 				commands/calibrate.c commands/view.c \
 				commands/enable_consumer.c commands/disable_consumer.c \
+				commands/snapshot.c \
 				utils.c utils.h lttng.c
 
 lttng_LDADD = $(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \

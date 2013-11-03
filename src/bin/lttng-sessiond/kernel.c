@@ -30,6 +30,7 @@
 
 #include "consumer.h"
 #include "kernel.h"
+#include "kernel-consumer.h"
 #include "kern-modules.h"
 
 /*
@@ -39,6 +40,9 @@ int kernel_add_channel_context(struct ltt_kernel_channel *chan,
 		struct lttng_kernel_context *ctx)
 {
 	int ret;
+
+	assert(chan);
+	assert(ctx);
 
 	DBG("Adding context to channel %s", chan->channel->name);
 	ret = kernctl_add_context(chan->fd, ctx);
@@ -75,8 +79,10 @@ int kernel_create_session(struct ltt_session *session, int tracer_fd)
 	int ret;
 	struct ltt_kernel_session *lks;
 
+	assert(session);
+
 	/* Allocate data structure */
-	lks = trace_kernel_create_session(session->path);
+	lks = trace_kernel_create_session();
 	if (lks == NULL) {
 		ret = -1;
 		goto error;
@@ -105,6 +111,9 @@ int kernel_create_session(struct ltt_session *session, int tracer_fd)
 	return 0;
 
 error:
+	if (lks) {
+		trace_kernel_destroy_session(lks);
+	}
 	return ret;
 }
 
@@ -113,19 +122,22 @@ error:
  * kernel session.
  */
 int kernel_create_channel(struct ltt_kernel_session *session,
-		struct lttng_channel *chan, char *path)
+		struct lttng_channel *chan)
 {
 	int ret;
 	struct ltt_kernel_channel *lkc;
 
+	assert(session);
+	assert(chan);
+
 	/* Allocate kernel channel */
-	lkc = trace_kernel_create_channel(chan, path);
+	lkc = trace_kernel_create_channel(chan);
 	if (lkc == NULL) {
 		goto error;
 	}
 
-	DBG3("Kernel create channel %s in %s with attr: %d, %" PRIu64 ", %" PRIu64 ", %u, %u, %d",
-			chan->name, path, lkc->channel->attr.overwrite,
+	DBG3("Kernel create channel %s with attr: %d, %" PRIu64 ", %" PRIu64 ", %u, %u, %d",
+			chan->name, lkc->channel->attr.overwrite,
 			lkc->channel->attr.subbuf_size, lkc->channel->attr.num_subbuf,
 			lkc->channel->attr.switch_timer_interval, lkc->channel->attr.read_timer_interval,
 			lkc->channel->attr.output);
@@ -148,12 +160,17 @@ int kernel_create_channel(struct ltt_kernel_session *session,
 	/* Add channel to session */
 	cds_list_add(&lkc->list, &session->channel_list.head);
 	session->channel_count++;
+	lkc->session = session;
 
 	DBG("Kernel channel %s created (fd: %d)", lkc->channel->name, lkc->fd);
 
 	return 0;
 
 error:
+	if (lkc) {
+		free(lkc->channel);
+		free(lkc);
+	}
 	return -1;
 }
 
@@ -166,6 +183,9 @@ int kernel_create_event(struct lttng_event *ev,
 {
 	int ret;
 	struct ltt_kernel_event *event;
+
+	assert(ev);
+	assert(channel);
 
 	event = trace_kernel_create_event(ev);
 	if (event == NULL) {
@@ -230,6 +250,8 @@ int kernel_disable_channel(struct ltt_kernel_channel *chan)
 {
 	int ret;
 
+	assert(chan);
+
 	ret = kernctl_disable(chan->fd);
 	if (ret < 0) {
 		PERROR("disable chan ioctl");
@@ -253,6 +275,8 @@ int kernel_enable_channel(struct ltt_kernel_channel *chan)
 {
 	int ret;
 
+	assert(chan);
+
 	ret = kernctl_enable(chan->fd);
 	if (ret < 0 && errno != EEXIST) {
 		PERROR("Enable kernel chan");
@@ -274,6 +298,8 @@ error:
 int kernel_enable_event(struct ltt_kernel_event *event)
 {
 	int ret;
+
+	assert(event);
 
 	ret = kernctl_enable(event->fd);
 	if (ret < 0) {
@@ -304,6 +330,8 @@ int kernel_disable_event(struct ltt_kernel_event *event)
 {
 	int ret;
 
+	assert(event);
+
 	ret = kernctl_disable(event->fd);
 	if (ret < 0) {
 		switch (errno) {
@@ -333,7 +361,9 @@ error:
 int kernel_open_metadata(struct ltt_kernel_session *session)
 {
 	int ret;
-	struct ltt_kernel_metadata *lkm;
+	struct ltt_kernel_metadata *lkm = NULL;
+
+	assert(session);
 
 	/* Allocate kernel metadata */
 	lkm = trace_kernel_create_metadata();
@@ -344,7 +374,7 @@ int kernel_open_metadata(struct ltt_kernel_session *session)
 	/* Kernel tracer metadata creation */
 	ret = kernctl_open_metadata(session->fd, &lkm->conf->attr);
 	if (ret < 0) {
-		goto error;
+		goto error_open;
 	}
 
 	lkm->fd = ret;
@@ -360,6 +390,8 @@ int kernel_open_metadata(struct ltt_kernel_session *session)
 
 	return 0;
 
+error_open:
+	trace_kernel_destroy_metadata(lkm);
 error:
 	return -1;
 }
@@ -370,6 +402,8 @@ error:
 int kernel_start_session(struct ltt_kernel_session *session)
 {
 	int ret;
+
+	assert(session);
 
 	ret = kernctl_start_session(session->fd);
 	if (ret < 0) {
@@ -408,6 +442,8 @@ int kernel_calibrate(int fd, struct lttng_kernel_calibrate *calibrate)
 {
 	int ret;
 
+	assert(calibrate);
+
 	ret = kernctl_calibrate(fd, calibrate);
 	if (ret < 0) {
 		PERROR("calibrate ioctl");
@@ -425,6 +461,8 @@ int kernel_metadata_flush_buffer(int fd)
 {
 	int ret;
 
+	DBG("Kernel flushing metadata buffer on fd %d", fd);
+
 	ret = kernctl_buffer_flush(fd);
 	if (ret < 0) {
 		ERR("Fail to flush metadata buffers %d (ret: %d)", fd, ret);
@@ -440,6 +478,8 @@ int kernel_flush_buffer(struct ltt_kernel_channel *channel)
 {
 	int ret;
 	struct ltt_kernel_stream *stream;
+
+	assert(channel);
 
 	DBG("Flush buffer for channel %s", channel->channel->name);
 
@@ -462,6 +502,8 @@ int kernel_flush_buffer(struct ltt_kernel_channel *channel)
 int kernel_stop_session(struct ltt_kernel_session *session)
 {
 	int ret;
+
+	assert(session);
 
 	ret = kernctl_stop_session(session->fd);
 	if (ret < 0) {
@@ -487,6 +529,8 @@ int kernel_open_channel_stream(struct ltt_kernel_channel *channel)
 	int ret, count = 0;
 	struct ltt_kernel_stream *lks;
 
+	assert(channel);
+
 	while ((ret = kernctl_create_stream(channel->fd)) >= 0) {
 		lks = trace_kernel_create_stream(channel->channel->name, count);
 		if (lks == NULL) {
@@ -503,6 +547,9 @@ int kernel_open_channel_stream(struct ltt_kernel_channel *channel)
 		if (ret < 0) {
 			PERROR("fcntl session fd");
 		}
+
+		lks->tracefile_size = channel->channel->attr.tracefile_size;
+		lks->tracefile_count = channel->channel->attr.tracefile_count;
 
 		/* Add stream to channe stream list */
 		cds_list_add(&lks->list, &channel->stream_list.head);
@@ -527,6 +574,8 @@ error:
 int kernel_open_metadata_stream(struct ltt_kernel_session *session)
 {
 	int ret;
+
+	assert(session);
 
 	ret = kernctl_create_stream(session->metadata->fd);
 	if (ret < 0) {
@@ -558,6 +607,8 @@ ssize_t kernel_list_events(int tracer_fd, struct lttng_event **events)
 	size_t nbmem, count = 0;
 	FILE *fp;
 	struct lttng_event *elist;
+
+	assert(events);
 
 	fd = kernctl_tracepoint_list(tracer_fd);
 	if (fd < 0) {
@@ -703,8 +754,193 @@ void kernel_destroy_session(struct ltt_kernel_session *ksess)
 
 	DBG("Tearing down kernel session");
 
+	/*
+	 * Destroy channels on the consumer if in no output mode because the
+	 * streams are in *no* monitor mode so we have to send a command to clean
+	 * them up or else they leaked.
+	 */
+	if (!ksess->output_traces) {
+		int ret;
+		struct consumer_socket *socket;
+		struct lttng_ht_iter iter;
+
+		/* For each consumer socket. */
+		cds_lfht_for_each_entry(ksess->consumer->socks->ht, &iter.iter,
+				socket, node.node) {
+			struct ltt_kernel_channel *chan;
+
+			/* For each channel, ask the consumer to destroy it. */
+			cds_list_for_each_entry(chan, &ksess->channel_list.head, list) {
+				ret = kernel_consumer_destroy_channel(socket, chan);
+				if (ret < 0) {
+					/* Consumer is probably dead. Use next socket. */
+					continue;
+				}
+			}
+		}
+	}
+
 	/* Close any relayd session */
 	consumer_output_send_destroy_relayd(ksess->consumer);
 
 	trace_kernel_destroy_session(ksess);
+}
+
+/*
+ * Destroy a kernel channel object. It does not do anything on the tracer side.
+ */
+void kernel_destroy_channel(struct ltt_kernel_channel *kchan)
+{
+	struct ltt_kernel_session *ksess = NULL;
+
+	assert(kchan);
+	assert(kchan->channel);
+
+	DBG3("Kernel destroy channel %s", kchan->channel->name);
+
+	/* Update channel count of associated session. */
+	if (kchan->session) {
+		/* Keep pointer reference so we can update it after the destroy. */
+		ksess = kchan->session;
+	}
+
+	trace_kernel_destroy_channel(kchan);
+
+	/*
+	 * At this point the kernel channel is not visible anymore. This is safe
+	 * since in order to work on a visible kernel session, the tracing session
+	 * lock (ltt_session.lock) MUST be acquired.
+	 */
+	if (ksess) {
+		ksess->channel_count--;
+	}
+}
+
+/*
+ * Take a snapshot for a given kernel session.
+ *
+ * Return 0 on success or else return a LTTNG_ERR code.
+ */
+int kernel_snapshot_record(struct ltt_kernel_session *ksess,
+		struct snapshot_output *output, int wait, unsigned int nb_streams)
+{
+	int err, ret, saved_metadata_fd;
+	struct consumer_socket *socket;
+	struct lttng_ht_iter iter;
+	struct ltt_kernel_metadata *saved_metadata;
+	uint64_t max_size_per_stream = 0;
+
+	assert(ksess);
+	assert(ksess->consumer);
+	assert(output);
+
+	DBG("Kernel snapshot record started");
+
+	/* Save current metadata since the following calls will change it. */
+	saved_metadata = ksess->metadata;
+	saved_metadata_fd = ksess->metadata_stream_fd;
+
+	rcu_read_lock();
+
+	ret = kernel_open_metadata(ksess);
+	if (ret < 0) {
+		ret = LTTNG_ERR_KERN_META_FAIL;
+		goto error;
+	}
+
+	ret = kernel_open_metadata_stream(ksess);
+	if (ret < 0) {
+		ret = LTTNG_ERR_KERN_META_FAIL;
+		goto error_open_stream;
+	}
+
+	if (output->max_size > 0 && nb_streams > 0) {
+		max_size_per_stream = output->max_size / nb_streams;
+	}
+
+	/* Send metadata to consumer and snapshot everything. */
+	cds_lfht_for_each_entry(ksess->consumer->socks->ht, &iter.iter,
+			socket, node.node) {
+		struct consumer_output *saved_output;
+		struct ltt_kernel_channel *chan;
+
+		/*
+		 * Temporarly switch consumer output for our snapshot output. As long
+		 * as the session lock is taken, this is safe.
+		 */
+		saved_output = ksess->consumer;
+		ksess->consumer = output->consumer;
+
+		pthread_mutex_lock(socket->lock);
+		/* This stream must not be monitored by the consumer. */
+		ret = kernel_consumer_add_metadata(socket, ksess, 0);
+		pthread_mutex_unlock(socket->lock);
+		/* Put back the saved consumer output into the session. */
+		ksess->consumer = saved_output;
+		if (ret < 0) {
+			ret = LTTNG_ERR_KERN_CONSUMER_FAIL;
+			goto error_consumer;
+		}
+
+		/* For each channel, ask the consumer to snapshot it. */
+		cds_list_for_each_entry(chan, &ksess->channel_list.head, list) {
+			if (max_size_per_stream &&
+					chan->channel->attr.subbuf_size > max_size_per_stream) {
+				ret = LTTNG_ERR_INVALID;
+				DBG3("Kernel snapshot record maximum stream size %" PRIu64
+						" is smaller than subbuffer size of %" PRIu64,
+						max_size_per_stream, chan->channel->attr.subbuf_size);
+				(void) kernel_consumer_destroy_metadata(socket,
+						ksess->metadata);
+				goto error_consumer;
+			}
+
+			pthread_mutex_lock(socket->lock);
+			ret = consumer_snapshot_channel(socket, chan->fd, output, 0,
+					ksess->uid, ksess->gid,
+					DEFAULT_KERNEL_TRACE_DIR, wait,
+					max_size_per_stream);
+			pthread_mutex_unlock(socket->lock);
+			if (ret < 0) {
+				ret = LTTNG_ERR_KERN_CONSUMER_FAIL;
+				(void) kernel_consumer_destroy_metadata(socket,
+						ksess->metadata);
+				goto error_consumer;
+			}
+		}
+
+		/* Snapshot metadata, */
+		pthread_mutex_lock(socket->lock);
+		ret = consumer_snapshot_channel(socket, ksess->metadata->fd, output,
+				1, ksess->uid, ksess->gid,
+				DEFAULT_KERNEL_TRACE_DIR, wait, max_size_per_stream);
+		pthread_mutex_unlock(socket->lock);
+		if (ret < 0) {
+			ret = LTTNG_ERR_KERN_CONSUMER_FAIL;
+			goto error_consumer;
+		}
+
+		/*
+		 * The metadata snapshot is done, ask the consumer to destroy it since
+		 * it's not monitored on the consumer side.
+		 */
+		(void) kernel_consumer_destroy_metadata(socket, ksess->metadata);
+	}
+
+error_consumer:
+	/* Close newly opened metadata stream. It's now on the consumer side. */
+	err = close(ksess->metadata_stream_fd);
+	if (err < 0) {
+		PERROR("close snapshot kernel");
+	}
+
+error_open_stream:
+	trace_kernel_destroy_metadata(ksess->metadata);
+error:
+	/* Restore metadata state.*/
+	ksess->metadata = saved_metadata;
+	ksess->metadata_stream_fd = saved_metadata_fd;
+
+	rcu_read_unlock();
+	return ret;
 }

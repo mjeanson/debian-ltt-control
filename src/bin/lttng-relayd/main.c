@@ -47,16 +47,17 @@
 #include <common/futex.h>
 #include <common/sessiond-comm/sessiond-comm.h>
 #include <common/sessiond-comm/inet.h>
-#include <common/hashtable/hashtable.h>
 #include <common/sessiond-comm/relayd.h>
 #include <common/uri.h>
 #include <common/utils.h>
 
+#include "cmd.h"
+#include "utils.h"
 #include "lttng-relayd.h"
 
 /* command line options */
+char *opt_output_path;
 static int opt_daemon;
-static char *opt_output_path;
 static struct lttng_uri *control_uri;
 static struct lttng_uri *data_uri;
 
@@ -104,12 +105,12 @@ static
 void usage(void)
 {
 	fprintf(stderr, "Usage: %s OPTIONS\n\nOptions:\n", progname);
-	fprintf(stderr, "  -h, --help                         Display this usage.\n");
-	fprintf(stderr, "  -d, --daemonize                    Start as a daemon.\n");
-	fprintf(stderr, "  -C, --control-port                 Control port listening (URI)\n");
-	fprintf(stderr, "  -D, --data-port                    Data port listening (URI)\n");
-	fprintf(stderr, "  -o, --output                       Output path for traces (PATH)\n");
-	fprintf(stderr, "  -v, --verbose                      Verbose mode. Activate DBG() macro.\n");
+	fprintf(stderr, "  -h, --help                Display this usage.\n");
+	fprintf(stderr, "  -d, --daemonize           Start as a daemon.\n");
+	fprintf(stderr, "  -C, --control-port URL    Control port listening.\n");
+	fprintf(stderr, "  -D, --data-port URL       Data port listening.\n");
+	fprintf(stderr, "  -o, --output PATH         Output path for traces. Must use an absolute path.\n");
+	fprintf(stderr, "  -v, --verbose             Verbose mode. Activate DBG() macro.\n");
 }
 
 static
@@ -686,184 +687,31 @@ error:
 }
 
 /*
- * Return the realpath(3) of the path even if the last directory token does not
- * exist. For example, with /tmp/test1/test2, if test2/ does not exist but the
- * /tmp/test1 does, the real path is returned. In normal time, realpath(3)
- * fails if the end point directory does not exist.
+ * Get stream from stream id.
+ * Need to be called with RCU read-side lock held.
  */
 static
-char *expand_full_path(const char *path)
+struct relay_stream *relay_stream_from_stream_id(uint64_t stream_id,
+		struct lttng_ht *streams_ht)
 {
-	const char *end_path = path;
-	char *next, *cut_path, *expanded_path, *respath;
+	struct lttng_ht_node_ulong *node;
+	struct lttng_ht_iter iter;
+	struct relay_stream *ret;
 
-	/* Find last token delimited by '/' */
-	while ((next = strpbrk(end_path + 1, "/"))) {
-		end_path = next;
-	}
-
-	/* Cut last token from original path */
-	cut_path = strndup(path, end_path - path);
-
-	expanded_path = malloc(PATH_MAX);
-	if (expanded_path == NULL) {
-		respath = NULL;
+	lttng_ht_lookup(streams_ht,
+			(void *)((unsigned long) stream_id),
+			&iter);
+	node = lttng_ht_iter_get_node_ulong(&iter);
+	if (node == NULL) {
+		DBG("Relay stream %" PRIu64 " not found", stream_id);
+		ret = NULL;
 		goto end;
 	}
 
-	respath = realpath(cut_path, expanded_path);
-	if (respath == NULL) {
-		switch (errno) {
-		case ENOENT:
-			ERR("%s: No such file or directory", cut_path);
-			break;
-		default:
-			PERROR("realpath");
-			break;
-		}
-		free(expanded_path);
-	} else {
-		/* Add end part to expanded path */
-		strcat(respath, end_path);
-	}
+	ret = caa_container_of(node, struct relay_stream, stream_n);
+
 end:
-	free(cut_path);
-	return respath;
-}
-
-
-/*
- *  config_get_default_path
- *
- *  Returns the HOME directory path. Caller MUST NOT free(3) the return pointer.
- */
-static
-char *config_get_default_path(void)
-{
-	return getenv("HOME");
-}
-
-/*
- * Create recursively directory using the FULL path.
- */
-static
-int mkdir_recursive(char *path, mode_t mode)
-{
-	char *p, tmp[PATH_MAX];
-	struct stat statbuf;
-	size_t len;
-	int ret;
-
-	ret = snprintf(tmp, sizeof(tmp), "%s", path);
-	if (ret < 0) {
-		PERROR("snprintf mkdir");
-		goto error;
-	}
-
-	len = ret;
-	if (tmp[len - 1] == '/') {
-		tmp[len - 1] = 0;
-	}
-
-	for (p = tmp + 1; *p; p++) {
-		if (*p == '/') {
-			*p = 0;
-			if (tmp[strlen(tmp) - 1] == '.' &&
-					tmp[strlen(tmp) - 2] == '.' &&
-					tmp[strlen(tmp) - 3] == '/') {
-				ERR("Using '/../' is not permitted in the trace path (%s)",
-						tmp);
-				ret = -1;
-				goto error;
-			}
-			ret = stat(tmp, &statbuf);
-			if (ret < 0) {
-				ret = mkdir(tmp, mode);
-				if (ret < 0) {
-					if (errno != EEXIST) {
-						PERROR("mkdir recursive");
-						ret = -errno;
-						goto error;
-					}
-				}
-			}
-			*p = '/';
-		}
-	}
-
-	ret = mkdir(tmp, mode);
-	if (ret < 0) {
-		if (errno != EEXIST) {
-			PERROR("mkdir recursive last piece");
-			ret = -errno;
-		} else {
-			ret = 0;
-		}
-	}
-
-error:
 	return ret;
-}
-
-static
-char *create_output_path_auto(char *path_name)
-{
-	int ret;
-	char *traces_path = NULL;
-	char *alloc_path = NULL;
-	char *default_path;
-
-	default_path = config_get_default_path();
-	if (default_path == NULL) {
-		ERR("Home path not found.\n \
-				Please specify an output path using -o, --output PATH");
-		goto exit;
-	}
-	alloc_path = strdup(default_path);
-	if (alloc_path == NULL) {
-		PERROR("Path allocation");
-		goto exit;
-	}
-	ret = asprintf(&traces_path, "%s/" DEFAULT_TRACE_DIR_NAME
-			"/%s", alloc_path, path_name);
-	if (ret < 0) {
-		PERROR("asprintf trace dir name");
-		goto exit;
-	}
-exit:
-	free(alloc_path);
-	return traces_path;
-}
-
-static
-char *create_output_path_noauto(char *path_name)
-{
-	int ret;
-	char *traces_path = NULL;
-	char *full_path;
-
-	full_path = expand_full_path(opt_output_path);
-	ret = asprintf(&traces_path, "%s/%s", full_path, path_name);
-	if (ret < 0) {
-		PERROR("asprintf trace dir name");
-		goto exit;
-	}
-exit:
-	free(full_path);
-	return traces_path;
-}
-
-/*
- * create_output_path: create the output trace directory
- */
-static
-char *create_output_path(char *path_name)
-{
-	if (opt_output_path == NULL) {
-		return create_output_path_auto(path_name);
-	} else {
-		return create_output_path_noauto(path_name);
-	}
 }
 
 static
@@ -871,6 +719,8 @@ void deferred_free_stream(struct rcu_head *head)
 {
 	struct relay_stream *stream =
 		caa_container_of(head, struct relay_stream, rcu_node);
+	free(stream->path_name);
+	free(stream->channel_name);
 	free(stream);
 }
 
@@ -972,10 +822,8 @@ int relay_add_stream(struct lttcomm_relayd_hdr *recv_hdr,
 		struct relay_command *cmd, struct lttng_ht *streams_ht)
 {
 	struct relay_session *session = cmd->session;
-	struct lttcomm_relayd_add_stream stream_info;
 	struct relay_stream *stream = NULL;
 	struct lttcomm_relayd_status_stream reply;
-	char *path = NULL, *root_path = NULL;
 	int ret, send_ret;
 
 	if (!session || cmd->version_check_done == 0) {
@@ -984,18 +832,6 @@ int relay_add_stream(struct lttcomm_relayd_hdr *recv_hdr,
 		goto end_no_session;
 	}
 
-	ret = cmd->sock->ops->recvmsg(cmd->sock, &stream_info,
-			sizeof(struct lttcomm_relayd_add_stream), 0);
-	if (ret < sizeof(struct lttcomm_relayd_add_stream)) {
-		if (ret == 0) {
-			/* Orderly shutdown. Not necessary to print an error. */
-			DBG("Socket %d did an orderly shutdown", cmd->sock->fd);
-		} else {
-			ERR("Relay didn't receive valid add_stream struct size : %d", ret);
-		}
-		ret = -1;
-		goto end_no_session;
-	}
 	stream = zmalloc(sizeof(struct relay_stream));
 	if (stream == NULL) {
 		PERROR("relay stream zmalloc");
@@ -1003,54 +839,65 @@ int relay_add_stream(struct lttcomm_relayd_hdr *recv_hdr,
 		goto end_no_session;
 	}
 
+	switch (cmd->minor) {
+	case 1: /* LTTng sessiond 2.1 */
+		ret = cmd_recv_stream_2_1(cmd, stream);
+		break;
+	case 2: /* LTTng sessiond 2.2 */
+	default:
+		ret = cmd_recv_stream_2_2(cmd, stream);
+		break;
+	}
+	if (ret < 0) {
+		goto err_free_stream;
+	}
+
 	rcu_read_lock();
 	stream->stream_handle = ++last_relay_stream_id;
 	stream->prev_seq = -1ULL;
 	stream->session = session;
 
-	root_path = create_output_path(stream_info.pathname);
-	if (!root_path) {
-		ret = -1;
-		goto end;
-	}
-	ret = mkdir_recursive(root_path, S_IRWXU | S_IRWXG);
+	ret = utils_mkdir_recursive(stream->path_name, S_IRWXU | S_IRWXG);
 	if (ret < 0) {
 		ERR("relay creating output directory");
 		goto end;
 	}
 
-	ret = asprintf(&path, "%s/%s", root_path, stream_info.channel_name);
+	/*
+	 * No need to use run_as API here because whatever we receives, the relayd
+	 * uses its own credentials for the stream files.
+	 */
+	ret = utils_create_stream_file(stream->path_name, stream->channel_name,
+			stream->tracefile_size, 0, -1, -1);
 	if (ret < 0) {
-		PERROR("asprintf stream path");
+		ERR("Create output file");
 		goto end;
 	}
-
-	ret = open(path, O_WRONLY|O_CREAT|O_TRUNC, S_IRWXU|S_IRWXG|S_IRWXO);
-	if (ret < 0) {
-		PERROR("Relay creating trace file");
-		goto end;
-	}
-
 	stream->fd = ret;
-	DBG("Tracefile %s created", path);
+	if (stream->tracefile_size) {
+		DBG("Tracefile %s/%s_0 created", stream->path_name, stream->channel_name);
+	} else {
+		DBG("Tracefile %s/%s created", stream->path_name, stream->channel_name);
+	}
 
 	lttng_ht_node_init_ulong(&stream->stream_n,
 			(unsigned long) stream->stream_handle);
 	lttng_ht_add_unique_ulong(streams_ht,
 			&stream->stream_n);
 
-	DBG("Relay new stream added %s", stream_info.channel_name);
+	DBG("Relay new stream added %s", stream->channel_name);
 
 end:
-	free(path);
-	free(root_path);
+	reply.handle = htobe64(stream->stream_handle);
 	/* send the session id to the client or a negative return code on error */
 	if (ret < 0) {
 		reply.ret_code = htobe32(LTTNG_ERR_UNK);
+		/* stream was not properly added to the ht, so free it */
+		free(stream);
 	} else {
 		reply.ret_code = htobe32(LTTNG_OK);
 	}
-	reply.handle = htobe64(stream->stream_handle);
+
 	send_ret = cmd->sock->ops->sendmsg(cmd->sock, &reply,
 			sizeof(struct lttcomm_relayd_status_stream), 0);
 	if (send_ret < 0) {
@@ -1060,6 +907,12 @@ end:
 	rcu_read_unlock();
 
 end_no_session:
+	return ret;
+
+err_free_stream:
+	free(stream->path_name);
+	free(stream->channel_name);
+	free(stream);
 	return ret;
 }
 
@@ -1075,7 +928,6 @@ int relay_close_stream(struct lttcomm_relayd_hdr *recv_hdr,
 	struct lttcomm_relayd_generic_reply reply;
 	struct relay_stream *stream;
 	int ret, send_ret;
-	struct lttng_ht_node_ulong *node;
 	struct lttng_ht_iter iter;
 
 	DBG("Close stream received");
@@ -1100,17 +952,8 @@ int relay_close_stream(struct lttcomm_relayd_hdr *recv_hdr,
 	}
 
 	rcu_read_lock();
-	lttng_ht_lookup(streams_ht,
-			(void *)((unsigned long) be64toh(stream_info.stream_id)),
-			&iter);
-	node = lttng_ht_iter_get_node_ulong(&iter);
-	if (node == NULL) {
-		DBG("Relay stream %" PRIu64 " not found", be64toh(stream_info.stream_id));
-		ret = -1;
-		goto end_unlock;
-	}
-
-	stream = caa_container_of(node, struct relay_stream, stream_n);
+	stream = relay_stream_from_stream_id(be64toh(stream_info.stream_id),
+			streams_ht);
 	if (!stream) {
 		ret = -1;
 		goto end_unlock;
@@ -1126,6 +969,7 @@ int relay_close_stream(struct lttcomm_relayd_hdr *recv_hdr,
 		if (delret < 0) {
 			PERROR("close stream");
 		}
+		iter.iter.node = &stream->stream_n.node;
 		delret = lttng_ht_del(streams_ht, &iter);
 		assert(!delret);
 		call_rcu(&stream->rcu_node,
@@ -1193,34 +1037,6 @@ int relay_start(struct lttcomm_relayd_hdr *recv_hdr,
 		ERR("Relay sending start ack");
 	}
 
-	return ret;
-}
-
-/*
- * Get stream from stream id.
- * Need to be called with RCU read-side lock held.
- */
-static
-struct relay_stream *relay_stream_from_stream_id(uint64_t stream_id,
-		struct lttng_ht *streams_ht)
-{
-	struct lttng_ht_node_ulong *node;
-	struct lttng_ht_iter iter;
-	struct relay_stream *ret;
-
-	lttng_ht_lookup(streams_ht,
-			(void *)((unsigned long) stream_id),
-			&iter);
-	node = lttng_ht_iter_get_node_ulong(&iter);
-	if (node == NULL) {
-		DBG("Relay stream %" PRIu64 " not found", stream_id);
-		ret = NULL;
-		goto end;
-	}
-
-	ret = caa_container_of(node, struct relay_stream, stream_n);
-
-end:
 	return ret;
 }
 
@@ -1349,7 +1165,7 @@ end:
  */
 static
 int relay_send_version(struct lttcomm_relayd_hdr *recv_hdr,
-		struct relay_command *cmd)
+		struct relay_command *cmd, struct lttng_ht *streams_ht)
 {
 	int ret;
 	struct lttcomm_relayd_version reply, msg;
@@ -1371,19 +1187,26 @@ int relay_send_version(struct lttcomm_relayd_hdr *recv_hdr,
 		goto end;
 	}
 
-	/*
-	 * For now, we just ignore the received version but after 2.1 stable
-	 * release, a check must be done to see if we either adapt to the other
-	 * side version (which MUST be lower than us) or keep the latest data
-	 * structure considering that the other side will adapt.
-	 */
+	reply.major = RELAYD_VERSION_COMM_MAJOR;
+	reply.minor = RELAYD_VERSION_COMM_MINOR;
 
-	ret = sscanf(VERSION, "%10u.%10u", &reply.major, &reply.minor);
-	if (ret < 2) {
-		ERR("Error in scanning version");
-		ret = -1;
+	/* Major versions must be the same */
+	if (reply.major != be32toh(msg.major)) {
+		DBG("Incompatible major versions (%u vs %u), deleting session",
+				reply.major, be32toh(msg.major));
+		relay_delete_session(cmd, streams_ht);
+		ret = 0;
 		goto end;
 	}
+
+	cmd->major = reply.major;
+	/* We adapt to the lowest compatible version */
+	if (reply.minor <= be32toh(msg.minor)) {
+		cmd->minor = reply.minor;
+	} else {
+		cmd->minor = be32toh(msg.minor);
+	}
+
 	reply.major = htobe32(reply.major);
 	reply.minor = htobe32(reply.minor);
 	ret = cmd->sock->ops->sendmsg(cmd->sock, &reply,
@@ -1391,8 +1214,9 @@ int relay_send_version(struct lttcomm_relayd_hdr *recv_hdr,
 	if (ret < 0) {
 		ERR("Relay sending version");
 	}
-	DBG("Version check done (%u.%u)", be32toh(reply.major),
-			be32toh(reply.minor));
+
+	DBG("Version check done using protocol %u.%u", cmd->major,
+			cmd->minor);
 
 end:
 	return ret;
@@ -1410,8 +1234,6 @@ int relay_data_pending(struct lttcomm_relayd_hdr *recv_hdr,
 	struct lttcomm_relayd_generic_reply reply;
 	struct relay_stream *stream;
 	int ret;
-	struct lttng_ht_node_ulong *node;
-	struct lttng_ht_iter iter;
 	uint64_t last_net_seq_num, stream_id;
 
 	DBG("Data pending command received");
@@ -1439,16 +1261,11 @@ int relay_data_pending(struct lttcomm_relayd_hdr *recv_hdr,
 	last_net_seq_num = be64toh(msg.last_net_seq_num);
 
 	rcu_read_lock();
-	lttng_ht_lookup(streams_ht, (void *)((unsigned long) stream_id), &iter);
-	node = lttng_ht_iter_get_node_ulong(&iter);
-	if (node == NULL) {
-		DBG("Relay stream %" PRIu64 " not found", stream_id);
+	stream = relay_stream_from_stream_id(stream_id, streams_ht);
+	if (stream == NULL) {
 		ret = -1;
 		goto end_unlock;
 	}
-
-	stream = caa_container_of(node, struct relay_stream, stream_n);
-	assert(stream);
 
 	DBG("Data pending for stream id %" PRIu64 " prev_seq %" PRIu64
 			" and last_seq %" PRIu64, stream_id, stream->prev_seq,
@@ -1709,7 +1526,7 @@ int relay_process_control(struct lttcomm_relayd_hdr *recv_hdr,
 		ret = relay_recv_metadata(recv_hdr, cmd, streams_ht);
 		break;
 	case RELAYD_VERSION:
-		ret = relay_send_version(recv_hdr, cmd);
+		ret = relay_send_version(recv_hdr, cmd, streams_ht);
 		break;
 	case RELAYD_CLOSE_STREAM:
 		ret = relay_close_stream(recv_hdr, cmd, streams_ht);
@@ -1803,6 +1620,22 @@ int relay_process_data(struct relay_command *cmd, struct lttng_ht *streams_ht)
 		goto end_unlock;
 	}
 
+	if (stream->tracefile_size > 0 &&
+			(stream->tracefile_size_current + data_size) >
+			stream->tracefile_size) {
+		ret = utils_rotate_stream_file(stream->path_name,
+				stream->channel_name, stream->tracefile_size,
+				stream->tracefile_count, -1, -1,
+				stream->fd, &(stream->tracefile_count_current));
+		if (ret < 0) {
+			ERR("Rotating output file");
+			goto end;
+		}
+		stream->fd = ret;
+		/* Reset current size because we just perform a stream rotation. */
+		stream->tracefile_size_current = 0;
+	}
+	stream->tracefile_size_current += data_size;
 	do {
 		ret = write(stream->fd, data_buffer, data_size);
 	} while (ret < 0 && errno == EINTR);
@@ -2232,6 +2065,20 @@ int main(int argc, char **argv)
 		goto exit;
 	}
 
+	/* Try to create directory if -o, --output is specified. */
+	if (opt_output_path) {
+		if (*opt_output_path != '/') {
+			ERR("Please specify an absolute path for -o, --output PATH");
+			goto exit;
+		}
+
+		ret = utils_mkdir_recursive(opt_output_path, S_IRWXU | S_IRWXG);
+		if (ret < 0) {
+			ERR("Unable to create %s", opt_output_path);
+			goto exit;
+		}
+	}
+
 	/* Daemonize */
 	if (opt_daemon) {
 		ret = daemon(0, 0);
@@ -2262,6 +2109,9 @@ int main(int argc, char **argv)
 
 	/* Set up max poll set size */
 	lttng_poll_set_max_size();
+
+	/* Initialize communication library */
+	lttcomm_init();
 
 	/* Setup the dispatcher thread */
 	ret = pthread_create(&dispatcher_thread, NULL,

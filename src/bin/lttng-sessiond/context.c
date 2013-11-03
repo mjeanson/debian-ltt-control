@@ -39,6 +39,9 @@ static int add_kctx_all_channels(struct ltt_kernel_session *ksession,
 	int ret;
 	struct ltt_kernel_channel *kchan;
 
+	assert(ksession);
+	assert(kctx);
+
 	DBG("Adding kernel context to all channels");
 
 	/* Go over all channels */
@@ -63,6 +66,9 @@ static int add_kctx_to_channel(struct lttng_kernel_context *kctx,
 		struct ltt_kernel_channel *kchan)
 {
 	int ret;
+
+	assert(kchan);
+	assert(kctx);
 
 	DBG("Add kernel context to channel '%s'", kchan->channel->name);
 
@@ -89,6 +95,10 @@ static int add_uctx_to_channel(struct ltt_ust_session *usess, int domain,
 	struct lttng_ht_iter iter;
 	struct lttng_ht_node_ulong *uctx_node;
 
+	assert(usess);
+	assert(uchan);
+	assert(ctx);
+
 	/* Create ltt UST context */
 	uctx = trace_ust_create_context(ctx);
 	if (uctx == NULL) {
@@ -108,16 +118,21 @@ static int add_uctx_to_channel(struct ltt_ust_session *usess, int domain,
 		goto error;
 	}
 
+	rcu_read_lock();
+
 	/* Lookup context before adding it */
 	lttng_ht_lookup(uchan->ctx, (void *)((unsigned long)uctx->ctx.ctx), &iter);
 	uctx_node = lttng_ht_iter_get_node_ulong(&iter);
 	if (uctx_node != NULL) {
 		ret = -EEXIST;
+		rcu_read_unlock();
 		goto error;
 	}
 
 	/* Add ltt UST context node to ltt UST channel */
 	lttng_ht_add_unique_ulong(uchan->ctx, &uctx->node);
+	rcu_read_unlock();
+	cds_list_add_tail(&uctx->list, &uchan->ctx_list);
 
 	DBG("Context UST %d added to channel %s", uctx->ctx.ctx, uchan->name);
 
@@ -137,6 +152,10 @@ int context_kernel_add(struct ltt_kernel_session *ksession,
 	int ret;
 	struct ltt_kernel_channel *kchan;
 	struct lttng_kernel_context kctx;
+
+	assert(ksession);
+	assert(ctx);
+	assert(channel_name);
 
 	/* Setup kernel context structure */
 	switch (ctx->ctx) {
@@ -183,7 +202,7 @@ int context_kernel_add(struct ltt_kernel_session *ksession,
 			LTTNG_SYMBOL_NAME_LEN);
 	kctx.u.perf_counter.name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
 
-	if (strlen(channel_name) == 0) {
+	if (*channel_name == '\0') {
 		ret = add_kctx_all_channels(ksession, &kctx);
 		if (ret != LTTNG_OK) {
 			goto error;
@@ -219,6 +238,12 @@ int context_ust_add(struct ltt_ust_session *usess, int domain,
 	struct lttng_ht *chan_ht;
 	struct ltt_ust_channel *uchan = NULL;
 
+	assert(usess);
+	assert(ctx);
+	assert(channel_name);
+
+	rcu_read_lock();
+
 	/*
 	 * Define which channel's hashtable to use from the domain or quit if
 	 * unknown domain.
@@ -238,7 +263,7 @@ int context_ust_add(struct ltt_ust_session *usess, int domain,
 	}
 
 	/* Get UST channel if defined */
-	if (strlen(channel_name) != 0) {
+	if (channel_name[0] != '\0') {
 		uchan = trace_ust_find_channel_by_name(chan_ht, channel_name);
 		if (uchan == NULL) {
 			ret = LTTNG_ERR_UST_CHAN_NOT_FOUND;
@@ -250,6 +275,7 @@ int context_ust_add(struct ltt_ust_session *usess, int domain,
 		/* Add ctx to channel */
 		ret = add_uctx_to_channel(usess, domain, uchan, ctx);
 	} else {
+		rcu_read_lock();
 		/* Add ctx all events, all channels */
 		cds_lfht_for_each_entry(chan_ht->ht, &iter.iter, uchan, node.node) {
 			ret = add_uctx_to_channel(usess, domain, uchan, ctx);
@@ -258,6 +284,7 @@ int context_ust_add(struct ltt_ust_session *usess, int domain,
 				continue;
 			}
 		}
+		rcu_read_unlock();
 	}
 
 	switch (ret) {
@@ -279,5 +306,6 @@ int context_ust_add(struct ltt_ust_session *usess, int domain,
 	}
 
 error:
+	rcu_read_unlock();
 	return ret;
 }
