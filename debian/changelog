@@ -1,3 +1,10 @@
+ltt-control (2.3.0-2) unstable; urgency=low
+
+  * [31b9b12] Fix build failure on armel
+  * [635f0c3] Bump version dependency on ust
+
+ -- Jon Bernard <jbernard@debian.org>  Fri, 22 Nov 2013 12:57:18 -0500
+
 ltt-control (2.3.0-1) unstable; urgency=low
 
   * [c75fa17] New upstream version 2.3.0 (Closes: #728644)
