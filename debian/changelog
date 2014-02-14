@@ -1,3 +1,11 @@
+ltt-control (2.4.0~rc4-1) experimental; urgency=low
+
+  * [5accadb] Update UST version dependency
+  * [67eb5bb] Update watch file to only uversionmangle
+  * [055f855] New upstream version 2.4.0~rc4
+
+ -- Jon Bernard <jbernard@debian.org>  Fri, 14 Feb 2014 17:29:29 -0500
+
 ltt-control (2.3.0-2) unstable; urgency=low
 
   * [31b9b12] Fix build failure on armel
