@@ -1,4 +1,4 @@
-AC_INIT([lttng-tools],[2.3.0],[dgoulet@efficios.com],[],[http://lttng.org])
+AC_INIT([lttng-tools],[2.4.0-rc4],[dgoulet@efficios.com],[],[http://lttng.org])
 AC_CONFIG_AUX_DIR([config])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
@@ -18,8 +18,8 @@ AC_DEFINE_UNQUOTED([VERSION_MAJOR], $major_version, [LTTng-Tools major version n
 AC_DEFINE_UNQUOTED([VERSION_MINOR], $minor_version, [LTTng-Tools minor version number])
 AC_DEFINE_UNQUOTED([VERSION_PATCHLEVEL], $patchlevel_version, [LTTng-Tools patchlevel version number])
 
-version_name="Dominus Vobiscum"
-version_description="A very succulent line-up of beers brewed at Microbrasserie Charlevoix. Elaborated starting from special malts and fermented with a Belgian yeast. These beers are refermented in bottle and will make you discover the richness of wheat, amber and triple styles."
+version_name="Époque Opaque"
+version_description="The Époque Opaque is a black IPA from Trou du Diable brewery. The nose is eerily reminiscent of the coffee crisp candy from of our childhood. These strong mocha accents are present on the palate, which are quickly subdued by Japanese and Australian hops leading to a final state of satisfaction enjoyable for any fan of bitter beer."
 
 AC_DEFINE_UNQUOTED([VERSION_NAME], ["$version_name"], "")
 AC_DEFINE_UNQUOTED([VERSION_DESCRIPTION], ["$version_description"], "")
@@ -301,6 +301,43 @@ AX_CONFIG_FEATURE(
 )
 AM_CONDITIONAL([COMPAT_EPOLL], [ test "$enable_epoll" = "yes" ])
 
+# Set compile flags to java include files if given. This is only used to
+# compile JUL tests.
+AC_ARG_WITH([java-jdk],
+	[AS_HELP_STRING([--with-java-jdk=DIR],[use the Java JDK in DIR. Ex : $JAVA_HOME.])],
+	[JAVA_JDK=$withval],
+	[JAVA_JDK=""]
+)
+AM_CONDITIONAL([HAVE_JAVA_JDK], [test $JAVA_JDK], [Java JDK path])
+AC_SUBST([JAVA_JDK])
+
+AS_IF([test $JAVA_JDK],[
+	AS_IF([test -d $JAVA_JDK],
+		[
+			AC_MSG_RESULT([using Java includes in $JAVA_SDK])
+			SUBDIRS=`find $JAVA_JDK/include -type d`
+			CPPFLAGS+=" "
+			CPPFLAGS+=`for x in $SUBDIRS; do echo -n "-I$x "; done`
+			CPPFLAGS+=" "
+        ],[AC_MSG_ERROR(Unable to find Java include files in $JAVA_JDK)]
+	)
+])
+
+# Check for the UST JUL jar file in the system. Hardcoded path is added here
+# since we have *no* idea where this could be installed. Note that this is only
+# used for JUL testing.
+AC_MSG_CHECKING(Java JUL UST jar file)
+java_jul_jar_path="/usr/local/lib/lttng/java/liblttng-ust-jul.jar"
+if test -f $java_jul_jar_path; then
+	build_java_jul=yes
+	AC_MSG_RESULT(found)
+else
+	build_java_jul=no
+	AC_MSG_RESULT(not found)
+fi
+AM_CONDITIONAL([BUILD_JAVA_JUL], [test "x$build_java_jul" = "xyes"])
+AC_SUBST([java_jul_jar_path])
+
 AC_SYS_LARGEFILE
 AC_PROG_CC
 LT_INIT
@@ -353,6 +390,8 @@ AC_CONFIG_FILES([
 	src/common/compat/Makefile
 	src/common/relayd/Makefile
 	src/common/testpoint/Makefile
+	src/common/index/Makefile
+	src/common/health/Makefile
 	src/lib/Makefile
 	src/lib/lttng-ctl/Makefile
 	src/lib/lttng-ctl/filter/Makefile
@@ -371,6 +410,8 @@ AC_CONFIG_FILES([
 	tests/regression/tools/health/Makefile
 	tests/regression/tools/tracefile-limits/Makefile
 	tests/regression/tools/snapshots/Makefile
+	tests/regression/tools/live/Makefile
+	tests/regression/tools/exclusion/Makefile
 	tests/regression/ust/Makefile
 	tests/regression/ust/nprocesses/Makefile
 	tests/regression/ust/high-throughput/Makefile
@@ -386,6 +427,7 @@ AC_CONFIG_FILES([
 	tests/regression/ust/exit-fast/Makefile
 	tests/regression/ust/fork/Makefile
 	tests/regression/ust/libc-wrapper/Makefile
+	tests/regression/ust/java-jul/Makefile
 	tests/stress/Makefile
 	tests/unit/Makefile
 	tests/utils/Makefile

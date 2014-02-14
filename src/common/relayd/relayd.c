@@ -26,6 +26,7 @@
 #include <common/common.h>
 #include <common/defaults.h>
 #include <common/sessiond-comm/relayd.h>
+#include <common/index/ctf-index.h>
 
 #include "relayd.h"
 
@@ -116,13 +117,59 @@ error:
 }
 
 /*
+ * Starting at 2.4, RELAYD_CREATE_SESSION takes additional parameters to
+ * support the live reading capability.
+ */
+static int relayd_create_session_2_4(struct lttcomm_relayd_sock *rsock,
+		uint64_t *session_id, char *session_name, char *hostname,
+		int session_live_timer, unsigned int snapshot)
+{
+	int ret;
+	struct lttcomm_relayd_create_session_2_4 msg;
+
+	strncpy(msg.session_name, session_name, sizeof(msg.session_name));
+	strncpy(msg.hostname, hostname, sizeof(msg.hostname));
+	msg.live_timer = htobe32(session_live_timer);
+	msg.snapshot = htobe32(snapshot);
+
+	/* Send command */
+	ret = send_command(rsock, RELAYD_CREATE_SESSION, &msg, sizeof(msg), 0);
+	if (ret < 0) {
+		goto error;
+	}
+
+error:
+	return ret;
+}
+
+/*
+ * RELAYD_CREATE_SESSION from 2.1 to 2.3.
+ */
+static int relayd_create_session_2_1(struct lttcomm_relayd_sock *rsock,
+		uint64_t *session_id)
+{
+	int ret;
+
+	/* Send command */
+	ret = send_command(rsock, RELAYD_CREATE_SESSION, NULL, 0, 0);
+	if (ret < 0) {
+		goto error;
+	}
+
+error:
+	return ret;
+}
+
+/*
  * Send a RELAYD_CREATE_SESSION command to the relayd with the given socket and
  * set session_id of the relayd if we have a successful reply from the relayd.
  *
  * On success, return 0 else a negative value which is either an errno error or
  * a lttng error code from the relayd.
  */
-int relayd_create_session(struct lttcomm_relayd_sock *rsock, uint64_t *session_id)
+int relayd_create_session(struct lttcomm_relayd_sock *rsock, uint64_t *session_id,
+		char *session_name, char *hostname, int session_live_timer,
+		unsigned int snapshot)
 {
 	int ret;
 	struct lttcomm_relayd_status_session reply;
@@ -132,8 +179,19 @@ int relayd_create_session(struct lttcomm_relayd_sock *rsock, uint64_t *session_i
 
 	DBG("Relayd create session");
 
-	/* Send command */
-	ret = send_command(rsock, RELAYD_CREATE_SESSION, NULL, 0, 0);
+	switch(rsock->minor) {
+		case 1:
+		case 2:
+		case 3:
+			ret = relayd_create_session_2_1(rsock, session_id);
+			break;
+		case 4:
+		default:
+			ret = relayd_create_session_2_4(rsock, session_id, session_name,
+					hostname, session_live_timer, snapshot);
+			break;
+	}
+
 	if (ret < 0) {
 		goto error;
 	}
@@ -232,6 +290,59 @@ int relayd_add_stream(struct lttcomm_relayd_sock *rsock, const char *channel_nam
 		reply.handle);
 
 error:
+	return ret;
+}
+
+/*
+ * Inform the relay that all the streams for the current channel has been sent.
+ *
+ * On success return 0 else return ret_code negative value.
+ */
+int relayd_streams_sent(struct lttcomm_relayd_sock *rsock)
+{
+	int ret;
+	struct lttcomm_relayd_generic_reply reply;
+
+	/* Code flow error. Safety net. */
+	assert(rsock);
+
+	DBG("Relayd sending streams sent.");
+
+	/* This feature was introduced in 2.4, ignore it for earlier versions. */
+	if (rsock->minor < 4) {
+		ret = 0;
+		goto end;
+	}
+
+	/* Send command */
+	ret = send_command(rsock, RELAYD_STREAMS_SENT, NULL, 0, 0);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Waiting for reply */
+	ret = recv_reply(rsock, (void *) &reply, sizeof(reply));
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Back to host bytes order. */
+	reply.ret_code = be32toh(reply.ret_code);
+
+	/* Return session id or negative ret code. */
+	if (reply.ret_code != LTTNG_OK) {
+		ret = -1;
+		ERR("Relayd streams sent replied error %d", reply.ret_code);
+		goto error;
+	} else {
+		/* Success */
+		ret = 0;
+	}
+
+	DBG("Relayd streams sent success");
+
+error:
+end:
 	return ret;
 }
 
@@ -633,7 +744,7 @@ error:
 int relayd_end_data_pending(struct lttcomm_relayd_sock *rsock, uint64_t id,
 		unsigned int *is_data_inflight)
 {
-	int ret;
+	int ret, recv_ret;
 	struct lttcomm_relayd_end_data_pending msg;
 	struct lttcomm_relayd_generic_reply reply;
 
@@ -656,17 +767,77 @@ int relayd_end_data_pending(struct lttcomm_relayd_sock *rsock, uint64_t id,
 		goto error;
 	}
 
-	reply.ret_code = be32toh(reply.ret_code);
-	if (reply.ret_code < 0) {
-		ret = reply.ret_code;
+	recv_ret = be32toh(reply.ret_code);
+	if (recv_ret < 0) {
+		ret = recv_ret;
 		goto error;
 	}
 
-	*is_data_inflight = reply.ret_code;
+	*is_data_inflight = recv_ret;
 
-	DBG("Relayd end data pending is data inflight: %d", reply.ret_code);
+	DBG("Relayd end data pending is data inflight: %d", recv_ret);
 
 	return 0;
+
+error:
+	return ret;
+}
+
+/*
+ * Send index to the relayd.
+ */
+int relayd_send_index(struct lttcomm_relayd_sock *rsock,
+		struct ctf_packet_index *index, uint64_t relay_stream_id,
+		uint64_t net_seq_num)
+{
+	int ret;
+	struct lttcomm_relayd_index msg;
+	struct lttcomm_relayd_generic_reply reply;
+
+	/* Code flow error. Safety net. */
+	assert(rsock);
+
+	if (rsock->minor < 4) {
+		DBG("Not sending indexes before protocol 2.4");
+		ret = 0;
+		goto error;
+	}
+
+	DBG("Relayd sending index for stream ID %" PRIu64, relay_stream_id);
+
+	msg.relay_stream_id = htobe64(relay_stream_id);
+	msg.net_seq_num = htobe64(net_seq_num);
+
+	/* The index is already in big endian. */
+	msg.packet_size = index->packet_size;
+	msg.content_size = index->content_size;
+	msg.timestamp_begin = index->timestamp_begin;
+	msg.timestamp_end = index->timestamp_end;
+	msg.events_discarded = index->events_discarded;
+	msg.stream_id = index->stream_id;
+
+	/* Send command */
+	ret = send_command(rsock, RELAYD_SEND_INDEX, &msg, sizeof(msg), 0);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Receive response */
+	ret = recv_reply(rsock, (void *) &reply, sizeof(reply));
+	if (ret < 0) {
+		goto error;
+	}
+
+	reply.ret_code = be32toh(reply.ret_code);
+
+	/* Return session id or negative ret code. */
+	if (reply.ret_code != LTTNG_OK) {
+		ret = -1;
+		ERR("Relayd send index replied error %d", reply.ret_code);
+	} else {
+		/* Success */
+		ret = 0;
+	}
 
 error:
 	return ret;

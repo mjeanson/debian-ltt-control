@@ -91,33 +91,6 @@ static void test_create_one_ust_session(void)
 	trace_ust_destroy_session(usess);
 }
 
-static void test_create_ust_metadata(void)
-{
-	struct ltt_ust_metadata *metadata;
-
-	assert(usess != NULL);
-
-	metadata = trace_ust_create_metadata(PATH1);
-	ok(metadata != NULL, "Create UST metadata");
-
-	ok(metadata->handle == -1 &&
-	   strlen(metadata->pathname) &&
-	   metadata->attr.overwrite
-			== DEFAULT_CHANNEL_OVERWRITE &&
-	   metadata->attr.subbuf_size
-			== default_get_metadata_subbuf_size() &&
-	   metadata->attr.num_subbuf
-			== DEFAULT_METADATA_SUBBUF_NUM &&
-	   metadata->attr.switch_timer_interval
-			== DEFAULT_METADATA_SWITCH_TIMER &&
-	   metadata->attr.read_timer_interval
-			== DEFAULT_METADATA_READ_TIMER &&
-	   metadata->attr.output == LTTNG_UST_MMAP,
-	   "Validate UST session metadata");
-
-	trace_ust_destroy_metadata(metadata);
-}
-
 static void test_create_ust_channel(void)
 {
 	struct ltt_ust_channel *uchan;
@@ -151,7 +124,7 @@ static void test_create_ust_event(void)
 	ev.type = LTTNG_EVENT_TRACEPOINT;
 	ev.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
 
-	event = trace_ust_create_event(&ev, NULL);
+	event = trace_ust_create_event(&ev, NULL, NULL);
 
 	ok(event != NULL, "Create UST event");
 
@@ -163,6 +136,46 @@ static void test_create_ust_event(void)
 
 	trace_ust_destroy_event(event);
 }
+
+static void test_create_ust_event_exclusion(void)
+{
+	struct ltt_ust_event *event;
+	struct lttng_event ev;
+	char *name;
+	struct lttng_event_exclusion *exclusion;
+
+	memset(&ev, 0, sizeof(ev));
+
+	/* make a wildcarded event name */
+	name = get_random_string();
+	name[strlen(name) - 1] = '*';
+	strncpy(ev.name, name, LTTNG_SYMBOL_NAME_LEN);
+
+	ev.type = LTTNG_EVENT_TRACEPOINT;
+	ev.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
+
+	/* set up an exclusion set */
+	exclusion = zmalloc(sizeof(*exclusion) + LTTNG_SYMBOL_NAME_LEN);
+	exclusion->count = 1;
+	strncpy((char *)(exclusion->names), get_random_string(), LTTNG_SYMBOL_NAME_LEN);
+
+	event = trace_ust_create_event(&ev, NULL, exclusion);
+
+	ok(event != NULL, "Create UST event with exclusion");
+
+	ok(event->enabled == 0 &&
+	   event->attr.instrumentation == LTTNG_UST_TRACEPOINT &&
+	   strcmp(event->attr.name, ev.name) == 0 &&
+	   event->exclusion != NULL &&
+	   event->exclusion->count == 1 &&
+	   strcmp((char *)(event->exclusion->names), (char *)(exclusion->names)) == 0 &&
+	   event->attr.name[LTTNG_UST_SYM_NAME_LEN - 1] == '\0',
+	   "Validate UST event and exclusion");
+
+	free(exclusion);
+	trace_ust_destroy_event(event);
+}
+
 
 static void test_create_ust_context(void)
 {
@@ -186,10 +199,10 @@ int main(int argc, char **argv)
 	diag("UST data structures unit test");
 
 	test_create_one_ust_session();
-	test_create_ust_metadata();
 	test_create_ust_channel();
 	test_create_ust_event();
 	test_create_ust_context();
+	test_create_ust_event_exclusion();
 
 	return exit_status();
 }

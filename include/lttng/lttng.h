@@ -47,18 +47,9 @@ extern "C" {
  * Domain types: the different possible tracers.
  */
 enum lttng_domain_type {
-	LTTNG_DOMAIN_KERNEL                   = 1,
-	LTTNG_DOMAIN_UST                      = 2,
-
-	/*
-	 * For now, the domains below are not implemented. However, we keep them
-	 * here in order to retain their enum values for future development. Note
-	 * that it is on the roadmap to implement them.
-	 *
-	LTTNG_DOMAIN_UST_EXEC_NAME            = 3,
-	LTTNG_DOMAIN_UST_PID                  = 4,
-	LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN  = 5,
-	*/
+	LTTNG_DOMAIN_KERNEL                   = 1,	/* Linux Kernel tracer. */
+	LTTNG_DOMAIN_UST                      = 2,	/* Global Userspace tracer. */
+	LTTNG_DOMAIN_JUL                      = 3,	/* Java Util Logging. */
 };
 
 /*
@@ -102,6 +93,22 @@ enum lttng_loglevel {
 	LTTNG_LOGLEVEL_DEBUG_FUNCTION         = 12,
 	LTTNG_LOGLEVEL_DEBUG_LINE             = 13,
 	LTTNG_LOGLEVEL_DEBUG                  = 14,
+};
+
+/*
+ * Available loglevels for the JUL domain. Those are an exact map from the
+ * class java.util.logging.Level.
+ */
+enum lttng_loglevel_jul {
+	LTTNG_LOGLEVEL_JUL_OFF                = INT32_MAX,
+	LTTNG_LOGLEVEL_JUL_SEVERE             = 1000,
+	LTTNG_LOGLEVEL_JUL_WARNING            = 900,
+	LTTNG_LOGLEVEL_JUL_INFO               = 800,
+	LTTNG_LOGLEVEL_JUL_CONFIG             = 700,
+	LTTNG_LOGLEVEL_JUL_FINE               = 500,
+	LTTNG_LOGLEVEL_JUL_FINER              = 400,
+	LTTNG_LOGLEVEL_JUL_FINEST             = 300,
+	LTTNG_LOGLEVEL_JUL_ALL                = INT32_MIN,
 };
 
 /*
@@ -235,7 +242,7 @@ struct lttng_event_function_attr {
  *
  * The structures should be initialized to zero before use.
  */
-#define LTTNG_EVENT_PADDING1               15
+#define LTTNG_EVENT_PADDING1               14
 #define LTTNG_EVENT_PADDING2               LTTNG_SYMBOL_NAME_LEN + 32
 struct lttng_event {
 	enum lttng_event_type type;
@@ -247,6 +254,7 @@ struct lttng_event {
 	int32_t enabled;	/* Does not apply: -1 */
 	pid_t pid;
 	unsigned char filter;	/* filter enabled ? */
+	unsigned char exclusion; /* exclusions added ? */
 
 	char padding[LTTNG_EVENT_PADDING1];
 
@@ -281,7 +289,7 @@ struct lttng_event_field {
  *
  * The structures should be initialized to zero before use.
  */
-#define LTTNG_CHANNEL_ATTR_PADDING1        LTTNG_SYMBOL_NAME_LEN + 16
+#define LTTNG_CHANNEL_ATTR_PADDING1        LTTNG_SYMBOL_NAME_LEN + 12
 struct lttng_channel_attr {
 	int overwrite;                      /* 1: overwrite, 0: discard */
 	uint64_t subbuf_size;               /* bytes */
@@ -292,6 +300,8 @@ struct lttng_channel_attr {
 	/* LTTng 2.1 padding limit */
 	uint64_t tracefile_size;            /* bytes */
 	uint64_t tracefile_count;           /* number of tracefiles */
+	/* LTTng 2.3 padding limit */
+	unsigned int live_timer_interval;   /* usec */
 
 	char padding[LTTNG_CHANNEL_ATTR_PADDING1];
 };
@@ -333,6 +343,7 @@ struct lttng_session {
 	char path[PATH_MAX];
 	uint32_t enabled;	/* enabled/started: 1, disabled/stopped: 0 */
 	uint32_t snapshot_mode;
+	unsigned int live_timer_interval;	/* usec */
 
 	char padding[LTTNG_SESSION_PADDING1];
 };
@@ -405,6 +416,19 @@ extern int lttng_create_session(const char *name, const char *url);
  */
 extern int lttng_create_session_snapshot(const char *name,
 		const char *snapshot_url);
+
+/*
+ * Create a session exclusively used for live reading.
+ *
+ * In this mode, the switch-timer parameter is forced for each UST channel, a
+ * live-switch-timer is enabled for kernel channels, manually setting
+ * switch-timer is forbidden. Synchronization beacons are sent to the relayd,
+ * indexes are sent and metadata is checked for each packet.
+ *
+ * Returns LTTNG_OK on success or a negative error code.
+ */
+extern int lttng_create_session_live(const char *name, const char *url,
+		unsigned int timer_interval);
 
 /*
  * Destroy a tracing session.
@@ -566,6 +590,23 @@ extern int lttng_enable_event_with_filter(struct lttng_handle *handle,
 		const char *filter_expression);
 
 /*
+ * Create or enable an event with a filter and/or exclusions.
+ *
+ * If the event you are trying to enable does not exist, it will be created,
+ * else it is enabled.
+ * If ev is NULL, all events are enabled with the filter and exclusion options.
+ * If channel_name is NULL, the default channel is used (channel0) and created
+ * if not found.
+ * If filter_expression is NULL, an event without associated filter is
+ * created.
+ * If exclusion count is zero, the event will be created without exclusions.
+ */
+extern int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
+		struct lttng_event *event, const char *channel_name,
+		const char *filter_expression,
+		int exclusion_count, char **exclusion_names);
+
+/*
  * Create or enable a channel.
  *
  * The chan and handle params can not be NULL.
@@ -642,7 +683,8 @@ int lttng_disable_consumer(struct lttng_handle *handle);
  *
  * Please see lttng-health-check(3) man page for more information.
  */
-extern int lttng_health_check(enum lttng_health_component c);
+extern LTTNG_DEPRECATED("This call is now obsolete.")
+int lttng_health_check(enum lttng_health_component c);
 
 /*
  * For a given session name, this call checks if the data is ready to be read

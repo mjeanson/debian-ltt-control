@@ -34,7 +34,7 @@
 
 #include "buffer-registry.h"
 #include "fd-limit.h"
-#include "health.h"
+#include "health-sessiond.h"
 #include "ust-app.h"
 #include "ust-consumer.h"
 #include "ust-ctl.h"
@@ -104,7 +104,7 @@ static int ht_match_ust_app_event(struct cds_lfht_node *node, const void *_key)
 	event = caa_container_of(node, struct ust_app_event, node.node);
 	key = _key;
 
-	/* Match the 3 elements of the key: name, filter and loglevel. */
+	/* Match the 4 elements of the key: name, filter, loglevel, exclusions */
 
 	/* Event name */
 	if (strncmp(event->attr.name, key->name, sizeof(event->attr.name)) != 0) {
@@ -140,6 +140,21 @@ static int ht_match_ust_app_event(struct cds_lfht_node *node, const void *_key)
 		}
 	}
 
+	/* One of the exclusions is NULL, fail. */
+	if ((key->exclusion && !event->exclusion) || (!key->exclusion && event->exclusion)) {
+		goto no_match;
+	}
+
+	if (key->exclusion && event->exclusion) {
+		/* Both exclusions exists, check count followed by the names. */
+		if (event->exclusion->count != key->exclusion->count ||
+				memcmp(event->exclusion->names, key->exclusion->names,
+					event->exclusion->count * LTTNG_UST_SYM_NAME_LEN) != 0) {
+			goto no_match;
+		}
+	}
+
+
 	/* Match. */
 	return 1;
 
@@ -166,6 +181,7 @@ static void add_unique_ust_app_event(struct ust_app_channel *ua_chan,
 	key.name = event->attr.name;
 	key.filter = event->filter;
 	key.loglevel = event->attr.loglevel;
+	key.exclusion = event->exclusion;
 
 	node_ptr = cds_lfht_add_unique(ht->ht,
 			ht->hash_fct(event->node.key, lttng_ht_seed),
@@ -271,7 +287,8 @@ void delete_ust_app_event(int sock, struct ust_app_event *ua_event)
 	assert(ua_event);
 
 	free(ua_event->filter);
-
+	if (ua_event->exclusion != NULL)
+		free(ua_event->exclusion);
 	if (ua_event->obj != NULL) {
 		ret = ustctl_release_object(sock, ua_event->obj);
 		if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
@@ -389,7 +406,8 @@ void delete_ust_app_channel(int sock, struct ust_app_channel *ua_chan,
 	if (ua_chan->obj != NULL) {
 		/* Remove channel from application UST object descriptor. */
 		iter.iter.node = &ua_chan->ust_objd_node.node;
-		lttng_ht_del(app->ust_objd, &iter);
+		ret = lttng_ht_del(app->ust_objd, &iter);
+		assert(!ret);
 		ret = ustctl_release_object(sock, ua_chan->obj);
 		if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app sock %d release channel obj failed with ret %d",
@@ -464,6 +482,25 @@ push_data:
 	ret = consumer_push_metadata(socket, registry->metadata_key,
 			metadata_str, len, offset);
 	if (ret < 0) {
+		/*
+		 * There is an acceptable race here between the registry metadata key
+		 * assignment and the creation on the consumer. The session daemon can
+		 * concurrently push metadata for this registry while being created on
+		 * the consumer since the metadata key of the registry is assigned
+		 * *before* it is setup to avoid the consumer to ask for metadata that
+		 * could possibly be not found in the session daemon.
+		 *
+		 * The metadata will get pushed either by the session being stopped or
+		 * the consumer requesting metadata if that race is triggered.
+		 */
+		if (ret == -LTTCOMM_CONSUMERD_CHANNEL_FAIL) {
+			ret = 0;
+		}
+
+		/* Update back the actual metadata len sent since it failed here. */
+		pthread_mutex_lock(&registry->lock);
+		registry->metadata_len_sent -= len;
+		pthread_mutex_unlock(&registry->lock);
 		ret_val = ret;
 		goto error_push;
 	}
@@ -957,8 +994,7 @@ error:
  * Find an ust_app using the sock and return it. RCU read side lock must be
  * held before calling this helper function.
  */
-static
-struct ust_app *find_app_by_sock(int sock)
+struct ust_app *ust_app_find_by_sock(int sock)
 {
 	struct lttng_ht_node_ulong *node;
 	struct lttng_ht_iter iter;
@@ -1006,7 +1042,8 @@ error:
  * Return an ust_app_event object or NULL on error.
  */
 static struct ust_app_event *find_ust_app_event(struct lttng_ht *ht,
-		char *name, struct lttng_ust_filter_bytecode *filter, int loglevel)
+		char *name, struct lttng_ust_filter_bytecode *filter, int loglevel,
+		const struct lttng_event_exclusion *exclusion)
 {
 	struct lttng_ht_iter iter;
 	struct lttng_ht_node_str *node;
@@ -1020,6 +1057,8 @@ static struct ust_app_event *find_ust_app_event(struct lttng_ht *ht,
 	key.name = name;
 	key.filter = filter;
 	key.loglevel = loglevel;
+	/* lttng_event_exclusion and lttng_ust_event_exclusion structures are similar */
+	key.exclusion = (struct lttng_ust_event_exclusion *)exclusion;
 
 	/* Lookup using the event name as hash and a custom match fct. */
 	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
@@ -1111,6 +1150,47 @@ int set_ust_event_filter(struct ust_app_event *ua_event,
 	}
 
 	DBG2("UST filter set successfully for event %s", ua_event->name);
+
+error:
+	health_code_update();
+	return ret;
+}
+
+/*
+ * Set event exclusions on the tracer.
+ */
+static
+int set_ust_event_exclusion(struct ust_app_event *ua_event,
+		struct ust_app *app)
+{
+	int ret;
+
+	health_code_update();
+
+	if (!ua_event->exclusion || !ua_event->exclusion->count) {
+		ret = 0;
+		goto error;
+	}
+
+	ret = ustctl_set_exclusion(app->sock, ua_event->exclusion,
+			ua_event->obj);
+	if (ret < 0) {
+		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
+			ERR("UST app event %s exclusions failed for app (pid: %d) "
+					"with ret %d", ua_event->attr.name, app->pid, ret);
+		} else {
+			/*
+			 * This is normal behavior, an application can die during the
+			 * creation process. Don't report an error so the execution can
+			 * continue normally.
+			 */
+			ret = 0;
+			DBG3("UST app event exclusion failed. Application is dead.");
+		}
+		goto error;
+	}
+
+	DBG2("UST exclusion set successfully for event %s", ua_event->name);
 
 error:
 	health_code_update();
@@ -1356,6 +1436,14 @@ int create_ust_event(struct ust_app *app, struct ust_app_session *ua_sess,
 		}
 	}
 
+	/* Set exclusions for the event */
+	if (ua_event->exclusion) {
+		ret = set_ust_event_exclusion(ua_event, app);
+		if (ret < 0) {
+			goto error;
+		}
+	}
+
 	/* If event not enabled, disable it on the tracer */
 	if (ua_event->enabled == 0) {
 		ret = disable_ust_event(app, ua_sess, ua_event);
@@ -1391,6 +1479,8 @@ error:
 static void shadow_copy_event(struct ust_app_event *ua_event,
 		struct ltt_ust_event *uevent)
 {
+	size_t exclusion_alloc_size;
+
 	strncpy(ua_event->name, uevent->attr.name, sizeof(ua_event->name));
 	ua_event->name[sizeof(ua_event->name) - 1] = '\0';
 
@@ -1403,6 +1493,19 @@ static void shadow_copy_event(struct ust_app_event *ua_event,
 	if (uevent->filter) {
 		ua_event->filter = alloc_copy_ust_app_filter(uevent->filter);
 		/* Filter might be NULL here in case of ENONEM. */
+	}
+
+	/* Copy exclusion data */
+	if (uevent->exclusion) {
+		exclusion_alloc_size = sizeof(struct lttng_ust_event_exclusion) +
+				LTTNG_UST_SYM_NAME_LEN * uevent->exclusion->count;
+		ua_event->exclusion = zmalloc(exclusion_alloc_size);
+		if (ua_event->exclusion == NULL) {
+			PERROR("malloc");
+		} else {
+			memcpy(ua_event->exclusion, uevent->exclusion,
+					exclusion_alloc_size);
+		}
 	}
 }
 
@@ -1455,7 +1558,7 @@ static void shadow_copy_channel(struct ust_app_channel *ua_chan,
 	/* Copy all events from ltt ust channel to ust app channel */
 	cds_lfht_for_each_entry(uchan->events->ht, &iter.iter, uevent, node.node) {
 		ua_event = find_ust_app_event(ua_chan->events, uevent->attr.name,
-				uevent->filter, uevent->attr.loglevel);
+				uevent->filter, uevent->attr.loglevel, uevent->exclusion);
 		if (ua_event == NULL) {
 			DBG2("UST event %s not found on shadow copy channel",
 					uevent->attr.name);
@@ -1504,6 +1607,7 @@ static void shadow_copy_session(struct ust_app_session *ua_sess,
 	/* There is only one consumer object per session possible. */
 	ua_sess->consumer = usess->consumer;
 	ua_sess->output_traces = usess->output_traces;
+	ua_sess->live_timer_interval = usess->live_timer_interval;
 
 	switch (ua_sess->buffer_type) {
 	case LTTNG_BUFFER_PER_PID:
@@ -2567,7 +2671,7 @@ int create_ust_app_event(struct ust_app_session *ua_sess,
 
 	/* Get event node */
 	ua_event = find_ust_app_event(ua_chan->events, uevent->attr.name,
-			uevent->filter, uevent->attr.loglevel);
+			uevent->filter, uevent->attr.loglevel, uevent->exclusion);
 	if (ua_event != NULL) {
 		ret = -EEXIST;
 		goto end;
@@ -2711,14 +2815,6 @@ error_consumer:
 	delete_ust_app_channel(-1, metadata, app);
 error:
 	return ret;
-}
-
-/*
- * Return pointer to traceable apps list.
- */
-struct lttng_ht *ust_app_get_ht(void)
-{
-	return ust_app_ht;
 }
 
 /*
@@ -2984,20 +3080,6 @@ void ust_app_unregister(int sock)
 }
 
 /*
- * Return traceable_app_count
- */
-unsigned long ust_app_list_count(void)
-{
-	unsigned long count;
-
-	rcu_read_lock();
-	count = lttng_ht_get_count(ust_app_ht);
-	rcu_read_unlock();
-
-	return count;
-}
-
-/*
  * Fill events array with all events name of all registered apps.
  */
 int ust_app_list_events(struct lttng_event **events)
@@ -3043,8 +3125,7 @@ int ust_app_list_events(struct lttng_event **events)
 					&uiter)) != -LTTNG_UST_ERR_NOENT) {
 			/* Handle ustctl error. */
 			if (ret < 0) {
-				free(tmp_event);
-				if (ret != -LTTNG_UST_ERR_EXITING || ret != -EPIPE) {
+				if (ret != -LTTNG_UST_ERR_EXITING && ret != -EPIPE) {
 					ERR("UST app tp list get failed for app %d with ret %d",
 							app->sock, ret);
 				} else {
@@ -3056,6 +3137,7 @@ int ust_app_list_events(struct lttng_event **events)
 					 */
 					break;
 				}
+				free(tmp_event);
 				goto rcu_error;
 			}
 
@@ -3143,8 +3225,7 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 					&uiter)) != -LTTNG_UST_ERR_NOENT) {
 			/* Handle ustctl error. */
 			if (ret < 0) {
-				free(tmp_event);
-				if (ret != -LTTNG_UST_ERR_EXITING || ret != -EPIPE) {
+				if (ret != -LTTNG_UST_ERR_EXITING && ret != -EPIPE) {
 					ERR("UST app tp list field failed for app %d with ret %d",
 							app->sock, ret);
 				} else {
@@ -3152,10 +3233,11 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 					/*
 					 * This is normal behavior, an application can die during the
 					 * creation process. Don't report an error so the execution can
-					 * continue normally.
+					 * continue normally. Reset list and count for next app.
 					 */
 					break;
 				}
+				free(tmp_event);
 				goto rcu_error;
 			}
 
@@ -3178,12 +3260,13 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 			}
 
 			memcpy(tmp_event[count].field_name, uiter.field_name, LTTNG_UST_SYM_NAME_LEN);
-			tmp_event[count].type = uiter.type;
+			/* Mapping between these enums matches 1 to 1. */
+			tmp_event[count].type = (enum lttng_event_field_type) uiter.type;
 			tmp_event[count].nowrite = uiter.nowrite;
 
 			memcpy(tmp_event[count].event.name, uiter.event_name, LTTNG_UST_SYM_NAME_LEN);
 			tmp_event[count].event.loglevel = uiter.loglevel;
-			tmp_event[count].event.type = LTTNG_UST_TRACEPOINT;
+			tmp_event[count].event.type = LTTNG_EVENT_TRACEPOINT;
 			tmp_event[count].event.pid = app->pid;
 			tmp_event[count].event.enabled = -1;
 			count++;
@@ -3434,65 +3517,6 @@ int ust_app_disable_event_glb(struct ltt_ust_session *usess,
 }
 
 /*
- * For a specific UST session and UST channel, the event for all
- * registered apps.
- */
-int ust_app_disable_all_event_glb(struct ltt_ust_session *usess,
-		struct ltt_ust_channel *uchan)
-{
-	int ret = 0;
-	struct lttng_ht_iter iter, uiter;
-	struct lttng_ht_node_str *ua_chan_node;
-	struct ust_app *app;
-	struct ust_app_session *ua_sess;
-	struct ust_app_channel *ua_chan;
-	struct ust_app_event *ua_event;
-
-	DBG("UST app disabling all event for all apps in channel "
-			"%s for session id %" PRIu64, uchan->name, usess->id);
-
-	rcu_read_lock();
-
-	/* For all registered applications */
-	cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, app, pid_n.node) {
-		if (!app->compatible) {
-			/*
-			 * TODO: In time, we should notice the caller of this error by
-			 * telling him that this is a version error.
-			 */
-			continue;
-		}
-		ua_sess = lookup_session_by_app(usess, app);
-		if (!ua_sess) {
-			/* The application has problem or is probably dead. */
-			continue;
-		}
-
-		/* Lookup channel in the ust app session */
-		lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &uiter);
-		ua_chan_node = lttng_ht_iter_get_node_str(&uiter);
-		/* If the channel is not found, there is a code flow error */
-		assert(ua_chan_node);
-
-		ua_chan = caa_container_of(ua_chan_node, struct ust_app_channel, node);
-
-		/* Disable each events of channel */
-		cds_lfht_for_each_entry(ua_chan->events->ht, &uiter.iter, ua_event,
-				node.node) {
-			ret = disable_ust_app_event(ua_sess, ua_event, app);
-			if (ret < 0) {
-				/* XXX: Report error someday... */
-				continue;
-			}
-		}
-	}
-
-	rcu_read_unlock();
-
-	return ret;
-}
-
-/*
  * For a specific UST session, create the channel for all registered apps.
  */
 int ust_app_create_channel_glb(struct ltt_ust_session *usess,
@@ -3625,7 +3649,7 @@ int ust_app_enable_event_glb(struct ltt_ust_session *usess,
 
 		/* Get event node */
 		ua_event = find_ust_app_event(ua_chan->events, uevent->attr.name,
-				uevent->filter, uevent->attr.loglevel);
+				uevent->filter, uevent->attr.loglevel, uevent->exclusion);
 		if (ua_event == NULL) {
 			DBG3("UST app enable event %s not found for app PID %d."
 					"Skipping app", uevent->attr.name, app->pid);
@@ -4151,7 +4175,7 @@ void ust_app_global_update(struct ltt_ust_session *usess, int sock)
 
 	rcu_read_lock();
 
-	app = find_app_by_sock(sock);
+	app = ust_app_find_by_sock(sock);
 	if (app == NULL) {
 		/*
 		 * Application can be unregistered before so this is possible hence
@@ -4351,7 +4375,7 @@ int ust_app_enable_event_pid(struct ltt_ust_session *usess,
 	ua_chan = caa_container_of(ua_chan_node, struct ust_app_channel, node);
 
 	ua_event = find_ust_app_event(ua_chan->events, uevent->attr.name,
-			uevent->filter, uevent->attr.loglevel);
+			uevent->filter, uevent->attr.loglevel, uevent->exclusion);
 	if (ua_event == NULL) {
 		ret = create_ust_app_event(ua_sess, ua_chan, uevent, app);
 		if (ret < 0) {
@@ -4367,69 +4391,6 @@ int ust_app_enable_event_pid(struct ltt_ust_session *usess,
 end_unlock:
 	pthread_mutex_unlock(&ua_sess->lock);
 end:
-	rcu_read_unlock();
-	return ret;
-}
-
-/*
- * Disable event for a channel from a UST session for a specific PID.
- */
-int ust_app_disable_event_pid(struct ltt_ust_session *usess,
-		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent, pid_t pid)
-{
-	int ret = 0;
-	struct lttng_ht_iter iter;
-	struct lttng_ht_node_str *ua_chan_node, *ua_event_node;
-	struct ust_app *app;
-	struct ust_app_session *ua_sess;
-	struct ust_app_channel *ua_chan;
-	struct ust_app_event *ua_event;
-
-	DBG("UST app disabling event %s for PID %d", uevent->attr.name, pid);
-
-	rcu_read_lock();
-
-	app = ust_app_find_by_pid(pid);
-	if (app == NULL) {
-		ERR("UST app disable event per PID %d not found", pid);
-		ret = -1;
-		goto error;
-	}
-
-	if (!app->compatible) {
-		ret = 0;
-		goto error;
-	}
-
-	ua_sess = lookup_session_by_app(usess, app);
-	if (!ua_sess) {
-		/* The application has problem or is probably dead. */
-		goto error;
-	}
-
-	/* Lookup channel in the ust app session */
-	lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &iter);
-	ua_chan_node = lttng_ht_iter_get_node_str(&iter);
-	if (ua_chan_node == NULL) {
-		/* Channel does not exist, skip disabling */
-		goto error;
-	}
-	ua_chan = caa_container_of(ua_chan_node, struct ust_app_channel, node);
-
-	lttng_ht_lookup(ua_chan->events, (void *)uevent->attr.name, &iter);
-	ua_event_node = lttng_ht_iter_get_node_str(&iter);
-	if (ua_event_node == NULL) {
-		/* Event does not exist, skip disabling */
-		goto error;
-	}
-	ua_event = caa_container_of(ua_event_node, struct ust_app_event, node);
-
-	ret = disable_ust_app_event(ua_sess, ua_event, app);
-	if (ret < 0) {
-		goto error;
-	}
-
-error:
 	rcu_read_unlock();
 	return ret;
 }
@@ -4971,6 +4932,7 @@ int ust_app_snapshot_record(struct ltt_ust_session *usess,
 		struct snapshot_output *output, int wait, unsigned int nb_streams)
 {
 	int ret = 0;
+	unsigned int snapshot_done = 0;
 	struct lttng_ht_iter iter;
 	struct ust_app *app;
 	char pathname[PATH_MAX];
@@ -5045,6 +5007,7 @@ int ust_app_snapshot_record(struct ltt_ust_session *usess,
 			if (ret < 0) {
 				goto error;
 			}
+			snapshot_done = 1;
 		}
 		break;
 	}
@@ -5112,12 +5075,22 @@ int ust_app_snapshot_record(struct ltt_ust_session *usess,
 			if (ret < 0) {
 				goto error;
 			}
+			snapshot_done = 1;
 		}
 		break;
 	}
 	default:
 		assert(0);
 		break;
+	}
+
+	if (!snapshot_done) {
+		/*
+		 * If no snapshot was made and we are not in the error path, this means
+		 * that there are no buffers thus no (prior) application to snapshot
+		 * data from so we have simply NO data.
+		 */
+		ret = -ENODATA;
 	}
 
 error:

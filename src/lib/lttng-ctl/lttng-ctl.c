@@ -34,6 +34,7 @@
 #include <common/uri.h>
 #include <common/utils.h>
 #include <lttng/lttng.h>
+#include <lttng/health-internal.h>
 
 #include "filter/filter-ast.h"
 #include "filter/filter-parser.h"
@@ -59,7 +60,6 @@ do {								\
 /* Socket to session daemon for communication */
 static int sessiond_socket;
 static char sessiond_sock_path[PATH_MAX];
-static char health_sock_path[PATH_MAX];
 
 /* Variables */
 static char *tracing_group;
@@ -103,6 +103,7 @@ void lttng_ctl_copy_lttng_domain(struct lttng_domain *dst,
 		switch (src->type) {
 		case LTTNG_DOMAIN_KERNEL:
 		case LTTNG_DOMAIN_UST:
+		case LTTNG_DOMAIN_JUL:
 			memcpy(dst, src, sizeof(struct lttng_domain));
 			break;
 		default:
@@ -197,12 +198,14 @@ end:
  *
  *  If yes return 1, else return -1.
  */
-static int check_tracing_group(const char *grp_name)
+LTTNG_HIDDEN
+int lttng_check_tracing_group(void)
 {
 	struct group *grp_tracing;	/* no free(). See getgrnam(3) */
 	gid_t *grp_list;
 	int grp_list_size, grp_id, i;
 	int ret = -1;
+	const char *grp_name = tracing_group;
 
 	/* Get GID of group 'tracing' */
 	grp_tracing = getgrnam(grp_name);
@@ -293,7 +296,7 @@ static int set_session_daemon_path(void)
 
 	if (uid != 0) {
 		/* Are we in the tracing group ? */
-		in_tgroup = check_tracing_group(tracing_group);
+		in_tgroup = lttng_check_tracing_group();
 	}
 
 	if ((uid == 0) || in_tgroup) {
@@ -670,36 +673,8 @@ int lttng_add_context(struct lttng_handle *handle,
 int lttng_enable_event(struct lttng_handle *handle,
 		struct lttng_event *ev, const char *channel_name)
 {
-	struct lttcomm_session_msg lsm;
-
-	if (handle == NULL || ev == NULL) {
-		return -LTTNG_ERR_INVALID;
-	}
-
-	memset(&lsm, 0, sizeof(lsm));
-
-	/* If no channel name, send empty string. */
-	if (channel_name == NULL) {
-		lttng_ctl_copy_string(lsm.u.enable.channel_name, "",
-				sizeof(lsm.u.enable.channel_name));
-	} else {
-		lttng_ctl_copy_string(lsm.u.enable.channel_name, channel_name,
-				sizeof(lsm.u.enable.channel_name));
-	}
-
-	lttng_ctl_copy_lttng_domain(&lsm.domain, &handle->domain);
-
-	if (ev->name[0] != '\0') {
-		lsm.cmd_type = LTTNG_ENABLE_EVENT;
-	} else {
-		lsm.cmd_type = LTTNG_ENABLE_ALL_EVENT;
-	}
-	memcpy(&lsm.u.enable.event, ev, sizeof(lsm.u.enable.event));
-
-	lttng_ctl_copy_string(lsm.session.name, handle->session_name,
-			sizeof(lsm.session.name));
-
-	return lttng_ctl_ask_sessiond(&lsm, NULL);
+	return lttng_enable_event_with_exclusions(handle, ev, channel_name,
+			NULL, 0, NULL);
 }
 
 /*
@@ -712,100 +687,42 @@ int lttng_enable_event_with_filter(struct lttng_handle *handle,
 		struct lttng_event *event, const char *channel_name,
 		const char *filter_expression)
 {
+	return lttng_enable_event_with_exclusions(handle, event, channel_name,
+			filter_expression, 0, NULL);
+}
+
+/*
+ * Enable event(s) for a channel, possibly with exclusions and a filter.
+ * If no event name is specified, all events are enabled.
+ * If no channel name is specified, the default name is used.
+ * If filter expression is not NULL, the filter is set for the event.
+ * If exclusion count is not zero, the exclusions are set for the event.
+ * Returns size of returned session payload data or a negative error code.
+ */
+int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
+		struct lttng_event *ev, const char *channel_name,
+		const char *filter_expression,
+		int exclusion_count, char **exclusion_list)
+{
 	struct lttcomm_session_msg lsm;
-	struct filter_parser_ctx *ctx;
-	FILE *fmem;
+	char *varlen_data;
 	int ret = 0;
+	struct filter_parser_ctx *ctx = NULL;
+	FILE *fmem = NULL;
 
-	if (!filter_expression) {
-		/*
-		 * Fall back to normal event enabling if no filter
-		 * specified.
-		 */
-		return lttng_enable_event(handle, event, channel_name);
-	}
-
-	/*
-	 * Empty filter string will always be rejected by the parser
-	 * anyway, so treat this corner-case early to eliminate
-	 * lttng_fmemopen error for 0-byte allocation.
-	 */
-	if (handle == NULL || filter_expression[0] == '\0') {
+	if (handle == NULL || ev == NULL) {
 		return -LTTNG_ERR_INVALID;
 	}
 
-	/*
-	 * casting const to non-const, as the underlying function will
-	 * use it in read-only mode.
+	/* Empty filter string will always be rejected by the parser
+	 * anyway, so treat this corner-case early to eliminate
+	 * lttng_fmemopen error for 0-byte allocation.
 	 */
-	fmem = lttng_fmemopen((void *) filter_expression,
-			strlen(filter_expression), "r");
-	if (!fmem) {
-		fprintf(stderr, "Error opening memory as stream\n");
-		return -LTTNG_ERR_FILTER_NOMEM;
+	if (filter_expression && filter_expression[0] == '\0') {
+		return -LTTNG_ERR_INVALID;
 	}
-	ctx = filter_parser_ctx_alloc(fmem);
-	if (!ctx) {
-		fprintf(stderr, "Error allocating parser\n");
-		ret = -LTTNG_ERR_FILTER_NOMEM;
-		goto alloc_error;
-	}
-	ret = filter_parser_ctx_append_ast(ctx);
-	if (ret) {
-		fprintf(stderr, "Parse error\n");
-		ret = -LTTNG_ERR_FILTER_INVAL;
-		goto parse_error;
-	}
-	ret = filter_visitor_set_parent(ctx);
-	if (ret) {
-		fprintf(stderr, "Set parent error\n");
-		ret = -LTTNG_ERR_FILTER_INVAL;
-		goto parse_error;
-	}
-	if (print_xml) {
-		ret = filter_visitor_print_xml(ctx, stdout, 0);
-		if (ret) {
-			fflush(stdout);
-			fprintf(stderr, "XML print error\n");
-			ret = -LTTNG_ERR_FILTER_INVAL;
-			goto parse_error;
-		}
-	}
-
-	dbg_printf("Generating IR... ");
-	fflush(stdout);
-	ret = filter_visitor_ir_generate(ctx);
-	if (ret) {
-		fprintf(stderr, "Generate IR error\n");
-		ret = -LTTNG_ERR_FILTER_INVAL;
-		goto parse_error;
-	}
-	dbg_printf("done\n");
-
-	dbg_printf("Validating IR... ");
-	fflush(stdout);
-	ret = filter_visitor_ir_check_binary_op_nesting(ctx);
-	if (ret) {
-		ret = -LTTNG_ERR_FILTER_INVAL;
-		goto parse_error;
-	}
-	dbg_printf("done\n");
-
-	dbg_printf("Generating bytecode... ");
-	fflush(stdout);
-	ret = filter_visitor_bytecode_generate(ctx);
-	if (ret) {
-		fprintf(stderr, "Generate bytecode error\n");
-		ret = -LTTNG_ERR_FILTER_INVAL;
-		goto parse_error;
-	}
-	dbg_printf("done\n");
-	dbg_printf("Size of bytecode generated: %u bytes.\n",
-		bytecode_get_len(&ctx->bytecode->b));
 
 	memset(&lsm, 0, sizeof(lsm));
-
-	lsm.cmd_type = LTTNG_ENABLE_EVENT_WITH_FILTER;
 
 	/* If no channel name, send empty string. */
 	if (channel_name == NULL) {
@@ -816,27 +733,147 @@ int lttng_enable_event_with_filter(struct lttng_handle *handle,
 				sizeof(lsm.u.enable.channel_name));
 	}
 
-	/* Copy event name */
-	if (event) {
-		memcpy(&lsm.u.enable.event, event, sizeof(lsm.u.enable.event));
+	if (ev->name[0] != '\0') {
+		lsm.cmd_type = LTTNG_ENABLE_EVENT;
+	} else {
+		lsm.cmd_type = LTTNG_ENABLE_ALL_EVENT;
 	}
 
-	lsm.u.enable.bytecode_len = sizeof(ctx->bytecode->b)
-			+ bytecode_get_len(&ctx->bytecode->b);
-
 	lttng_ctl_copy_lttng_domain(&lsm.domain, &handle->domain);
+	memcpy(&lsm.u.enable.event, ev, sizeof(lsm.u.enable.event));
 
 	lttng_ctl_copy_string(lsm.session.name, handle->session_name,
 			sizeof(lsm.session.name));
+	lsm.u.enable.exclusion_count = exclusion_count;
+	lsm.u.enable.bytecode_len = 0;
 
-	ret = lttng_ctl_ask_sessiond_varlen(&lsm, &ctx->bytecode->b,
-				lsm.u.enable.bytecode_len, NULL);
+	if (exclusion_count == 0 && filter_expression == NULL) {
+		ret = lttng_ctl_ask_sessiond(&lsm, NULL);
+		return ret;
+	}
 
-	filter_bytecode_free(ctx);
-	filter_ir_free(ctx);
-	filter_parser_ctx_free(ctx);
-	if (fclose(fmem) != 0) {
-		perror("fclose");
+	/*
+	 * We have either a filter or some exclusions, so we need to set up
+	 * a variable-length memory block from where to send the data
+	 */
+
+	/* Parse filter expression */
+	if (filter_expression != NULL) {
+
+		/*
+		 * casting const to non-const, as the underlying function will
+		 * use it in read-only mode.
+		 */
+		fmem = lttng_fmemopen((void *) filter_expression,
+				strlen(filter_expression), "r");
+		if (!fmem) {
+			fprintf(stderr, "Error opening memory as stream\n");
+			return -LTTNG_ERR_FILTER_NOMEM;
+		}
+		ctx = filter_parser_ctx_alloc(fmem);
+		if (!ctx) {
+			fprintf(stderr, "Error allocating parser\n");
+			ret = -LTTNG_ERR_FILTER_NOMEM;
+			goto filter_alloc_error;
+		}
+		ret = filter_parser_ctx_append_ast(ctx);
+		if (ret) {
+			fprintf(stderr, "Parse error\n");
+			ret = -LTTNG_ERR_FILTER_INVAL;
+			goto parse_error;
+		}
+		ret = filter_visitor_set_parent(ctx);
+		if (ret) {
+			fprintf(stderr, "Set parent error\n");
+			ret = -LTTNG_ERR_FILTER_INVAL;
+			goto parse_error;
+		}
+		if (print_xml) {
+			ret = filter_visitor_print_xml(ctx, stdout, 0);
+			if (ret) {
+				fflush(stdout);
+				fprintf(stderr, "XML print error\n");
+				ret = -LTTNG_ERR_FILTER_INVAL;
+				goto parse_error;
+			}
+		}
+
+		dbg_printf("Generating IR... ");
+		fflush(stdout);
+		ret = filter_visitor_ir_generate(ctx);
+		if (ret) {
+			fprintf(stderr, "Generate IR error\n");
+			ret = -LTTNG_ERR_FILTER_INVAL;
+			goto parse_error;
+		}
+		dbg_printf("done\n");
+
+		dbg_printf("Validating IR... ");
+		fflush(stdout);
+		ret = filter_visitor_ir_check_binary_op_nesting(ctx);
+		if (ret) {
+			ret = -LTTNG_ERR_FILTER_INVAL;
+			goto parse_error;
+		}
+		dbg_printf("done\n");
+
+		dbg_printf("Generating bytecode... ");
+		fflush(stdout);
+		ret = filter_visitor_bytecode_generate(ctx);
+		if (ret) {
+			fprintf(stderr, "Generate bytecode error\n");
+			ret = -LTTNG_ERR_FILTER_INVAL;
+			goto parse_error;
+		}
+		dbg_printf("done\n");
+		dbg_printf("Size of bytecode generated: %u bytes.\n",
+			bytecode_get_len(&ctx->bytecode->b));
+
+		lsm.u.enable.bytecode_len = sizeof(ctx->bytecode->b)
+				+ bytecode_get_len(&ctx->bytecode->b);
+	}
+
+	/* Allocate variable length data */
+	if (lsm.u.enable.exclusion_count != 0) {
+		varlen_data = zmalloc(lsm.u.enable.bytecode_len
+				+ LTTNG_SYMBOL_NAME_LEN * exclusion_count);
+		if (!varlen_data) {
+			ret = -LTTNG_ERR_EXCLUSION_NOMEM;
+			goto varlen_alloc_error;
+		}
+		/* Put exclusion names first in the data */
+		while (exclusion_count--) {
+			strncpy(varlen_data + LTTNG_SYMBOL_NAME_LEN * exclusion_count,
+					*(exclusion_list + exclusion_count),
+					LTTNG_SYMBOL_NAME_LEN);
+		}
+		/* Add filter bytecode next */
+		if (lsm.u.enable.bytecode_len != 0) {
+			memcpy(varlen_data + LTTNG_SYMBOL_NAME_LEN * lsm.u.enable.exclusion_count,
+					&ctx->bytecode->b,
+					lsm.u.enable.bytecode_len);
+		}
+	} else {
+		/* no exclusions - use the already allocated filter bytecode */
+		varlen_data = (char *)(&ctx->bytecode->b);
+	}
+
+	ret = lttng_ctl_ask_sessiond_varlen(&lsm, varlen_data,
+			(LTTNG_SYMBOL_NAME_LEN * lsm.u.enable.exclusion_count) +
+			lsm.u.enable.bytecode_len, NULL);
+
+	if (lsm.u.enable.exclusion_count != 0) {
+		free(varlen_data);
+	}
+
+varlen_alloc_error:
+	if (filter_expression) {
+		filter_bytecode_free(ctx);
+		filter_ir_free(ctx);
+		filter_parser_ctx_free(ctx);
+		if (fclose(fmem) != 0) {
+			perror("fclose");
+		}
 	}
 	return ret;
 
@@ -844,7 +881,7 @@ parse_error:
 	filter_bytecode_free(ctx);
 	filter_ir_free(ctx);
 	filter_parser_ctx_free(ctx);
-alloc_error:
+filter_alloc_error:
 	if (fclose(fmem) != 0) {
 		perror("fclose");
 	}
@@ -1362,104 +1399,6 @@ int lttng_disable_consumer(struct lttng_handle *handle)
 }
 
 /*
- * Set health socket path by putting it in the global health_sock_path
- * variable.
- *
- * Returns 0 on success or assert(0) on ENOMEM.
- */
-static int set_health_socket_path(void)
-{
-	int in_tgroup = 0;	/* In tracing group */
-	uid_t uid;
-	const char *home;
-
-	uid = getuid();
-
-	if (uid != 0) {
-		/* Are we in the tracing group ? */
-		in_tgroup = check_tracing_group(tracing_group);
-	}
-
-	if ((uid == 0) || in_tgroup) {
-		lttng_ctl_copy_string(health_sock_path,
-				DEFAULT_GLOBAL_HEALTH_UNIX_SOCK, sizeof(health_sock_path));
-	}
-
-	if (uid != 0) {
-		int ret;
-
-		/*
-		 * With GNU C <  2.1, snprintf returns -1 if the target buffer is too small;
-		 * With GNU C >= 2.1, snprintf returns the required size (excluding closing null)
-		 */
-		home = utils_get_home_dir();
-		if (home == NULL) {
-			/* Fallback in /tmp .. */
-			home = "/tmp";
-		}
-
-		ret = snprintf(health_sock_path, sizeof(health_sock_path),
-				DEFAULT_HOME_HEALTH_UNIX_SOCK, home);
-		if ((ret < 0) || (ret >= sizeof(health_sock_path))) {
-			/* ENOMEM at this point... just kill the control lib. */
-			assert(0);
-		}
-	}
-
-	return 0;
-}
-
-/*
- * Check session daemon health for a specific health component.
- *
- * Return 0 if health is OK or else 1 if BAD.
- *
- * Any other negative value is a lttng error code which can be translated with
- * lttng_strerror().
- */
-int lttng_health_check(enum lttng_health_component c)
-{
-	int sock, ret;
-	struct lttcomm_health_msg msg;
-	struct lttcomm_health_data reply;
-
-	/* Connect to the sesssion daemon */
-	sock = lttcomm_connect_unix_sock(health_sock_path);
-	if (sock < 0) {
-		ret = -LTTNG_ERR_NO_SESSIOND;
-		goto error;
-	}
-
-	msg.cmd = LTTNG_HEALTH_CHECK;
-	msg.component = c;
-
-	ret = lttcomm_send_unix_sock(sock, (void *)&msg, sizeof(msg));
-	if (ret < 0) {
-		ret = -LTTNG_ERR_FATAL;
-		goto close_error;
-	}
-
-	ret = lttcomm_recv_unix_sock(sock, (void *)&reply, sizeof(reply));
-	if (ret < 0) {
-		ret = -LTTNG_ERR_FATAL;
-		goto close_error;
-	}
-
-	ret = reply.ret_code;
-
-close_error:
-	{
-		int closeret;
-
-		closeret = close(sock);
-		assert(!closeret);
-	}
-
-error:
-	return ret;
-}
-
-/*
  * This is an extension of create session that is ONLY and SHOULD only be used
  * by the lttng command line program. It exists to avoid using URI parsing in
  * the lttng client.
@@ -1597,14 +1536,57 @@ int lttng_create_session_snapshot(const char *name, const char *snapshot_url)
 }
 
 /*
+ * Create a session exclusively used for live.
+ *
+ * Returns LTTNG_OK on success or a negative error code.
+ */
+int lttng_create_session_live(const char *name, const char *url,
+		unsigned int timer_interval)
+{
+	int ret;
+	ssize_t size;
+	struct lttcomm_session_msg lsm;
+	struct lttng_uri *uris = NULL;
+
+	if (name == NULL) {
+		return -LTTNG_ERR_INVALID;
+	}
+
+	memset(&lsm, 0, sizeof(lsm));
+
+	lsm.cmd_type = LTTNG_CREATE_SESSION_LIVE;
+	lttng_ctl_copy_string(lsm.session.name, name, sizeof(lsm.session.name));
+
+	size = uri_parse_str_urls(url, NULL, &uris);
+	if (size < 0) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	/* file:// is not accepted for live session. */
+	if (uris[0].dtype == LTTNG_DST_PATH) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	lsm.u.session_live.nb_uri = size;
+	lsm.u.session_live.timer_interval = timer_interval;
+
+	ret = lttng_ctl_ask_sessiond_varlen(&lsm, uris,
+			sizeof(struct lttng_uri) * size, NULL);
+
+end:
+	free(uris);
+	return ret;
+}
+
+/*
  * lib constructor
  */
 static void __attribute__((constructor)) init()
 {
 	/* Set default session group */
 	lttng_set_tracing_group(DEFAULT_TRACING_GROUP);
-	/* Set socket for health check */
-	(void) set_health_socket_path();
 }
 
 /*

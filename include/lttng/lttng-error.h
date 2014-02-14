@@ -82,7 +82,7 @@ enum lttng_error_code {
 	LTTNG_ERR_KERN_STREAM_FAIL       = 49,  /* Kernel create stream failed */
 	LTTNG_ERR_START_SESSION_ONCE     = 50,  /* Session needs to be started once. */
 	LTTNG_ERR_SNAPSHOT_FAIL          = 51,  /* Snapshot record failed. */
-	/* 52 */
+	LTTNG_ERR_NO_STREAM              = 52,  /* Index without stream on relay. */
 	LTTNG_ERR_KERN_LIST_FAIL         = 53,  /* Kernel listing events failed */
 	LTTNG_ERR_UST_CALIBRATE_FAIL     = 54,  /* UST calibration failed */
 	LTTNG_ERR_UST_EVENT_ENABLED      = 55,  /* UST event already enabled. */
@@ -92,7 +92,7 @@ enum lttng_error_code {
 	LTTNG_ERR_UST_CHAN_NOT_FOUND     = 59,  /* UST channel not found */
 	LTTNG_ERR_UST_CHAN_DISABLE_FAIL  = 60,  /* UST disable channel failed */
 	LTTNG_ERR_UST_CHAN_ENABLE_FAIL   = 61,  /* UST enable channel failed */
-	/* 62 */
+	LTTNG_ERR_CHAN_EXIST             = 62,  /* Channel already exists. */
 	LTTNG_ERR_UST_ENABLE_FAIL        = 63,  /* UST enable event failed */
 	LTTNG_ERR_UST_DISABLE_FAIL       = 64,  /* UST disable event failed */
 	LTTNG_ERR_UST_META_FAIL          = 65,  /* UST open metadata failed */
@@ -101,7 +101,7 @@ enum lttng_error_code {
 	LTTNG_ERR_UST_CONSUMER64_FAIL    = 68,  /* 64-bit UST consumer start failed */
 	LTTNG_ERR_UST_CONSUMER32_FAIL    = 69,  /* 32-bit UST consumer start failed */
 	LTTNG_ERR_UST_STREAM_FAIL        = 70,  /* UST create stream failed */
-	/* 71 */
+	LTTNG_ERR_SNAPSHOT_NODATA        = 71,  /* No data in snapshot. */
 	/* 72 */
 	/* 73 */
 	LTTNG_ERR_UST_LIST_FAIL          = 74,  /* UST listing events failed */
@@ -140,6 +140,8 @@ enum lttng_error_code {
 	LTTNG_ERR_FILTER_NOMEM           = 107, /* Lack of memory for filter bytecode */
 	LTTNG_ERR_FILTER_EXIST           = 108, /* Filter already exist */
 	LTTNG_ERR_NO_CONSUMER            = 109, /* No consumer exist for the session */
+	LTTNG_ERR_EXCLUSION_INVAL        = 110, /* Invalid event exclusion data */
+	LTTNG_ERR_EXCLUSION_NOMEM        = 111, /* Lack of memory while processing event exclusions */
 
 	/* MUST be last element */
 	LTTNG_ERR_NR,                           /* Last element */

@@ -56,6 +56,9 @@ Verbose mode for consumer. Activate DBG() macro.
 .BR "-d, --daemonize"
 Start as a daemon
 .TP
+.BR "-b, --background"
+Start as a daemon, keeping console open
+.TP
 .BR "-g, --group=NAME"
 Specify the tracing group name. (default: tracing)
 .TP
@@ -63,7 +66,7 @@ Specify the tracing group name. (default: tracing)
 Show version number
 .TP
 .BR "-S, --sig-parent"
-Send SIGCHLD to parent pid to notify readiness.
+Send SIGUSR1 to parent pid to notify readiness.
 
 This is used by \fBlttng(1)\fP to get notified when the session daemon is ready
 to accept command. When building a third party tool over liblttng-ctl, this option

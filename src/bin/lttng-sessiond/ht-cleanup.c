@@ -23,11 +23,13 @@
 #include <common/utils.h>
 
 #include "lttng-sessiond.h"
-#include "health.h"
+#include "health-sessiond.h"
+#include "testpoint.h"
 
 void *thread_ht_cleanup(void *data)
 {
 	int ret, i, pollfd, err = -1;
+	ssize_t size_ret;
 	uint32_t revents, nb_fd;
 	struct lttng_poll_event events;
 
@@ -36,7 +38,11 @@ void *thread_ht_cleanup(void *data)
 	rcu_register_thread();
 	rcu_thread_online();
 
-	health_register(HEALTH_TYPE_HT_CLEANUP);
+	health_register(health_sessiond, HEALTH_SESSIOND_TYPE_HT_CLEANUP);
+
+	if (testpoint(sessiond_thread_ht_cleanup)) {
+		goto error_testpoint;
+	}
 
 	health_code_update();
 
@@ -100,11 +106,10 @@ restart:
 				goto error;
 			}
 
-			do {
-				/* Get socket from dispatch thread. */
-				ret = read(ht_cleanup_pipe[0], &ht, sizeof(ht));
-			} while (ret < 0 && errno == EINTR);
-			if (ret < 0 || ret < sizeof(ht)) {
+			/* Get socket from dispatch thread. */
+			size_ret = lttng_read(ht_cleanup_pipe[0], &ht,
+					sizeof(ht));
+			if (size_ret < sizeof(ht)) {
 				PERROR("ht cleanup notify pipe");
 				goto error;
 			}
@@ -125,6 +130,7 @@ exit:
 error:
 	lttng_poll_clean(&events);
 error_poll_create:
+error_testpoint:
 	utils_close_pipe(ht_cleanup_pipe);
 	ht_cleanup_pipe[0] = ht_cleanup_pipe[1] = -1;
 	DBG("[ust-thread] cleanup complete.");
@@ -132,7 +138,7 @@ error_poll_create:
 		health_error();
 		ERR("Health error occurred in %s", __func__);
 	}
-	health_unregister();
+	health_unregister(health_sessiond);
 	rcu_thread_offline();
 	rcu_unregister_thread();
 	return NULL;

@@ -80,14 +80,15 @@ enum lttcomm_sessiond_command {
 	LTTNG_DISABLE_CONSUMER              = 19,
 	LTTNG_ENABLE_CONSUMER               = 20,
 	LTTNG_SET_CONSUMER_URI              = 21,
-	LTTNG_ENABLE_EVENT_WITH_FILTER      = 22,
-	LTTNG_HEALTH_CHECK                  = 23,
+	/* 22 */
+	/* 23 */
 	LTTNG_DATA_PENDING                  = 24,
 	LTTNG_SNAPSHOT_ADD_OUTPUT           = 25,
 	LTTNG_SNAPSHOT_DEL_OUTPUT           = 26,
 	LTTNG_SNAPSHOT_LIST_OUTPUT          = 27,
 	LTTNG_SNAPSHOT_RECORD               = 28,
 	LTTNG_CREATE_SESSION_SNAPSHOT       = 29,
+	LTTNG_CREATE_SESSION_LIVE           = 30,
 };
 
 enum lttcomm_relayd_command {
@@ -102,12 +103,20 @@ enum lttcomm_relayd_command {
 	RELAYD_QUIESCENT_CONTROL            = 9,
 	RELAYD_BEGIN_DATA_PENDING           = 10,
 	RELAYD_END_DATA_PENDING             = 11,
+	RELAYD_ADD_INDEX                    = 12,
+	RELAYD_SEND_INDEX                   = 13,
+	RELAYD_CLOSE_INDEX                  = 14,
+	/* Live-reading commands (2.4+). */
+	RELAYD_LIST_SESSIONS                = 15,
+	/* All streams of the channel have been sent to the relayd (2.4+). */
+	RELAYD_STREAMS_SENT                 = 16,
 };
 
 /*
  * lttcomm error code.
  */
 enum lttcomm_return_code {
+	LTTCOMM_CONSUMERD_SUCCESS            = 0,   /* Everything went fine. */
 	LTTCOMM_CONSUMERD_COMMAND_SOCK_READY = 1,   /* Command socket ready */
 	LTTCOMM_CONSUMERD_SUCCESS_RECV_FD,          /* Success on receiving fds */
 	LTTCOMM_CONSUMERD_ERROR_RECV_FD,            /* Error on receiving fds */
@@ -126,6 +135,7 @@ enum lttcomm_return_code {
 	LTTCOMM_CONSUMERD_ERROR_METADATA,           /* Error with metadata. */
 	LTTCOMM_CONSUMERD_FATAL,                    /* Fatal error. */
 	LTTCOMM_CONSUMERD_RELAYD_FAIL,              /* Error on remote relayd */
+	LTTCOMM_CONSUMERD_CHANNEL_FAIL,             /* Channel creation failed. */
 
 	/* MUST be last element */
 	LTTCOMM_NR,						/* Last element */
@@ -224,6 +234,14 @@ struct lttcomm_session_msg {
 			struct lttng_event event;
 			/* Length of following bytecode for filter. */
 			uint32_t bytecode_len;
+			/* exclusion data */
+			uint32_t exclusion_count;
+			/*
+			 * After this structure, the following variable-length
+			 * items are transmitted:
+			 * - char exclusion_names[LTTNG_SYMBOL_NAME_LEN][exclusion_count]
+			 * - unsigned char filter_bytecode[bytecode_len]
+			 */
 		} LTTNG_PACKED enable;
 		/* Create channel */
 		struct {
@@ -255,6 +273,10 @@ struct lttcomm_session_msg {
 			uint32_t wait;
 			struct lttng_snapshot_output output;
 		} LTTNG_PACKED snapshot_record;
+		struct {
+			uint32_t nb_uri;
+			unsigned int timer_interval;	/* usec */
+		} LTTNG_PACKED session_live;
 	} u;
 } LTTNG_PACKED;
 
@@ -275,6 +297,18 @@ struct lttng_filter_bytecode {
 } LTTNG_PACKED;
 
 /*
+ * Event exclusion data. At the end of the structure, there will actually
+ * by zero or more names, where the actual number of names is given by
+ * the 'count' item of the structure.
+ */
+#define LTTNG_EVENT_EXCLUSION_PADDING	32
+struct lttng_event_exclusion {
+	uint32_t count;
+	char padding[LTTNG_EVENT_EXCLUSION_PADDING];
+	char names[LTTNG_SYMBOL_NAME_LEN][0];
+} LTTNG_PACKED;
+
+/*
  * Data structure for the response from sessiond to the lttng client.
  */
 struct lttcomm_lttng_msg {
@@ -288,15 +322,6 @@ struct lttcomm_lttng_msg {
 
 struct lttcomm_lttng_output_id {
 	uint32_t id;
-} LTTNG_PACKED;
-
-struct lttcomm_health_msg {
-	uint32_t component;
-	uint32_t cmd;
-} LTTNG_PACKED;
-
-struct lttcomm_health_data {
-	uint32_t ret_code;
 } LTTNG_PACKED;
 
 /*
@@ -324,6 +349,8 @@ struct lttcomm_consumer_msg {
 			uint32_t tracefile_count; /* number of tracefiles */
 			/* If the channel's streams have to be monitored or not. */
 			uint32_t monitor;
+			/* timer to check the streams usage in live mode (usec). */
+			unsigned int live_timer_interval;
 		} LTTNG_PACKED channel; /* Only used by Kernel. */
 		struct {
 			uint64_t stream_key;
@@ -339,6 +366,8 @@ struct lttcomm_consumer_msg {
 			struct lttcomm_relayd_sock sock;
 			/* Tracing session id associated to the relayd. */
 			uint64_t session_id;
+			/* Relayd session id, only used with control socket. */
+			uint64_t relayd_session_id;
 		} LTTNG_PACKED relayd_sock;
 		struct {
 			uint64_t net_seq_idx;
@@ -352,6 +381,7 @@ struct lttcomm_consumer_msg {
 			int32_t overwrite;			/* 1: overwrite, 0: discard */
 			uint32_t switch_timer_interval;		/* usec */
 			uint32_t read_timer_interval;		/* usec */
+			unsigned int live_timer_interval;		/* usec */
 			int32_t output;				/* splice, mmap */
 			int32_t type;				/* metadata or per_cpu */
 			uint64_t session_id;			/* Tracing session id */
@@ -405,6 +435,10 @@ struct lttcomm_consumer_msg {
 			uint64_t key;
 			uint64_t max_stream_size;
 		} LTTNG_PACKED snapshot_channel;
+		struct {
+			uint64_t channel_key;
+			uint64_t net_seq_idx;
+		} LTTNG_PACKED sent_streams;
 	} u;
 } LTTNG_PACKED;
 
@@ -412,11 +446,11 @@ struct lttcomm_consumer_msg {
  * Status message returned to the sessiond after a received command.
  */
 struct lttcomm_consumer_status_msg {
-	enum lttng_error_code ret_code;
+	enum lttcomm_return_code ret_code;
 } LTTNG_PACKED;
 
 struct lttcomm_consumer_status_channel {
-	enum lttng_error_code ret_code;
+	enum lttcomm_return_code ret_code;
 	uint64_t key;
 	unsigned int stream_count;
 } LTTNG_PACKED;

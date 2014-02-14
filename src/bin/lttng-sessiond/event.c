@@ -48,6 +48,7 @@ static void add_unique_ust_event(struct lttng_ht *ht,
 	key.name = event->attr.name;
 	key.filter = (struct lttng_filter_bytecode *) event->filter;
 	key.loglevel = event->attr.loglevel;
+	key.exclusion = event->exclusion;
 
 	node_ptr = cds_lfht_add_unique(ht->ht,
 			ht->hash_fct(event->node.key, lttng_ht_seed),
@@ -244,7 +245,7 @@ end:
 }
 
 /*
- * Enable all kernel tracepoint events of a channel of the kernel session.
+ * Enable all kernel sycalls events of a channel of the kernel session.
  */
 int event_kernel_enable_all_syscalls(struct ltt_kernel_channel *kchan,
 		int kernel_tracer_fd)
@@ -350,7 +351,7 @@ int event_ust_enable_all_tracepoints(struct ltt_ust_session *usess,
 		 * previously.
 		 */
 		uevent = trace_ust_find_event(uchan->events, events[i].name, filter,
-				events[i].loglevel);
+				events[i].loglevel, NULL);
 		if (uevent != NULL) {
 			ret = ust_app_enable_event_pid(usess, uchan, uevent,
 					events[i].pid);
@@ -364,7 +365,7 @@ int event_ust_enable_all_tracepoints(struct ltt_ust_session *usess,
 		}
 
 		/* Create ust event */
-		uevent = trace_ust_create_event(&events[i], filter);
+		uevent = trace_ust_create_event(&events[i], filter, NULL);
 		if (uevent == NULL) {
 			ret = LTTNG_ERR_FATAL;
 			goto error_destroy;
@@ -408,7 +409,8 @@ error:
  */
 int event_ust_enable_tracepoint(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct lttng_event *event,
-		struct lttng_filter_bytecode *filter)
+		struct lttng_filter_bytecode *filter,
+		struct lttng_event_exclusion *exclusion)
 {
 	int ret = LTTNG_OK, to_create = 0;
 	struct ltt_ust_event *uevent;
@@ -420,9 +422,9 @@ int event_ust_enable_tracepoint(struct ltt_ust_session *usess,
 	rcu_read_lock();
 
 	uevent = trace_ust_find_event(uchan->events, event->name, filter,
-			event->loglevel);
+			event->loglevel, exclusion);
 	if (uevent == NULL) {
-		uevent = trace_ust_create_event(event, filter);
+		uevent = trace_ust_create_event(event, filter, exclusion);
 		if (uevent == NULL) {
 			ret = LTTNG_ERR_UST_ENABLE_FAIL;
 			goto error;
@@ -605,5 +607,181 @@ int event_ust_disable_all_tracepoints(struct ltt_ust_session *usess,
 error:
 	free(events);
 	rcu_read_unlock();
+	return ret;
+}
+
+/*
+ * Enable all JUL event for a given UST session.
+ *
+ * Return LTTNG_OK on success or else a LTTNG_ERR* code.
+ */
+int event_jul_enable_all(struct ltt_ust_session *usess,
+		struct lttng_event *event)
+{
+	int ret;
+	struct jul_event *jevent;
+	struct lttng_ht_iter iter;
+
+	assert(usess);
+
+	DBG("Event JUL enabling ALL events for session %" PRIu64, usess->id);
+
+	/* Enable event on JUL application through TCP socket. */
+	ret = event_jul_enable(usess, event);
+	if (ret != LTTNG_OK) {
+		goto error;
+	}
+
+	/* Flag every event that they are now enabled. */
+	rcu_read_lock();
+	cds_lfht_for_each_entry(usess->domain_jul.events->ht, &iter.iter, jevent,
+			node.node) {
+		jevent->enabled = 1;
+	}
+	rcu_read_unlock();
+
+	ret = LTTNG_OK;
+
+error:
+	return ret;
+}
+
+/*
+ * Enable a single JUL event for a given UST session.
+ *
+ * Return LTTNG_OK on success or else a LTTNG_ERR* code.
+ */
+int event_jul_enable(struct ltt_ust_session *usess, struct lttng_event *event)
+{
+	int ret, created = 0;
+	struct jul_event *jevent;
+
+	assert(usess);
+	assert(event);
+
+	DBG("Event JUL enabling %s for session %" PRIu64 " with loglevel type %d "
+			"and loglevel %d", event->name, usess->id, event->loglevel_type,
+			event->loglevel);
+
+	jevent = jul_find_by_name(event->name, &usess->domain_jul);
+	if (!jevent) {
+		jevent = jul_create_event(event->name);
+		if (!jevent) {
+			ret = LTTNG_ERR_NOMEM;
+			goto error;
+		}
+		jevent->loglevel = event->loglevel;
+		jevent->loglevel_type = event->loglevel_type;
+		created = 1;
+	}
+
+	/* Already enabled? */
+	if (jevent->enabled) {
+		goto end;
+	}
+
+	ret = jul_enable_event(jevent);
+	if (ret != LTTNG_OK) {
+		goto error;
+	}
+
+	/* If the event was created prior to the enable, add it to the domain. */
+	if (created) {
+		jul_add_event(jevent, &usess->domain_jul);
+	}
+
+end:
+	return LTTNG_OK;
+
+error:
+	if (created) {
+		jul_destroy_event(jevent);
+	}
+	return ret;
+}
+
+/*
+ * Disable a single JUL event for a given UST session.
+ *
+ * Return LTTNG_OK on success or else a LTTNG_ERR* code.
+ */
+int event_jul_disable(struct ltt_ust_session *usess, char *event_name)
+{
+	int ret;
+	struct jul_event *jevent;
+
+	assert(usess);
+	assert(event_name);
+
+	DBG("Event JUL disabling %s for session %" PRIu64, event_name, usess->id);
+
+	jevent = jul_find_by_name(event_name, &usess->domain_jul);
+	if (!jevent) {
+		ret = LTTNG_ERR_UST_EVENT_NOT_FOUND;
+		goto error;
+	}
+
+	/* Already disabled? */
+	if (!jevent->enabled) {
+		goto end;
+	}
+
+	ret = jul_disable_event(jevent);
+	if (ret != LTTNG_OK) {
+		goto error;
+	}
+
+end:
+	return LTTNG_OK;
+
+error:
+	return ret;
+}
+/*
+ * Disable all JUL event for a given UST session.
+ *
+ * Return LTTNG_OK on success or else a LTTNG_ERR* code.
+ */
+int event_jul_disable_all(struct ltt_ust_session *usess)
+{
+	int ret, do_disable = 0;
+	struct jul_event *jevent;
+	struct lttng_ht_iter iter;
+
+	assert(usess);
+
+	/* Enable event on JUL application through TCP socket. */
+	ret = event_jul_disable(usess, "*");
+	if (ret != LTTNG_OK) {
+		if (ret == LTTNG_ERR_UST_EVENT_NOT_FOUND) {
+			/*
+			 * This means that no enable all was done before but still a user
+			 * could want to disable everything even though the * wild card
+			 * event does not exists.
+			 */
+			do_disable = 1;
+		} else {
+			goto error;
+		}
+	}
+
+	/* Flag every event that they are now enabled. */
+	rcu_read_lock();
+	cds_lfht_for_each_entry(usess->domain_jul.events->ht, &iter.iter, jevent,
+			node.node) {
+		if (jevent->enabled && do_disable) {
+			ret = event_jul_disable(usess, jevent->name);
+			if (ret != LTTNG_OK) {
+				rcu_read_unlock();
+				goto error;
+			}
+		}
+		jevent->enabled = 0;
+	}
+	rcu_read_unlock();
+
+	ret = LTTNG_OK;
+
+error:
 	return ret;
 }

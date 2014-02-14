@@ -136,11 +136,11 @@ int kernel_create_channel(struct ltt_kernel_session *session,
 		goto error;
 	}
 
-	DBG3("Kernel create channel %s with attr: %d, %" PRIu64 ", %" PRIu64 ", %u, %u, %d",
+	DBG3("Kernel create channel %s with attr: %d, %" PRIu64 ", %" PRIu64 ", %u, %u, %d, %d",
 			chan->name, lkc->channel->attr.overwrite,
 			lkc->channel->attr.subbuf_size, lkc->channel->attr.num_subbuf,
 			lkc->channel->attr.switch_timer_interval, lkc->channel->attr.read_timer_interval,
-			lkc->channel->attr.output);
+			lkc->channel->attr.live_timer_interval, lkc->channel->attr.output);
 
 	/* Kernel tracer channel creation */
 	ret = kernctl_create_channel(session->fd, &lkc->channel->attr);
@@ -926,6 +926,8 @@ int kernel_snapshot_record(struct ltt_kernel_session *ksess,
 		 */
 		(void) kernel_consumer_destroy_metadata(socket, ksess->metadata);
 	}
+
+	ret = LTTNG_OK;
 
 error_consumer:
 	/* Close newly opened metadata stream. It's now on the consumer side. */

@@ -1,3 +1,94 @@
+2014-01-29 lttng-tools 2.4.0-rc4
+	* Fix: add -b, --background option
+	* health check tests: test relayd and consumerd
+	* tests: Add stop_lttng_relayd_nocheck
+	* Fix: add missing JUL loglevel handling
+	* relayd: add testpoints
+	* relayd: use same pipe for live and main
+	* Cleanup relayd live comment
+	* Fix: relayd: add LPOLLERR to events
+	* Fix: relayd: notify parent of readiness when all threads ready
+	* Fix: tests: start relayd in background mode (-b)
+	* lttng-relayd: implement background cmd line option
+	* sessiond: add missing testpoints
+	* tests: use --background for session daemon
+	* sessiond: add --background argument
+	* Use lib common daemonize
+	* Fix: sessiond: wait for health check readiness
+	* Fix: relayd: initialize lttcomm inet
+	* Consumer: add testpoints
+	* Fix: consumerd: HT init/teardown with program
+	* Cleanup: lttng-ctl-health comment
+	* Add daemonize() to libcommon
+	* Fix: tests: wait for consumerd to complete
+	* Fix: consumerd: use DBG rather than DBG2
+	* Fix: consumerd: only return readiness when health is ready
+	* Fix: consumerd should initialize lttcomm
+	* Fix health check: signal parent before exit testpoint
+	* Test health: add test_thread_ok
+	* health check: change --relayd-path arg to --relayd-path=arg
+	* relayd: add LTTNG_RELAYD_HEALTH env var
+	* Add sessiond/SESSIOND_ prefix to sessiond testpoints
+	* Fix: zero out data structure before using it
+	* Fix: delete metadata stream before destroying it
+	* Fix: report to client when snapshot will be empty
+
+2014-01-14 lttng-tools 2.4.0-rc3
+	* Fix: metadata stream should be always flagged as ready
+	* Fix: wrong check before destroying the viewer metadata stream
+	* Fix: race with the viewer and readiness of streams
+	* Fix: missing reset when listing UST fields for multiple PIDs
+	* Fix: filter: check binary op nesting
+	* Fix: relayd cmd line option for live port
+	* Fix: remove break in epoll loop of apps. thread
+	* Fix: wrong comment in snapshot public API
+	* Fix: clear the CTF traces when all the streams are closed
+
+2013-12-10 lttng-tools 2.4.0-rc2
+	* Fix: close connection on incompatible version check
+	* Fix: fields alignements in live protocol
+	* Tests: add regression test for Java JUL support
+	* Fix: possible use after free
+	* Fix: remove unused code in session daemon
+	* Fix: string format with unsigned value
+	* Fix: remove useless assert
+	* Fix: bad logical check of error codes
+	* Fix: resource leak in enable-event command
+	* Fix: unchecked return value in ust app delete
+	* Fix: dereference after null check in UST registry
+	* Fix: Resource leak in ust registry
+	* Fix: backported from urcu commit 92af1a30
+	* Tests: fix racy tests and misleading output messages
+	* Tests: fix bad argument parsing in test app
+	* Fix: remove assert on fd in the read/write layer
+	* Fix: missing lock/unlock when sending index
+	* Fix: update back the metadata len sent on failure
+	* Fix: don't fail on push metadata if no channel
+	* Rename LTTng index in CTF index
+	* Fix: set the enable all event command type
+	* Fix: implicit conversion of enum types in sessiond
+	* Fix: implicit conversion of enum types in consumer
+	* Fix: comparison of unsigned enum expression >= 0
+	* Fix: comparison of unsigned value agains < 0
+	* Fix: create a fast and a long UST snapshot test
+	* Tests: fix racy UST snapshot post mortem test
+	* Tests: remove useless sleep when spawning sessiond
+	* Add travis-ci configuration file
+	* Add libuuid as dependency in README
+	* Tests: add valid test cases to test_utils_expand_path
+	* Tests: add symlink tests for test_utils_expand_path
+	* Fix: utils_expand_path now works for paths that ends with '/.' or '/..'
+	* Fix: comment indentation
+	* Add missing copyright to utils.c
+	* Fix: use non block waitpid to lookup child state
+
+2013-11-15 lttng-tools 2.4.0-rc1
+	* Live streaming support
+	* Health check support in consumer and relayd
+	* Event exclusion support
+	* Java Util Logging support
+	* Multiple fixes! The diff is just too big to put here.
+
 2013-09-03 lttng-tools 2.3.0
 	* Fix: remove periodical flush test from make check
 

@@ -30,7 +30,7 @@
 #include "channel.h"
 #include "consumer.h"
 #include "event.h"
-#include "health.h"
+#include "health-sessiond.h"
 #include "kernel.h"
 #include "kernel-consumer.h"
 #include "lttng-sessiond.h"
@@ -183,6 +183,55 @@ static void list_lttng_channels(int domain, struct ltt_session *session,
 }
 
 /*
+ * Create a list of JUL domain events.
+ *
+ * Return number of events in list on success or else a negative value.
+ */
+static int list_lttng_jul_events(struct jul_domain *dom,
+		struct lttng_event **events)
+{
+	int i = 0, ret = 0;
+	unsigned int nb_event = 0;
+	struct jul_event *event;
+	struct lttng_event *tmp_events;
+	struct lttng_ht_iter iter;
+
+	assert(dom);
+	assert(events);
+
+	DBG3("Listing JUL events");
+
+	nb_event = lttng_ht_get_count(dom->events);
+	if (nb_event == 0) {
+		ret = nb_event;
+		goto error;
+	}
+
+	tmp_events = zmalloc(nb_event * sizeof(*tmp_events));
+	if (!tmp_events) {
+		PERROR("zmalloc JUL events session");
+		ret = -LTTNG_ERR_FATAL;
+		goto error;
+	}
+
+	rcu_read_lock();
+	cds_lfht_for_each_entry(dom->events->ht, &iter.iter, event, node.node) {
+		strncpy(tmp_events[i].name, event->name, sizeof(tmp_events[i].name));
+		tmp_events[i].name[sizeof(tmp_events[i].name) - 1] = '\0';
+		tmp_events[i].enabled = event->enabled;
+		i++;
+	}
+	rcu_read_unlock();
+
+	*events = tmp_events;
+	ret = nb_event;
+
+error:
+	assert(nb_event == i);
+	return ret;
+}
+
+/*
  * Create a list of ust global domain events.
  */
 static int list_lttng_ust_global_events(char *channel_name,
@@ -255,6 +304,9 @@ static int list_lttng_ust_global_events(char *channel_name,
 		}
 		if (uevent->filter) {
 			tmp[i].filter = 1;
+		}
+		if (uevent->exclusion) {
+			tmp[i].exclusion = 1;
 		}
 		i++;
 	}
@@ -547,7 +599,8 @@ error:
  */
 static int send_consumer_relayd_socket(int domain, unsigned int session_id,
 		struct lttng_uri *relayd_uri, struct consumer_output *consumer,
-		struct consumer_socket *consumer_sock)
+		struct consumer_socket *consumer_sock,
+		char *session_name, char *hostname, int session_live_timer)
 {
 	int ret;
 	struct lttcomm_relayd_sock *rsock = NULL;
@@ -573,7 +626,8 @@ static int send_consumer_relayd_socket(int domain, unsigned int session_id,
 
 	/* Send relayd socket to consumer. */
 	ret = consumer_send_relayd_socket(consumer_sock, rsock, consumer,
-			relayd_uri->stype, session_id);
+			relayd_uri->stype, session_id,
+			session_name, hostname, session_live_timer);
 	if (ret < 0) {
 		ret = LTTNG_ERR_ENABLE_CONSUMER_FAIL;
 		goto close_sock;
@@ -615,7 +669,8 @@ error:
  * session.
  */
 static int send_consumer_relayd_sockets(int domain, unsigned int session_id,
-		struct consumer_output *consumer, struct consumer_socket *sock)
+		struct consumer_output *consumer, struct consumer_socket *sock,
+		char *session_name, char *hostname, int session_live_timer)
 {
 	int ret = LTTNG_OK;
 
@@ -625,7 +680,8 @@ static int send_consumer_relayd_sockets(int domain, unsigned int session_id,
 	/* Sending control relayd socket. */
 	if (!sock->control_sock_sent) {
 		ret = send_consumer_relayd_socket(domain, session_id,
-				&consumer->dst.net.control, consumer, sock);
+				&consumer->dst.net.control, consumer, sock,
+				session_name, hostname, session_live_timer);
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
@@ -634,7 +690,8 @@ static int send_consumer_relayd_sockets(int domain, unsigned int session_id,
 	/* Sending data relayd socket. */
 	if (!sock->data_sock_sent) {
 		ret = send_consumer_relayd_socket(domain, session_id,
-				&consumer->dst.net.data, consumer, sock);
+				&consumer->dst.net.data, consumer, sock,
+				session_name, hostname, session_live_timer);
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
@@ -673,7 +730,9 @@ int cmd_setup_relayd(struct ltt_session *session)
 				socket, node.node) {
 			pthread_mutex_lock(socket->lock);
 			ret = send_consumer_relayd_sockets(LTTNG_DOMAIN_UST, session->id,
-					usess->consumer, socket);
+					usess->consumer, socket,
+					session->name, session->hostname,
+					session->live_timer);
 			pthread_mutex_unlock(socket->lock);
 			if (ret != LTTNG_OK) {
 				goto error;
@@ -689,7 +748,9 @@ int cmd_setup_relayd(struct ltt_session *session)
 				socket, node.node) {
 			pthread_mutex_lock(socket->lock);
 			ret = send_consumer_relayd_sockets(LTTNG_DOMAIN_KERNEL, session->id,
-					ksess->consumer, socket);
+					ksess->consumer, socket,
+					session->name, session->hostname,
+					session->live_timer);
 			pthread_mutex_unlock(socket->lock);
 			if (ret != LTTNG_OK) {
 				goto error;
@@ -850,6 +911,25 @@ int cmd_enable_channel(struct ltt_session *session,
 
 	rcu_read_lock();
 
+	/*
+	 * Don't try to enable a channel if the session has been started at
+	 * some point in time before. The tracer does not allow it.
+	 */
+	if (session->started) {
+		ret = LTTNG_ERR_TRACE_ALREADY_STARTED;
+		goto error;
+	}
+
+	/*
+	 * If the session is a live session, remove the switch timer, the
+	 * live timer does the same thing but sends also synchronisation
+	 * beacons for inactive streams.
+	 */
+	if (session->live_timer > 0) {
+		attr->attr.live_timer_interval = session->live_timer;
+		attr->attr.switch_timer_interval = 0;
+	}
+
 	switch (domain->type) {
 	case LTTNG_DOMAIN_KERNEL:
 	{
@@ -994,6 +1074,19 @@ int cmd_disable_event(struct ltt_session *session, int domain,
 				channel_name);
 		break;
 	}
+	case LTTNG_DOMAIN_JUL:
+	{
+		struct ltt_ust_session *usess = session->ust_session;
+
+		assert(usess);
+
+		ret = event_jul_disable(usess, event_name);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+
+		break;
+	}
 #if 0
 	case LTTNG_DOMAIN_UST_EXEC_NAME:
 	case LTTNG_DOMAIN_UST_PID:
@@ -1083,6 +1176,19 @@ int cmd_disable_event_all(struct ltt_session *session, int domain,
 		}
 
 		DBG3("Disable all UST events in channel %s completed", channel_name);
+
+		break;
+	}
+	case LTTNG_DOMAIN_JUL:
+	{
+		struct ltt_ust_session *usess = session->ust_session;
+
+		assert(usess);
+
+		ret = event_jul_disable_all(usess);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
 
 		break;
 	}
@@ -1203,7 +1309,9 @@ error:
  */
 int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		char *channel_name, struct lttng_event *event,
-		struct lttng_filter_bytecode *filter, int wpipe)
+		struct lttng_filter_bytecode *filter,
+		struct lttng_event_exclusion *exclusion,
+		int wpipe)
 {
 	int ret, channel_created = 0;
 	struct lttng_channel *attr;
@@ -1316,10 +1424,51 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		}
 
 		/* At this point, the session and channel exist on the tracer */
-		ret = event_ust_enable_tracepoint(usess, uchan, event, filter);
+		ret = event_ust_enable_tracepoint(usess, uchan, event, filter, exclusion);
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
+		break;
+	}
+	case LTTNG_DOMAIN_JUL:
+	{
+		struct lttng_event uevent;
+		struct lttng_domain tmp_dom;
+		struct ltt_ust_session *usess = session->ust_session;
+
+		assert(usess);
+
+		/* Create the default JUL tracepoint. */
+		memset(&uevent, 0, sizeof(uevent));
+		uevent.type = LTTNG_EVENT_TRACEPOINT;
+		uevent.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
+		strncpy(uevent.name, DEFAULT_JUL_EVENT_NAME, sizeof(uevent.name));
+		uevent.name[sizeof(uevent.name) - 1] = '\0';
+
+		/*
+		 * The domain type is changed because we are about to enable the
+		 * default channel and event for the JUL domain that are hardcoded.
+		 * This happens in the UST domain.
+		 */
+		memcpy(&tmp_dom, domain, sizeof(tmp_dom));
+		tmp_dom.type = LTTNG_DOMAIN_UST;
+
+		ret = cmd_enable_event(session, &tmp_dom, DEFAULT_JUL_CHANNEL_NAME,
+				&uevent, NULL, NULL, wpipe);
+		if (ret != LTTNG_OK && ret != LTTNG_ERR_UST_EVENT_ENABLED) {
+			goto error;
+		}
+
+		/* The wild card * means that everything should be enabled. */
+		if (strncmp(event->name, "*", 1) == 0 && strlen(event->name) == 1) {
+			ret = event_jul_enable_all(usess, event);
+		} else {
+			ret = event_jul_enable(usess, event);
+		}
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+
 		break;
 	}
 #if 0
@@ -1494,6 +1643,46 @@ int cmd_enable_event_all(struct ltt_session *session,
 
 		break;
 	}
+	case LTTNG_DOMAIN_JUL:
+	{
+		struct lttng_event uevent, event;
+		struct lttng_domain tmp_dom;
+		struct ltt_ust_session *usess = session->ust_session;
+
+		assert(usess);
+
+		/* Create the default JUL tracepoint. */
+		uevent.type = LTTNG_EVENT_TRACEPOINT;
+		uevent.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
+		strncpy(uevent.name, DEFAULT_JUL_EVENT_NAME, sizeof(uevent.name));
+		uevent.name[sizeof(uevent.name) - 1] = '\0';
+
+		/*
+		 * The domain type is changed because we are about to enable the
+		 * default channel and event for the JUL domain that are hardcoded.
+		 * This happens in the UST domain.
+		 */
+		memcpy(&tmp_dom, domain, sizeof(tmp_dom));
+		tmp_dom.type = LTTNG_DOMAIN_UST;
+
+		ret = cmd_enable_event(session, &tmp_dom, DEFAULT_JUL_CHANNEL_NAME,
+				&uevent, NULL, NULL, wpipe);
+		if (ret != LTTNG_OK && ret != LTTNG_ERR_UST_EVENT_ENABLED) {
+			goto error;
+		}
+
+		event.loglevel = LTTNG_LOGLEVEL_JUL_ALL;
+		event.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
+		strncpy(event.name, "*", sizeof(event.name));
+		event.name[sizeof(event.name) - 1] = '\0';
+
+		ret = event_jul_enable_all(usess, &event);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+
+		break;
+	}
 #if 0
 	case LTTNG_DOMAIN_UST_EXEC_NAME:
 	case LTTNG_DOMAIN_UST_PID:
@@ -1530,6 +1719,13 @@ ssize_t cmd_list_tracepoints(int domain, struct lttng_event **events)
 		break;
 	case LTTNG_DOMAIN_UST:
 		nb_events = ust_app_list_events(events);
+		if (nb_events < 0) {
+			ret = LTTNG_ERR_UST_LIST_FAIL;
+			goto error;
+		}
+		break;
+	case LTTNG_DOMAIN_JUL:
+		nb_events = jul_list_events(events);
 		if (nb_events < 0) {
 			ret = LTTNG_ERR_UST_LIST_FAIL;
 			goto error;
@@ -1764,7 +1960,7 @@ error:
  * Command LTTNG_CREATE_SESSION processed by the client thread.
  */
 int cmd_create_session_uri(char *name, struct lttng_uri *uris,
-		size_t nb_uri, lttng_sock_cred *creds)
+		size_t nb_uri, lttng_sock_cred *creds, unsigned int live_timer)
 {
 	int ret;
 	struct ltt_session *session;
@@ -1802,6 +1998,7 @@ int cmd_create_session_uri(char *name, struct lttng_uri *uris,
 	session = session_find_by_name(name);
 	assert(session);
 
+	session->live_timer = live_timer;
 	/* Create default consumer output for the session not yet created. */
 	session->consumer = consumer_create_output(CONSUMER_DST_LOCAL);
 	if (session->consumer == NULL) {
@@ -1848,7 +2045,7 @@ int cmd_create_session_snapshot(char *name, struct lttng_uri *uris,
 	 * Create session in no output mode with URIs set to NULL. The uris we've
 	 * received are for a default snapshot output if one.
 	 */
-	ret = cmd_create_session_uri(name, NULL, 0, creds);
+	ret = cmd_create_session_uri(name, NULL, 0, creds, -1);
 	if (ret != LTTNG_OK) {
 		goto error;
 	}
@@ -1956,7 +2153,14 @@ int cmd_calibrate(int domain, struct lttng_calibrate *calibrate)
 	{
 		struct lttng_kernel_calibrate kcalibrate;
 
-		kcalibrate.type = calibrate->type;
+		switch (calibrate->type) {
+		case LTTNG_CALIBRATE_FUNCTION:
+		default:
+			/* Default and only possible calibrate option. */
+			kcalibrate.type = LTTNG_KERNEL_CALIBRATE_KRETPROBE;
+			break;
+		}
+
 		ret = kernel_calibrate(kernel_tracer_fd, &kcalibrate);
 		if (ret < 0) {
 			ret = LTTNG_ERR_KERN_ENABLE_FAIL;
@@ -1968,7 +2172,14 @@ int cmd_calibrate(int domain, struct lttng_calibrate *calibrate)
 	{
 		struct lttng_ust_calibrate ucalibrate;
 
-		ucalibrate.type = calibrate->type;
+		switch (calibrate->type) {
+		case LTTNG_CALIBRATE_FUNCTION:
+		default:
+			/* Default and only possible calibrate option. */
+			ucalibrate.type = LTTNG_UST_CALIBRATE_TRACEPOINT;
+			break;
+		}
+
 		ret = ust_app_calibrate_glb(&ucalibrate);
 		if (ret < 0) {
 			ret = LTTNG_ERR_UST_CALIBRATE_FAIL;
@@ -2082,6 +2293,10 @@ ssize_t cmd_list_domains(struct ltt_session *session,
 	if (session->ust_session != NULL) {
 		DBG3("Listing domains found UST global domain");
 		nb_dom++;
+
+		if (session->ust_session->domain_jul.being_used) {
+			nb_dom++;
+		}
 	}
 
 	*domains = zmalloc(nb_dom * sizeof(struct lttng_domain));
@@ -2099,6 +2314,12 @@ ssize_t cmd_list_domains(struct ltt_session *session,
 		(*domains)[index].type = LTTNG_DOMAIN_UST;
 		(*domains)[index].buf_type = session->ust_session->buffer_type;
 		index++;
+
+		if (session->ust_session->domain_jul.being_used) {
+			(*domains)[index].type = LTTNG_DOMAIN_JUL;
+			(*domains)[index].buf_type = session->ust_session->buffer_type;
+			index++;
+		}
 	}
 
 	return nb_dom;
@@ -2189,6 +2410,12 @@ ssize_t cmd_list_events(int domain, struct ltt_session *session,
 		}
 		break;
 	}
+	case LTTNG_DOMAIN_JUL:
+		if (session->ust_session) {
+			nb_event = list_lttng_jul_events(
+					&session->ust_session->domain_jul, events);
+		}
+		break;
 	default:
 		ret = LTTNG_ERR_UND;
 		goto error;
@@ -2519,7 +2746,9 @@ static int set_relayd_for_snapshot(struct consumer_output *consumer,
 	cds_lfht_for_each_entry(snap_output->consumer->socks->ht, &iter.iter,
 			socket, node.node) {
 		ret = send_consumer_relayd_sockets(0, session->id,
-				snap_output->consumer, socket);
+				snap_output->consumer, socket,
+				session->name, session->hostname,
+				session->live_timer);
 		if (ret != LTTNG_OK) {
 			rcu_read_unlock();
 			goto error;
@@ -2534,7 +2763,7 @@ error:
 /*
  * Record a kernel snapshot.
  *
- * Return 0 on success or a LTTNG_ERR code.
+ * Return LTTNG_OK on success or a LTTNG_ERR code.
  */
 static int record_kernel_snapshot(struct ltt_kernel_session *ksess,
 		struct snapshot_output *output, struct ltt_session *session,
@@ -2623,12 +2852,17 @@ static int record_ust_snapshot(struct ltt_ust_session *usess,
 
 	ret = ust_app_snapshot_record(usess, output, wait, nb_streams);
 	if (ret < 0) {
-		if (ret == -EINVAL) {
+		switch (-ret) {
+		case EINVAL:
 			ret = LTTNG_ERR_INVALID;
-			goto error_snapshot;
+			break;
+		case ENODATA:
+			ret = LTTNG_ERR_SNAPSHOT_NODATA;
+			break;
+		default:
+			ret = LTTNG_ERR_SNAPSHOT_FAIL;
+			break;
 		}
-
-		ret = LTTNG_ERR_SNAPSHOT_FAIL;
 		goto error_snapshot;
 	}
 
