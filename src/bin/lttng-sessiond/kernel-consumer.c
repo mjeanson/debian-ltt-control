@@ -26,7 +26,7 @@
 #include <common/defaults.h>
 
 #include "consumer.h"
-#include "health.h"
+#include "health-sessiond.h"
 #include "kernel-consumer.h"
 
 static char *create_channel_path(struct consumer_output *consumer,
@@ -123,7 +123,8 @@ int kernel_consumer_add_channel(struct consumer_socket *sock,
 			CONSUMER_CHANNEL_TYPE_DATA,
 			channel->channel->attr.tracefile_size,
 			channel->channel->attr.tracefile_count,
-			monitor);
+			monitor,
+			channel->channel->attr.live_timer_interval);
 
 	health_code_update();
 
@@ -184,7 +185,7 @@ int kernel_consumer_add_metadata(struct consumer_socket *sock,
 			DEFAULT_KERNEL_CHANNEL_OUTPUT,
 			CONSUMER_CHANNEL_TYPE_METADATA,
 			0, 0,
-			monitor);
+			monitor, 0);
 
 	health_code_update();
 
@@ -262,6 +263,40 @@ error:
 }
 
 /*
+ * Sending the notification that all streams were sent with STREAMS_SENT.
+ */
+int kernel_consumer_streams_sent(struct consumer_socket *sock,
+		struct ltt_kernel_session *session, uint64_t channel_key)
+{
+	int ret;
+	struct lttcomm_consumer_msg lkm;
+	struct consumer_output *consumer;
+
+	assert(sock);
+	assert(session);
+
+	DBG("Sending streams_sent");
+	/* Get consumer output pointer */
+	consumer = session->consumer;
+
+	/* Prep stream consumer message */
+	consumer_init_streams_sent_comm_msg(&lkm,
+			LTTNG_CONSUMER_STREAMS_SENT,
+			channel_key, consumer->net_seq_index);
+
+	health_code_update();
+
+	/* Send stream and file descriptor */
+	ret = consumer_send_msg(sock, &lkm);
+	if (ret < 0) {
+		goto error;
+	}
+
+error:
+	return ret;
+}
+
+/*
  * Send all stream fds of kernel channel to the consumer.
  */
 int kernel_consumer_send_channel_stream(struct consumer_socket *sock,
@@ -270,6 +305,7 @@ int kernel_consumer_send_channel_stream(struct consumer_socket *sock,
 {
 	int ret;
 	struct ltt_kernel_stream *stream;
+	uint64_t channel_key = -1ULL;
 
 	/* Safety net */
 	assert(channel);
@@ -303,8 +339,22 @@ int kernel_consumer_send_channel_stream(struct consumer_socket *sock,
 		if (ret < 0) {
 			goto error;
 		}
+		if (channel_key == -1ULL) {
+			channel_key = channel->fd;
+		}
 	}
 
+	if (!monitor || channel_key == -1ULL) {
+		goto end;
+	}
+
+	/* Add stream on the kernel consumer side. */
+	ret = kernel_consumer_streams_sent(sock, session, channel_key);
+	if (ret < 0) {
+		goto error;
+	}
+
+end:
 error:
 	return ret;
 }

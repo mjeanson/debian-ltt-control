@@ -29,7 +29,7 @@ void cmd_init(void);
 
 /* Session commands */
 int cmd_create_session_uri(char *name, struct lttng_uri *uris,
-		size_t nb_uri, lttng_sock_cred *creds);
+		size_t nb_uri, lttng_sock_cred *creds, unsigned int live_timer);
 int cmd_create_session_snapshot(char *name, struct lttng_uri *uris,
 		size_t nb_uri, lttng_sock_cred *creds);
 int cmd_destroy_session(struct ltt_session *session, int wpipe);
@@ -53,7 +53,9 @@ int cmd_set_filter(struct ltt_session *session, int domain,
 		struct lttng_filter_bytecode *bytecode);
 int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		char *channel_name, struct lttng_event *event,
-		struct lttng_filter_bytecode *filter, int wpipe);
+		struct lttng_filter_bytecode *filter,
+		struct lttng_event_exclusion *exclusion,
+		int wpipe);
 int cmd_enable_event_all(struct ltt_session *session,
 		struct lttng_domain *domain, char *channel_name, int event_type,
 		struct lttng_filter_bytecode *filter, int wpipe);

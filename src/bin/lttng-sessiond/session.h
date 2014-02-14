@@ -18,6 +18,7 @@
 #ifndef _LTT_SESSION_H
 #define _LTT_SESSION_H
 
+#include <limits.h>
 #include <urcu/list.h>
 
 #include <common/hashtable/hashtable.h>
@@ -59,6 +60,7 @@ struct ltt_session_list {
  */
 struct ltt_session {
 	char name[NAME_MAX];
+	char hostname[HOST_NAME_MAX]; /* Local hostname. */
 	struct ltt_kernel_session *kernel_session;
 	struct ltt_ust_session *ust_session;
 	/*
@@ -99,6 +101,10 @@ struct ltt_session {
 	 * snapshot purposes.
 	 */
 	unsigned int snapshot_mode;
+	/*
+	 * Timer set when the session is created for live reading.
+	 */
+	int live_timer;
 };
 
 /* Prototypes */

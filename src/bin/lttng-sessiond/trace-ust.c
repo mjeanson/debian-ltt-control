@@ -75,7 +75,7 @@ int trace_ust_ht_match_event(struct cds_lfht_node *node, const void *_key)
 	event = caa_container_of(node, struct ltt_ust_event, node.node);
 	key = _key;
 
-	/* Match the 3 elements of the key: name, filter and loglevel. */
+	/* Match the 4 elements of the key: name, filter, loglevel, exclusions. */
 
 	/* Event name */
 	if (strncmp(event->attr.name, key->name, sizeof(event->attr.name)) != 0) {
@@ -111,6 +111,19 @@ int trace_ust_ht_match_event(struct cds_lfht_node *node, const void *_key)
 		}
 	}
 
+	/* If only one of the exclusions is NULL, fail. */
+	if ((key->exclusion && !event->exclusion) || (!key->exclusion && event->exclusion)) {
+		goto no_match;
+	}
+
+	if (key->exclusion && event->exclusion) {
+		/* Both exclusions exist; check count followed by names. */
+		if (event->exclusion->count != key->exclusion->count ||
+				memcmp(event->exclusion->names, key->exclusion->names,
+					event->exclusion->count * LTTNG_SYMBOL_NAME_LEN) != 0) {
+			goto no_match;
+		}
+	}
 	/* Match. */
 	return 1;
 
@@ -155,7 +168,8 @@ error:
  * MUST be acquired before calling this.
  */
 struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
-		char *name, struct lttng_filter_bytecode *filter, int loglevel)
+		char *name, struct lttng_filter_bytecode *filter, int loglevel,
+		struct lttng_event_exclusion *exclusion)
 {
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
@@ -167,6 +181,7 @@ struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
 	key.name = name;
 	key.filter = filter;
 	key.loglevel = loglevel;
+	key.exclusion = exclusion;
 
 	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
 			trace_ust_ht_match_event, &key, &iter.iter);
@@ -191,6 +206,7 @@ error:
  */
 struct ltt_ust_session *trace_ust_create_session(uint64_t session_id)
 {
+	int ret;
 	struct ltt_ust_session *lus;
 
 	/* Allocate a new ltt ust session */
@@ -218,6 +234,10 @@ struct ltt_ust_session *trace_ust_create_session(uint64_t session_id)
 
 	/* Alloc UST global domain channels' HT */
 	lus->domain_global.channels = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+	ret = jul_init_domain(&lus->domain_jul);
+	if (ret < 0) {
+		goto error_consumer;
+	}
 
 	lus->consumer = consumer_create_output(CONSUMER_DST_LOCAL);
 	if (lus->consumer == NULL) {
@@ -238,6 +258,7 @@ struct ltt_ust_session *trace_ust_create_session(uint64_t session_id)
 
 error_consumer:
 	ht_cleanup_push(lus->domain_global.channels);
+	jul_destroy_domain(&lus->domain_jul);
 	free(lus);
 error:
 	return NULL;
@@ -311,7 +332,8 @@ error:
  * Return pointer to structure or NULL.
  */
 struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
-		struct lttng_filter_bytecode *filter)
+		struct lttng_filter_bytecode *filter,
+		struct lttng_event_exclusion *exclusion)
 {
 	struct ltt_ust_event *lue;
 
@@ -365,6 +387,7 @@ struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
 
 	/* Same layout. */
 	lue->filter = (struct lttng_ust_filter_bytecode *) filter;
+	lue->exclusion = (struct lttng_event_exclusion *) exclusion;
 
 	/* Init node */
 	lttng_ht_node_init_str(&lue->node, lue->attr.name);
@@ -377,48 +400,6 @@ struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
 
 error_free_event:
 	free(lue);
-error:
-	return NULL;
-}
-
-/*
- * Allocate and initialize a ust metadata.
- *
- * Return pointer to structure or NULL.
- */
-struct ltt_ust_metadata *trace_ust_create_metadata(char *path)
-{
-	int ret;
-	struct ltt_ust_metadata *lum;
-
-	assert(path);
-
-	lum = zmalloc(sizeof(struct ltt_ust_metadata));
-	if (lum == NULL) {
-		PERROR("ust metadata zmalloc");
-		goto error;
-	}
-
-	/* Set default attributes */
-	lum->attr.overwrite = DEFAULT_CHANNEL_OVERWRITE;
-	lum->attr.subbuf_size = default_get_metadata_subbuf_size();
-	lum->attr.num_subbuf = DEFAULT_METADATA_SUBBUF_NUM;
-	lum->attr.switch_timer_interval = DEFAULT_METADATA_SWITCH_TIMER;
-	lum->attr.read_timer_interval = DEFAULT_METADATA_READ_TIMER;
-	lum->attr.output = LTTNG_UST_MMAP;
-
-	lum->handle = -1;
-	/* Set metadata trace path */
-	ret = snprintf(lum->pathname, PATH_MAX, "%s/" DEFAULT_METADATA_NAME, path);
-	if (ret < 0) {
-		PERROR("asprintf ust metadata");
-		goto error_free_metadata;
-	}
-
-	return lum;
-
-error_free_metadata:
-	free(lum);
 error:
 	return NULL;
 }
@@ -616,20 +597,6 @@ void trace_ust_delete_channel(struct lttng_ht *ht,
 }
 
 /*
- * Cleanup ust metadata structure.
- */
-void trace_ust_destroy_metadata(struct ltt_ust_metadata *metadata)
-{
-	assert(metadata);
-
-	if (!metadata->handle) {
-		return;
-	}
-	DBG2("Trace UST destroy metadata %d", metadata->handle);
-	free(metadata);
-}
-
-/*
  * Iterate over a hash table containing channels and cleanup safely.
  */
 static void destroy_channels(struct lttng_ht *channels)
@@ -677,6 +644,7 @@ void trace_ust_destroy_session(struct ltt_ust_session *session)
 
 	/* Cleaning up UST domain */
 	destroy_domain_global(&session->domain_global);
+	jul_destroy_domain(&session->domain_jul);
 
 	/* Cleanup UID buffer registry object(s). */
 	cds_list_for_each_entry_safe(reg, sreg, &session->buffer_reg_uid_list,

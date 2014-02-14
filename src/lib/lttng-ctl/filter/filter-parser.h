@@ -1,19 +1,19 @@
-/* A Bison parser, made by GNU Bison 2.7.12-4996.  */
+/* A Bison parser, made by GNU Bison 3.0.2.  */
 
 /* Bison interface for Yacc-like parsers in C
-   
-      Copyright (C) 1984, 1989-1990, 2000-2013 Free Software Foundation, Inc.
-   
+
+   Copyright (C) 1984, 1989-1990, 2000-2013 Free Software Foundation, Inc.
+
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation, either version 3 of the License, or
    (at your option) any later version.
-   
+
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
    GNU General Public License for more details.
-   
+
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
@@ -26,13 +26,13 @@
    special exception, which will cause the skeleton and the resulting
    Bison output files to be licensed under the GNU General Public
    License without this special exception.
-   
+
    This special exception was added by the Free Software Foundation in
    version 2.2 of Bison.  */
 
 #ifndef YY_YY_FILTER_PARSER_H_INCLUDED
 # define YY_YY_FILTER_PARSER_H_INCLUDED
-/* Enabling traces.  */
+/* Debug traces.  */
 #ifndef YYDEBUG
 # define YYDEBUG 1
 #endif
@@ -40,60 +40,59 @@
 extern int yydebug;
 #endif
 
-/* Tokens.  */
+/* Token type.  */
 #ifndef YYTOKENTYPE
 # define YYTOKENTYPE
-   /* Put the tokens into the symbol table, so that GDB and other debuggers
-      know about them.  */
-   enum yytokentype {
-     CHARACTER_CONSTANT_START = 258,
-     SQUOTE = 259,
-     STRING_LITERAL_START = 260,
-     DQUOTE = 261,
-     ESCSEQ = 262,
-     CHAR_STRING_TOKEN = 263,
-     DECIMAL_CONSTANT = 264,
-     OCTAL_CONSTANT = 265,
-     HEXADECIMAL_CONSTANT = 266,
-     FLOAT_CONSTANT = 267,
-     LSBRAC = 268,
-     RSBRAC = 269,
-     LPAREN = 270,
-     RPAREN = 271,
-     LBRAC = 272,
-     RBRAC = 273,
-     RARROW = 274,
-     STAR = 275,
-     PLUS = 276,
-     MINUS = 277,
-     MOD_OP = 278,
-     DIV_OP = 279,
-     RIGHT_OP = 280,
-     LEFT_OP = 281,
-     EQ_OP = 282,
-     NE_OP = 283,
-     LE_OP = 284,
-     GE_OP = 285,
-     LT_OP = 286,
-     GT_OP = 287,
-     AND_OP = 288,
-     OR_OP = 289,
-     NOT_OP = 290,
-     ASSIGN = 291,
-     COLON = 292,
-     SEMICOLON = 293,
-     DOTDOTDOT = 294,
-     DOT = 295,
-     EQUAL = 296,
-     COMMA = 297,
-     XOR_BIN = 298,
-     AND_BIN = 299,
-     OR_BIN = 300,
-     NOT_BIN = 301,
-     IDENTIFIER = 302,
-     GLOBAL_IDENTIFIER = 303,
-     ERROR = 304
-   };
+  enum yytokentype
+  {
+    CHARACTER_CONSTANT_START = 258,
+    SQUOTE = 259,
+    STRING_LITERAL_START = 260,
+    DQUOTE = 261,
+    ESCSEQ = 262,
+    CHAR_STRING_TOKEN = 263,
+    DECIMAL_CONSTANT = 264,
+    OCTAL_CONSTANT = 265,
+    HEXADECIMAL_CONSTANT = 266,
+    FLOAT_CONSTANT = 267,
+    LSBRAC = 268,
+    RSBRAC = 269,
+    LPAREN = 270,
+    RPAREN = 271,
+    LBRAC = 272,
+    RBRAC = 273,
+    RARROW = 274,
+    STAR = 275,
+    PLUS = 276,
+    MINUS = 277,
+    MOD_OP = 278,
+    DIV_OP = 279,
+    RIGHT_OP = 280,
+    LEFT_OP = 281,
+    EQ_OP = 282,
+    NE_OP = 283,
+    LE_OP = 284,
+    GE_OP = 285,
+    LT_OP = 286,
+    GT_OP = 287,
+    AND_OP = 288,
+    OR_OP = 289,
+    NOT_OP = 290,
+    ASSIGN = 291,
+    COLON = 292,
+    SEMICOLON = 293,
+    DOTDOTDOT = 294,
+    DOT = 295,
+    EQUAL = 296,
+    COMMA = 297,
+    XOR_BIN = 298,
+    AND_BIN = 299,
+    OR_BIN = 300,
+    NOT_BIN = 301,
+    IDENTIFIER = 302,
+    GLOBAL_IDENTIFIER = 303,
+    ERROR = 304
+  };
 #endif
 /* Tokens.  */
 #define CHARACTER_CONSTANT_START 258
@@ -144,41 +143,26 @@ extern int yydebug;
 #define GLOBAL_IDENTIFIER 303
 #define ERROR 304
 
-
-
+/* Value type.  */
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
-typedef union YYSTYPE
+typedef union YYSTYPE YYSTYPE;
+union YYSTYPE
 {
-/* Line 2053 of yacc.c  */
-#line 320 "filter-parser.y"
+#line 320 "filter-parser.y" /* yacc.c:1909  */
 
 	long long ll;
 	char c;
 	struct gc_string *gs;
 	struct filter_node *n;
 
-
-/* Line 2053 of yacc.c  */
-#line 163 "filter-parser.h"
-} YYSTYPE;
+#line 159 "filter-parser.h" /* yacc.c:1909  */
+};
 # define YYSTYPE_IS_TRIVIAL 1
-# define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1
 #endif
 
 
-#ifdef YYPARSE_PARAM
-#if defined __STDC__ || defined __cplusplus
-int yyparse (void *YYPARSE_PARAM);
-#else
-int yyparse ();
-#endif
-#else /* ! YYPARSE_PARAM */
-#if defined __STDC__ || defined __cplusplus
+
 int yyparse (struct filter_parser_ctx *parser_ctx, yyscan_t scanner);
-#else
-int yyparse ();
-#endif
-#endif /* ! YYPARSE_PARAM */
 
 #endif /* !YY_YY_FILTER_PARSER_H_INCLUDED  */

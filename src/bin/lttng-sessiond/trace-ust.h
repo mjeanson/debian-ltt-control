@@ -27,12 +27,14 @@
 #include <common/defaults.h>
 
 #include "consumer.h"
+#include "jul.h"
 #include "ust-ctl.h"
 
 struct ltt_ust_ht_key {
 	const char *name;
 	const struct lttng_filter_bytecode *filter;
 	enum lttng_ust_loglevel_type loglevel;
+	const struct lttng_event_exclusion *exclusion;
 };
 
 /* Context hash table nodes */
@@ -48,6 +50,7 @@ struct ltt_ust_event {
 	struct lttng_ust_event attr;
 	struct lttng_ht_node_str node;
 	struct lttng_ust_filter_bytecode *filter;
+	const struct lttng_event_exclusion *exclusion;
 };
 
 /* UST channel */
@@ -64,15 +67,6 @@ struct ltt_ust_channel {
 	uint64_t tracefile_count;
 };
 
-/* UST Metadata */
-struct ltt_ust_metadata {
-	int handle;
-	struct lttng_ust_object_data *obj;
-	char pathname[PATH_MAX];              /* Trace file path name */
-	struct lttng_ust_channel_attr attr;
-	struct lttng_ust_object_data *stream_obj;
-};
-
 /* UST domain global (LTTNG_DOMAIN_UST) */
 struct ltt_ust_domain_global {
 	struct lttng_ht *channels;
@@ -84,6 +78,7 @@ struct ltt_ust_session {
 	uint64_t id;    /* Unique identifier of session */
 	int start_trace;
 	struct ltt_ust_domain_global domain_global;
+	struct jul_domain domain_jul;
 	/* UID/GID of the user owning the session */
 	uid_t uid;
 	gid_t gid;
@@ -111,6 +106,7 @@ struct ltt_ust_session {
 	unsigned int output_traces;
 	unsigned int snapshot_mode;
 	unsigned int has_non_default_channel;
+	unsigned int live_timer_interval;	/* usec */
 };
 
 /*
@@ -152,7 +148,8 @@ int trace_ust_ht_match_event_by_name(struct cds_lfht_node *node,
  * Lookup functions. NULL is returned if not found.
  */
 struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
-		char *name, struct lttng_filter_bytecode *filter, int loglevel);
+		char *name, struct lttng_filter_bytecode *filter, int loglevel,
+		struct lttng_event_exclusion *exclusion);
 struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 		char *name);
 
@@ -162,8 +159,8 @@ struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 struct ltt_ust_session *trace_ust_create_session(uint64_t session_id);
 struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr);
 struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
-		struct lttng_filter_bytecode *filter);
-struct ltt_ust_metadata *trace_ust_create_metadata(char *path);
+		struct lttng_filter_bytecode *filter,
+		struct lttng_event_exclusion *exclusion);
 struct ltt_ust_context *trace_ust_create_context(
 		struct lttng_event_context *ctx);
 void trace_ust_delete_channel(struct lttng_ht *ht,
@@ -174,7 +171,6 @@ void trace_ust_delete_channel(struct lttng_ht *ht,
  * it's applies.
  */
 void trace_ust_destroy_session(struct ltt_ust_session *session);
-void trace_ust_destroy_metadata(struct ltt_ust_metadata *metadata);
 void trace_ust_destroy_channel(struct ltt_ust_channel *channel);
 void trace_ust_destroy_event(struct ltt_ust_event *event);
 
@@ -209,23 +205,13 @@ struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr)
 }
 static inline
 struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
-		struct lttng_filter_bytecode *filter)
+		struct lttng_filter_bytecode *filter,
+		struct lttng_event_exclusion *exclusion)
 {
 	return NULL;
 }
-static inline
-struct ltt_ust_metadata *trace_ust_create_metadata(char *path)
-{
-	return NULL;
-}
-
 static inline
 void trace_ust_destroy_session(struct ltt_ust_session *session)
-{
-}
-
-static inline
-void trace_ust_destroy_metadata(struct ltt_ust_metadata *metadata)
 {
 }
 
@@ -245,7 +231,8 @@ struct ltt_ust_context *trace_ust_create_context(
 	return NULL;
 }
 static inline struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
-		char *name, struct lttng_filter_bytecode *filter, int loglevel)
+		char *name, struct lttng_filter_bytecode *filter, int loglevel,
+		struct lttng_event_exclusion *exclusion)
 {
 	return NULL;
 }

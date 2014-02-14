@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2012 - David Goulet <dgoulet@efficios.com>
+ * Copyright (C) 2013 - Raphaël Beamonte <raphael.beamonte@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License, version 2 only, as
@@ -27,6 +28,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <regex.h>
+#include <grp.h>
 
 #include <common/common.h>
 #include <common/runas.h>
@@ -35,58 +37,241 @@
 #include "defaults.h"
 
 /*
- * Return the realpath(3) of the path even if the last directory token does not
- * exist. For example, with /tmp/test1/test2, if test2/ does not exist but the
- * /tmp/test1 does, the real path is returned. In normal time, realpath(3)
- * fails if the end point directory does not exist.
+ * Return a partial realpath(3) of the path even if the full path does not
+ * exist. For instance, with /tmp/test1/test2/test3, if test2/ does not exist
+ * but the /tmp/test1 does, the real path for /tmp/test1 is concatened with
+ * /test2/test3 then returned. In normal time, realpath(3) fails if the end
+ * point directory does not exist.
+ * In case resolved_path is NULL, the string returned was allocated in the
+ * function and thus need to be freed by the caller. The size argument allows
+ * to specify the size of the resolved_path argument if given, or the size to
+ * allocate.
  */
 LTTNG_HIDDEN
-char *utils_expand_path(const char *path)
+char *utils_partial_realpath(const char *path, char *resolved_path, size_t size)
 {
-	const char *end_path = path;
-	char *next, *cut_path = NULL, *expanded_path = NULL;
+	char *cut_path, *try_path = NULL, *try_path_prev = NULL;
+	const char *next, *prev, *end;
 
 	/* Safety net */
 	if (path == NULL) {
 		goto error;
 	}
 
-	/* Find last token delimited by '/' */
-	while ((next = strpbrk(end_path + 1, "/"))) {
-		end_path = next;
+	/*
+	 * Identify the end of the path, we don't want to treat the
+	 * last char if it is a '/', we will just keep it on the side
+	 * to be added at the end, and return a value coherent with
+	 * the path given as argument
+	 */
+	end = path + strlen(path);
+	if (*(end-1) == '/') {
+		end--;
 	}
 
-	/* Cut last token from original path */
-	cut_path = strndup(path, end_path - path);
+	/* Initiate the values of the pointers before looping */
+	next = path;
+	prev = next;
+	/* Only to ensure try_path is not NULL to enter the while */
+	try_path = (char *)next;
 
-	expanded_path = zmalloc(PATH_MAX);
-	if (expanded_path == NULL) {
+	/* Resolve the canonical path of the first part of the path */
+	while (try_path != NULL && next != end) {
+		/*
+		 * If there is not any '/' left, we want to try with
+		 * the full path
+		 */
+		next = strpbrk(next + 1, "/");
+		if (next == NULL) {
+			next = end;
+		}
+
+		/* Cut the part we will be trying to resolve */
+		cut_path = strndup(path, next - path);
+
+		/* Try to resolve this part */
+		try_path = realpath((char *)cut_path, NULL);
+		if (try_path == NULL) {
+			/*
+			 * There was an error, we just want to be assured it
+			 * is linked to an unexistent directory, if it's another
+			 * reason, we spawn an error
+			 */
+			switch (errno) {
+			case ENOENT:
+				/* Ignore the error */
+				break;
+			default:
+				PERROR("realpath (partial_realpath)");
+				goto error;
+				break;
+			}
+		} else {
+			/* Save the place we are before trying the next step */
+			free(try_path_prev);
+			try_path_prev = try_path;
+			prev = next;
+		}
+
+		/* Free the allocated memory */
+		free(cut_path);
+	};
+
+	/* Allocate memory for the resolved path if necessary */
+	if (resolved_path == NULL) {
+		resolved_path = zmalloc(size);
+		if (resolved_path == NULL) {
+			PERROR("zmalloc resolved path");
+			goto error;
+		}
+	}
+
+	/*
+	 * If we were able to solve at least partially the path, we can concatenate
+	 * what worked and what didn't work
+	 */
+	if (try_path_prev != NULL) {
+		/* If we risk to concatenate two '/', we remove one of them */
+		if (try_path_prev[strlen(try_path_prev) - 1] == '/' && prev[0] == '/') {
+			try_path_prev[strlen(try_path_prev) - 1] = '\0';
+		}
+
+		/*
+		 * Duplicate the memory used by prev in case resolved_path and
+		 * path are pointers for the same memory space
+		 */
+		cut_path = strdup(prev);
+
+		/* Concatenate the strings */
+		snprintf(resolved_path, size, "%s%s", try_path_prev, cut_path);
+
+		/* Free the allocated memory */
+		free(cut_path);
+		free(try_path_prev);
+	/*
+	 * Else, we just copy the path in our resolved_path to
+	 * return it as is
+	 */
+	} else {
+		strncpy(resolved_path, path, size);
+	}
+
+	/* Then we return the 'partially' resolved path */
+	return resolved_path;
+
+error:
+	free(resolved_path);
+	return NULL;
+}
+
+/*
+ * Make a full resolution of the given path even if it doesn't exist.
+ * This function uses the utils_partial_realpath function to resolve
+ * symlinks and relatives paths at the start of the string, and
+ * implements functionnalities to resolve the './' and '../' strings
+ * in the middle of a path. This function is only necessary because
+ * realpath(3) does not accept to resolve unexistent paths.
+ * The returned string was allocated in the function, it is thus of
+ * the responsibility of the caller to free this memory.
+ */
+LTTNG_HIDDEN
+char *utils_expand_path(const char *path)
+{
+	char *next, *previous, *slash, *start_path, *absolute_path = NULL;
+	char *last_token;
+	int is_dot, is_dotdot;
+
+	/* Safety net */
+	if (path == NULL) {
+		goto error;
+	}
+
+	/* Allocate memory for the absolute_path */
+	absolute_path = zmalloc(PATH_MAX);
+	if (absolute_path == NULL) {
 		PERROR("zmalloc expand path");
 		goto error;
 	}
 
-	expanded_path = realpath((char *)cut_path, expanded_path);
-	if (expanded_path == NULL) {
-		switch (errno) {
-		case ENOENT:
-			ERR("%s: No such file or directory", cut_path);
-			break;
-		default:
-			PERROR("realpath utils expand path");
-			break;
-		}
-		goto error;
+	/*
+	 * If the path is not already absolute nor explicitly relative,
+	 * consider we're in the current directory
+	 */
+	if (*path != '/' && strncmp(path, "./", 2) != 0 &&
+			strncmp(path, "../", 3) != 0) {
+		snprintf(absolute_path, PATH_MAX, "./%s", path);
+	/* Else, we just copy the path */
+	} else {
+		strncpy(absolute_path, path, PATH_MAX);
 	}
 
-	/* Add end part to expanded path */
-	strncat(expanded_path, end_path, PATH_MAX - strlen(expanded_path) - 1);
+	/* Resolve partially our path */
+	absolute_path = utils_partial_realpath(absolute_path,
+			absolute_path, PATH_MAX);
 
-	free(cut_path);
-	return expanded_path;
+	/* As long as we find '/./' in the working_path string */
+	while ((next = strstr(absolute_path, "/./"))) {
+
+		/* We prepare the start_path not containing it */
+		start_path = strndup(absolute_path, next - absolute_path);
+
+		/* And we concatenate it with the part after this string */
+		snprintf(absolute_path, PATH_MAX, "%s%s", start_path, next + 2);
+
+		free(start_path);
+	}
+
+	/* As long as we find '/../' in the working_path string */
+	while ((next = strstr(absolute_path, "/../"))) {
+		/* We find the last level of directory */
+		previous = absolute_path;
+		while ((slash = strpbrk(previous, "/")) && slash != next) {
+			previous = slash + 1;
+		}
+
+		/* Then we prepare the start_path not containing it */
+		start_path = strndup(absolute_path, previous - absolute_path);
+
+		/* And we concatenate it with the part after the '/../' */
+		snprintf(absolute_path, PATH_MAX, "%s%s", start_path, next + 4);
+
+		/* We can free the memory used for the start path*/
+		free(start_path);
+
+		/* Then we verify for symlinks using partial_realpath */
+		absolute_path = utils_partial_realpath(absolute_path,
+				absolute_path, PATH_MAX);
+	}
+
+	/* Identify the last token */
+	last_token = strrchr(absolute_path, '/');
+
+	/* Verify that this token is not a relative path */
+	is_dotdot = (strcmp(last_token, "/..") == 0);
+	is_dot = (strcmp(last_token, "/.") == 0);
+
+	/* If it is, take action */
+	if (is_dot || is_dotdot) {
+		/* For both, remove this token */
+		*last_token = '\0';
+
+		/* If it was a reference to parent directory, go back one more time */
+		if (is_dotdot) {
+			last_token = strrchr(absolute_path, '/');
+
+			/* If there was only one level left, we keep the first '/' */
+			if (last_token == absolute_path) {
+				last_token++;
+			}
+
+			*last_token = '\0';
+		}
+	}
+
+	return absolute_path;
 
 error:
-	free(expanded_path);
-	free(cut_path);
+	free(absolute_path);
 	return NULL;
 }
 
@@ -351,10 +536,11 @@ error:
  */
 LTTNG_HIDDEN
 int utils_create_stream_file(const char *path_name, char *file_name, uint64_t size,
-		uint64_t count, int uid, int gid)
+		uint64_t count, int uid, int gid, char *suffix)
 {
 	int ret, out_fd, flags, mode;
-	char full_path[PATH_MAX], *path_name_id = NULL, *path;
+	char full_path[PATH_MAX], *path_name_suffix = NULL, *path;
+	char *extra = NULL;
 
 	assert(path_name);
 	assert(file_name);
@@ -366,17 +552,30 @@ int utils_create_stream_file(const char *path_name, char *file_name, uint64_t si
 		goto error;
 	}
 
+	/* Setup extra string if suffix or/and a count is needed. */
+	if (size > 0 && suffix) {
+		ret = asprintf(&extra, "_%" PRIu64 "%s", count, suffix);
+	} else if (size > 0) {
+		ret = asprintf(&extra, "_%" PRIu64, count);
+	} else if (suffix) {
+		ret = asprintf(&extra, "%s", suffix);
+	}
+	if (ret < 0) {
+		PERROR("Allocating extra string to name");
+		goto error;
+	}
+
 	/*
 	 * If we split the trace in multiple files, we have to add the count at the
 	 * end of the tracefile name
 	 */
-	if (size > 0) {
-		ret = asprintf(&path_name_id, "%s_%" PRIu64, full_path, count);
+	if (extra) {
+		ret = asprintf(&path_name_suffix, "%s%s", full_path, extra);
 		if (ret < 0) {
-			PERROR("Allocating path name ID");
-			goto error;
+			PERROR("Allocating path name with extra string");
+			goto error_free_suffix;
 		}
-		path = path_name_id;
+		path = path_name_suffix;
 	} else {
 		path = full_path;
 	}
@@ -397,7 +596,9 @@ int utils_create_stream_file(const char *path_name, char *file_name, uint64_t si
 	ret = out_fd;
 
 error_open:
-	free(path_name_id);
+	free(path_name_suffix);
+error_free_suffix:
+	free(extra);
 error:
 	return ret;
 }
@@ -413,9 +614,13 @@ error:
  */
 LTTNG_HIDDEN
 int utils_rotate_stream_file(char *path_name, char *file_name, uint64_t size,
-		uint64_t count, int uid, int gid, int out_fd, uint64_t *new_count)
+		uint64_t count, int uid, int gid, int out_fd, uint64_t *new_count,
+		int *stream_fd)
 {
 	int ret;
+
+	assert(new_count);
+	assert(stream_fd);
 
 	ret = close(out_fd);
 	if (ret < 0) {
@@ -429,8 +634,16 @@ int utils_rotate_stream_file(char *path_name, char *file_name, uint64_t size,
 		(*new_count)++;
 	}
 
-	return utils_create_stream_file(path_name, file_name, size, *new_count,
-			uid, gid);
+	ret = utils_create_stream_file(path_name, file_name, size, *new_count,
+			uid, gid, 0);
+	if (ret < 0) {
+		goto error;
+	}
+	*stream_fd = ret;
+
+	/* Success. */
+	ret = 0;
+
 error:
 	return ret;
 }
@@ -665,4 +878,25 @@ size_t utils_get_current_time_str(const char *format, char *dst, size_t len)
 	}
 
 	return ret;
+}
+
+/*
+ * Return the group ID matching name, else 0 if it cannot be found.
+ */
+LTTNG_HIDDEN
+gid_t utils_get_group_id(const char *name)
+{
+	struct group *grp;
+
+	grp = getgrnam(name);
+	if (!grp) {
+		static volatile int warn_once;
+
+		if (!warn_once) {
+			WARN("No tracing group detected");
+			warn_once = 1;
+		}
+		return 0;
+	}
+	return grp->gr_gid;
 }

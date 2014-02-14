@@ -30,18 +30,22 @@
 #include <inttypes.h>
 #include <signal.h>
 
+#include <bin/lttng-consumerd/health-consumerd.h>
 #include <common/common.h>
 #include <common/utils.h>
 #include <common/compat/poll.h>
+#include <common/index/index.h>
 #include <common/kernel-ctl/kernel-ctl.h>
 #include <common/sessiond-comm/relayd.h>
 #include <common/sessiond-comm/sessiond-comm.h>
 #include <common/kernel-consumer/kernel-consumer.h>
 #include <common/relayd/relayd.h>
 #include <common/ust-consumer/ust-consumer.h>
+#include <common/consumer-timer.h>
 
 #include "consumer.h"
 #include "consumer-stream.h"
+#include "consumer-testpoint.h"
 
 struct lttng_consumer_global_data consumer_data = {
 	.stream_count = 0,
@@ -91,22 +95,33 @@ static void notify_thread_lttng_pipe(struct lttng_pipe *pipe)
 	(void) lttng_pipe_write(pipe, &null_stream, sizeof(null_stream));
 }
 
+static void notify_health_quit_pipe(int *pipe)
+{
+	ssize_t ret;
+
+	ret = lttng_write(pipe[1], "4", 1);
+	if (ret < 1) {
+		PERROR("write consumer health quit");
+	}
+}
+
 static void notify_channel_pipe(struct lttng_consumer_local_data *ctx,
 		struct lttng_consumer_channel *chan,
 		uint64_t key,
 		enum consumer_channel_action action)
 {
 	struct consumer_channel_msg msg;
-	int ret;
+	ssize_t ret;
 
 	memset(&msg, 0, sizeof(msg));
 
 	msg.action = action;
 	msg.chan = chan;
 	msg.key = key;
-	do {
-		ret = write(ctx->consumer_channel_pipe[1], &msg, sizeof(msg));
-	} while (ret < 0 && errno == EINTR);
+	ret = lttng_write(ctx->consumer_channel_pipe[1], &msg, sizeof(msg));
+	if (ret < sizeof(msg)) {
+		PERROR("notify_channel_pipe write error");
+	}
 }
 
 void notify_thread_del_channel(struct lttng_consumer_local_data *ctx,
@@ -121,17 +136,18 @@ static int read_channel_pipe(struct lttng_consumer_local_data *ctx,
 		enum consumer_channel_action *action)
 {
 	struct consumer_channel_msg msg;
-	int ret;
+	ssize_t ret;
 
-	do {
-		ret = read(ctx->consumer_channel_pipe[0], &msg, sizeof(msg));
-	} while (ret < 0 && errno == EINTR);
-	if (ret > 0) {
-		*action = msg.action;
-		*chan = msg.chan;
-		*key = msg.key;
+	ret = lttng_read(ctx->consumer_channel_pipe[0], &msg, sizeof(msg));
+	if (ret < sizeof(msg)) {
+		ret = -1;
+		goto error;
 	}
-	return ret;
+	*action = msg.action;
+	*chan = msg.chan;
+	*key = msg.key;
+error:
+	return (int) ret;
 }
 
 /*
@@ -302,6 +318,10 @@ void consumer_del_channel(struct lttng_consumer_channel *channel)
 		 * we have a guarantee that this call will succeed.
 		 */
 		consumer_stream_destroy(stream, NULL);
+	}
+
+	if (channel->live_timer_enabled == 1) {
+		consumer_timer_live_stop(channel);
 	}
 
 	switch (consumer_data.type) {
@@ -506,6 +526,7 @@ struct lttng_consumer_stream *consumer_allocate_stream(uint64_t channel_key,
 	stream->session_id = session_id;
 	stream->monitor = monitor;
 	stream->endpoint_status = CONSUMER_ENDPOINT_ACTIVE;
+	stream->index_fd = -1;
 	pthread_mutex_init(&stream->lock, NULL);
 
 	/* If channel is the metadata, flag this stream as metadata. */
@@ -513,6 +534,9 @@ struct lttng_consumer_stream *consumer_allocate_stream(uint64_t channel_key,
 		stream->metadata_flag = 1;
 		/* Metadata is flat out. */
 		strncpy(stream->name, DEFAULT_METADATA_NAME, sizeof(stream->name));
+		/* Live rendez-vous point. */
+		pthread_cond_init(&stream->metadata_rdv, NULL);
+		pthread_mutex_init(&stream->metadata_rdv_lock, NULL);
 	} else {
 		/* Format stream name to <channel_name>_<cpu_number> */
 		ret = snprintf(stream->name, sizeof(stream->name), "%s_%d",
@@ -727,6 +751,7 @@ int consumer_send_relayd_stream(struct lttng_consumer_stream *stream,
 		if (ret < 0) {
 			goto end;
 		}
+
 		uatomic_inc(&relayd->refcount);
 		stream->sent_to_relayd = 1;
 	} else {
@@ -738,6 +763,44 @@ int consumer_send_relayd_stream(struct lttng_consumer_stream *stream,
 
 	DBG("Stream %s with key %" PRIu64 " sent to relayd id %" PRIu64,
 			stream->name, stream->key, stream->net_seq_idx);
+
+end:
+	rcu_read_unlock();
+	return ret;
+}
+
+/*
+ * Find a relayd and send the streams sent message
+ *
+ * Returns 0 on success, < 0 on error
+ */
+int consumer_send_relayd_streams_sent(uint64_t net_seq_idx)
+{
+	int ret = 0;
+	struct consumer_relayd_sock_pair *relayd;
+
+	assert(net_seq_idx != -1ULL);
+
+	/* The stream is not metadata. Get relayd reference if exists. */
+	rcu_read_lock();
+	relayd = consumer_find_relayd(net_seq_idx);
+	if (relayd != NULL) {
+		/* Add stream on the relayd */
+		pthread_mutex_lock(&relayd->ctrl_sock_mutex);
+		ret = relayd_streams_sent(&relayd->control_sock);
+		pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
+		if (ret < 0) {
+			goto end;
+		}
+	} else {
+		ERR("Relayd ID %" PRIu64 " unknown. Can't send streams_sent.",
+				net_seq_idx);
+		ret = -1;
+		goto end;
+	}
+
+	ret = 0;
+	DBG("All streams sent relayd id %" PRIu64, net_seq_idx);
 
 end:
 	rcu_read_unlock();
@@ -837,7 +900,8 @@ struct lttng_consumer_channel *consumer_allocate_channel(uint64_t key,
 		uint64_t tracefile_size,
 		uint64_t tracefile_count,
 		uint64_t session_id_per_pid,
-		unsigned int monitor)
+		unsigned int monitor,
+		unsigned int live_timer_interval)
 {
 	struct lttng_consumer_channel *channel;
 
@@ -854,12 +918,26 @@ struct lttng_consumer_channel *consumer_allocate_channel(uint64_t key,
 	channel->uid = uid;
 	channel->gid = gid;
 	channel->relayd_id = relayd_id;
-	channel->output = output;
 	channel->tracefile_size = tracefile_size;
 	channel->tracefile_count = tracefile_count;
 	channel->monitor = monitor;
+	channel->live_timer_interval = live_timer_interval;
 	pthread_mutex_init(&channel->lock, NULL);
 	pthread_mutex_init(&channel->timer_lock, NULL);
+
+	switch (output) {
+	case LTTNG_EVENT_SPLICE:
+		channel->output = CONSUMER_CHANNEL_SPLICE;
+		break;
+	case LTTNG_EVENT_MMAP:
+		channel->output = CONSUMER_CHANNEL_MMAP;
+		break;
+	default:
+		assert(0);
+		free(channel);
+		channel = NULL;
+		goto end;
+	}
 
 	/*
 	 * In monitor mode, the streams associated with the channel will be put in
@@ -1091,12 +1169,11 @@ void lttng_consumer_cleanup(void)
  */
 void lttng_consumer_should_exit(struct lttng_consumer_local_data *ctx)
 {
-	int ret;
+	ssize_t ret;
+
 	consumer_quit = 1;
-	do {
-		ret = write(ctx->consumer_should_quit[1], "4", 1);
-	} while (ret < 0 && errno == EINTR);
-	if (ret < 0 || ret != 1) {
+	ret = lttng_write(ctx->consumer_should_quit[1], "4", 1);
+	if (ret < 1) {
 		PERROR("write consumer quit");
 	}
 
@@ -1236,6 +1313,57 @@ error:
 }
 
 /*
+ * Iterate over all streams of the hashtable and free them properly.
+ */
+static void destroy_data_stream_ht(struct lttng_ht *ht)
+{
+	struct lttng_ht_iter iter;
+	struct lttng_consumer_stream *stream;
+
+	if (ht == NULL) {
+		return;
+	}
+
+	rcu_read_lock();
+	cds_lfht_for_each_entry(ht->ht, &iter.iter, stream, node.node) {
+		/*
+		 * Ignore return value since we are currently cleaning up so any error
+		 * can't be handled.
+		 */
+		(void) consumer_del_stream(stream, ht);
+	}
+	rcu_read_unlock();
+
+	lttng_ht_destroy(ht);
+}
+
+/*
+ * Iterate over all streams of the metadata hashtable and free them
+ * properly.
+ */
+static void destroy_metadata_stream_ht(struct lttng_ht *ht)
+{
+	struct lttng_ht_iter iter;
+	struct lttng_consumer_stream *stream;
+
+	if (ht == NULL) {
+		return;
+	}
+
+	rcu_read_lock();
+	cds_lfht_for_each_entry(ht->ht, &iter.iter, stream, node.node) {
+		/*
+		 * Ignore return value since we are currently cleaning up so any error
+		 * can't be handled.
+		 */
+		(void) consumer_del_metadata_stream(stream, ht);
+	}
+	rcu_read_unlock();
+
+	lttng_ht_destroy(ht);
+}
+
+/*
  * Close all fds associated with the instance and free the context.
  */
 void lttng_consumer_destroy(struct lttng_consumer_local_data *ctx)
@@ -1243,6 +1371,9 @@ void lttng_consumer_destroy(struct lttng_consumer_local_data *ctx)
 	int ret;
 
 	DBG("Consumer destroying it. Closing everything.");
+
+	destroy_data_stream_ht(data_ht);
+	destroy_metadata_stream_ht(metadata_ht);
 
 	ret = close(ctx->consumer_error_socket);
 	if (ret) {
@@ -1270,15 +1401,13 @@ static int write_relayd_metadata_id(int fd,
 		struct lttng_consumer_stream *stream,
 		struct consumer_relayd_sock_pair *relayd, unsigned long padding)
 {
-	int ret;
+	ssize_t ret;
 	struct lttcomm_relayd_metadata_payload hdr;
 
 	hdr.stream_id = htobe64(stream->relayd_stream_id);
 	hdr.padding_size = htobe32(padding);
-	do {
-		ret = write(fd, (void *) &hdr, sizeof(hdr));
-	} while (ret < 0 && errno == EINTR);
-	if (ret < 0 || ret != sizeof(hdr)) {
+	ret = lttng_write(fd, (void *) &hdr, sizeof(hdr));
+	if (ret < sizeof(hdr)) {
 		/*
 		 * This error means that the fd's end is closed so ignore the perror
 		 * not to clubber the error output since this can happen in a normal
@@ -1300,7 +1429,7 @@ static int write_relayd_metadata_id(int fd,
 			stream->relayd_stream_id, padding);
 
 end:
-	return ret;
+	return (int) ret;
 }
 
 /*
@@ -1317,7 +1446,8 @@ end:
 ssize_t lttng_consumer_on_read_subbuffer_mmap(
 		struct lttng_consumer_local_data *ctx,
 		struct lttng_consumer_stream *stream, unsigned long len,
-		unsigned long padding)
+		unsigned long padding,
+		struct ctf_packet_index *index)
 {
 	unsigned long mmap_offset;
 	void *mmap_base;
@@ -1424,26 +1554,40 @@ ssize_t lttng_consumer_on_read_subbuffer_mmap(
 			ret = utils_rotate_stream_file(stream->chan->pathname,
 					stream->name, stream->chan->tracefile_size,
 					stream->chan->tracefile_count, stream->uid, stream->gid,
-					stream->out_fd, &(stream->tracefile_count_current));
+					stream->out_fd, &(stream->tracefile_count_current),
+					&stream->out_fd);
 			if (ret < 0) {
 				ERR("Rotating output file");
 				goto end;
 			}
-			outfd = stream->out_fd = ret;
+			outfd = stream->out_fd;
+
+			if (stream->index_fd >= 0) {
+				ret = index_create_file(stream->chan->pathname,
+						stream->name, stream->uid, stream->gid,
+						stream->chan->tracefile_size,
+						stream->tracefile_count_current);
+				if (ret < 0) {
+					goto end;
+				}
+				stream->index_fd = ret;
+			}
+
 			/* Reset current size because we just perform a rotation. */
 			stream->tracefile_size_current = 0;
 			stream->out_fd_offset = 0;
 			orig_offset = 0;
 		}
 		stream->tracefile_size_current += len;
+		if (index) {
+			index->offset = htobe64(stream->out_fd_offset);
+		}
 	}
 
 	while (len > 0) {
-		do {
-			ret = write(outfd, mmap_base + mmap_offset, len);
-		} while (ret < 0 && errno == EINTR);
+		ret = lttng_write(outfd, mmap_base + mmap_offset, len);
 		DBG("Consumer mmap write() ret %zd (len %lu)", ret, len);
-		if (ret < 0) {
+		if (ret < len) {
 			/*
 			 * This is possible if the fd is closed on the other side (outfd)
 			 * or any write problem. It can be verbose a bit for a normal
@@ -1510,7 +1654,8 @@ end:
 ssize_t lttng_consumer_on_read_subbuffer_splice(
 		struct lttng_consumer_local_data *ctx,
 		struct lttng_consumer_stream *stream, unsigned long len,
-		unsigned long padding)
+		unsigned long padding,
+		struct ctf_packet_index *index)
 {
 	ssize_t ret = 0, written = 0, ret_splice = 0;
 	loff_t offset = 0;
@@ -1610,18 +1755,32 @@ ssize_t lttng_consumer_on_read_subbuffer_splice(
 			ret = utils_rotate_stream_file(stream->chan->pathname,
 					stream->name, stream->chan->tracefile_size,
 					stream->chan->tracefile_count, stream->uid, stream->gid,
-					stream->out_fd, &(stream->tracefile_count_current));
+					stream->out_fd, &(stream->tracefile_count_current),
+					&stream->out_fd);
 			if (ret < 0) {
 				ERR("Rotating output file");
 				goto end;
 			}
-			outfd = stream->out_fd = ret;
+			outfd = stream->out_fd;
+
+			if (stream->index_fd >= 0) {
+				ret = index_create_file(stream->chan->pathname,
+						stream->name, stream->uid, stream->gid,
+						stream->chan->tracefile_size,
+						stream->tracefile_count_current);
+				if (ret < 0) {
+					goto end;
+				}
+				stream->index_fd = ret;
+			}
+
 			/* Reset current size because we just perform a rotation. */
 			stream->tracefile_size_current = 0;
 			stream->out_fd_offset = 0;
 			orig_offset = 0;
 		}
 		stream->tracefile_size_current += len;
+		index->offset = htobe64(stream->out_fd_offset);
 	}
 
 	while (len > 0) {
@@ -1788,60 +1947,6 @@ int lttng_consumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		assert(0);
 		return -ENOSYS;
 	}
-}
-
-/*
- * Iterate over all streams of the hashtable and free them properly.
- *
- * WARNING: *MUST* be used with data stream only.
- */
-static void destroy_data_stream_ht(struct lttng_ht *ht)
-{
-	struct lttng_ht_iter iter;
-	struct lttng_consumer_stream *stream;
-
-	if (ht == NULL) {
-		return;
-	}
-
-	rcu_read_lock();
-	cds_lfht_for_each_entry(ht->ht, &iter.iter, stream, node.node) {
-		/*
-		 * Ignore return value since we are currently cleaning up so any error
-		 * can't be handled.
-		 */
-		(void) consumer_del_stream(stream, ht);
-	}
-	rcu_read_unlock();
-
-	lttng_ht_destroy(ht);
-}
-
-/*
- * Iterate over all streams of the hashtable and free them properly.
- *
- * XXX: Should not be only for metadata stream or else use an other name.
- */
-static void destroy_stream_ht(struct lttng_ht *ht)
-{
-	struct lttng_ht_iter iter;
-	struct lttng_consumer_stream *stream;
-
-	if (ht == NULL) {
-		return;
-	}
-
-	rcu_read_lock();
-	cds_lfht_for_each_entry(ht->ht, &iter.iter, stream, node.node) {
-		/*
-		 * Ignore return value since we are currently cleaning up so any error
-		 * can't be handled.
-		 */
-		(void) consumer_del_metadata_stream(stream, ht);
-	}
-	rcu_read_unlock();
-
-	lttng_ht_destroy(ht);
 }
 
 void lttng_consumer_close_metadata(void)
@@ -2137,7 +2242,7 @@ static void validate_endpoint_status_metadata_stream(
  */
 void *consumer_thread_metadata_poll(void *data)
 {
-	int ret, i, pollfd;
+	int ret, i, pollfd, err = -1;
 	uint32_t revents, nb_fd;
 	struct lttng_consumer_stream *stream = NULL;
 	struct lttng_ht_iter iter;
@@ -2148,11 +2253,13 @@ void *consumer_thread_metadata_poll(void *data)
 
 	rcu_register_thread();
 
-	metadata_ht = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
-	if (!metadata_ht) {
-		/* ENOMEM at this point. Better to bail out. */
-		goto end_ht;
+	health_register(health_consumerd, HEALTH_CONSUMERD_TYPE_METADATA);
+
+	if (testpoint(consumerd_thread_metadata)) {
+		goto error_testpoint;
 	}
+
+	health_code_update();
 
 	DBG("Thread metadata poll started");
 
@@ -2173,14 +2280,19 @@ void *consumer_thread_metadata_poll(void *data)
 	DBG("Metadata main loop started");
 
 	while (1) {
+		health_code_update();
+
 		/* Only the metadata pipe is set */
 		if (LTTNG_POLL_GETNB(&events) == 0 && consumer_quit == 1) {
+			err = 0;	/* All is OK */
 			goto end;
 		}
 
 restart:
 		DBG("Metadata poll wait with %d fd(s)", LTTNG_POLL_GETNB(&events));
+		health_poll_entry();
 		ret = lttng_poll_wait(&events, -1);
+		health_poll_exit();
 		DBG("Metadata event catched in thread");
 		if (ret < 0) {
 			if (errno == EINTR) {
@@ -2194,6 +2306,8 @@ restart:
 
 		/* From here, the event is a metadata wait fd */
 		for (i = 0; i < nb_fd; i++) {
+			health_code_update();
+
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
@@ -2213,8 +2327,8 @@ restart:
 
 					pipe_len = lttng_pipe_read(ctx->consumer_metadata_pipe,
 							&stream, sizeof(stream));
-					if (pipe_len < 0) {
-						ERR("read metadata stream, ret: %zd", pipe_len);
+					if (pipe_len < sizeof(stream)) {
+						PERROR("read metadata stream");
 						/*
 						 * Continue here to handle the rest of the streams.
 						 */
@@ -2263,6 +2377,8 @@ restart:
 
 					/* We just flushed the stream now read it. */
 					do {
+						health_code_update();
+
 						len = ctx->on_buffer_ready(stream, ctx);
 						/*
 						 * We don't check the return value here since if we get
@@ -2285,6 +2401,8 @@ restart:
 				assert(stream->wait_fd == pollfd);
 
 				do {
+					health_code_update();
+
 					len = ctx->on_buffer_ready(stream, ctx);
 					/*
 					 * We don't check the return value here since if we get
@@ -2307,14 +2425,20 @@ restart:
 		}
 	}
 
+	/* All is OK */
+	err = 0;
 error:
 end:
 	DBG("Metadata poll thread exiting");
 
 	lttng_poll_clean(&events);
 end_poll:
-	destroy_stream_ht(metadata_ht);
-end_ht:
+error_testpoint:
+	if (err) {
+		health_error();
+		ERR("Health error occurred in %s", __func__);
+	}
+	health_unregister(health_consumerd);
 	rcu_unregister_thread();
 	return NULL;
 }
@@ -2325,7 +2449,7 @@ end_ht:
  */
 void *consumer_thread_data_poll(void *data)
 {
-	int num_rdy, num_hup, high_prio, ret, i;
+	int num_rdy, num_hup, high_prio, ret, i, err = -1;
 	struct pollfd *pollfd = NULL;
 	/* local view of the streams */
 	struct lttng_consumer_stream **local_stream = NULL, *new_stream = NULL;
@@ -2336,11 +2460,13 @@ void *consumer_thread_data_poll(void *data)
 
 	rcu_register_thread();
 
-	data_ht = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
-	if (data_ht == NULL) {
-		/* ENOMEM at this point. Better to bail out. */
-		goto end;
+	health_register(health_consumerd, HEALTH_CONSUMERD_TYPE_DATA);
+
+	if (testpoint(consumerd_thread_data)) {
+		goto error_testpoint;
 	}
+
+	health_code_update();
 
 	local_stream = zmalloc(sizeof(struct lttng_consumer_stream *));
 	if (local_stream == NULL) {
@@ -2349,6 +2475,8 @@ void *consumer_thread_data_poll(void *data)
 	}
 
 	while (1) {
+		health_code_update();
+
 		high_prio = 0;
 		num_hup = 0;
 
@@ -2395,12 +2523,15 @@ void *consumer_thread_data_poll(void *data)
 
 		/* No FDs and consumer_quit, consumer_cleanup the thread */
 		if (nb_fd == 0 && consumer_quit == 1) {
+			err = 0;	/* All is OK */
 			goto end;
 		}
 		/* poll on the array of fds */
 	restart:
 		DBG("polling on %d fd", nb_fd + 1);
+		health_poll_entry();
 		num_rdy = poll(pollfd, nb_fd + 1, -1);
+		health_poll_exit();
 		DBG("poll num_rdy : %d", num_rdy);
 		if (num_rdy == -1) {
 			/*
@@ -2428,8 +2559,8 @@ void *consumer_thread_data_poll(void *data)
 			DBG("consumer_data_pipe wake up");
 			pipe_readlen = lttng_pipe_read(ctx->consumer_data_pipe,
 					&new_stream, sizeof(new_stream));
-			if (pipe_readlen < 0) {
-				ERR("Consumer data pipe ret %zd", pipe_readlen);
+			if (pipe_readlen < sizeof(new_stream)) {
+				PERROR("Consumer data pipe");
 				/* Continue so we can at least handle the current stream(s). */
 				continue;
 			}
@@ -2450,6 +2581,8 @@ void *consumer_thread_data_poll(void *data)
 
 		/* Take care of high priority channels first. */
 		for (i = 0; i < nb_fd; i++) {
+			health_code_update();
+
 			if (local_stream[i] == NULL) {
 				continue;
 			}
@@ -2478,6 +2611,8 @@ void *consumer_thread_data_poll(void *data)
 
 		/* Take care of low priority channels. */
 		for (i = 0; i < nb_fd; i++) {
+			health_code_update();
+
 			if (local_stream[i] == NULL) {
 				continue;
 			}
@@ -2498,6 +2633,8 @@ void *consumer_thread_data_poll(void *data)
 
 		/* Handle hangup and errors */
 		for (i = 0; i < nb_fd; i++) {
+			health_code_update();
+
 			if (local_stream[i] == NULL) {
 				continue;
 			}
@@ -2543,6 +2680,8 @@ void *consumer_thread_data_poll(void *data)
 			}
 		}
 	}
+	/* All is OK */
+	err = 0;
 end:
 	DBG("polling thread exiting");
 	free(pollfd);
@@ -2558,7 +2697,12 @@ end:
 	 */
 	(void) lttng_pipe_write_close(ctx->consumer_metadata_pipe);
 
-	destroy_data_stream_ht(data_ht);
+error_testpoint:
+	if (err) {
+		health_error();
+		ERR("Health error occurred in %s", __func__);
+	}
+	health_unregister(health_consumerd);
 
 	rcu_unregister_thread();
 	return NULL;
@@ -2641,7 +2785,7 @@ static void destroy_channel_ht(struct lttng_ht *ht)
  */
 void *consumer_thread_channel_poll(void *data)
 {
-	int ret, i, pollfd;
+	int ret, i, pollfd, err = -1;
 	uint32_t revents, nb_fd;
 	struct lttng_consumer_channel *chan = NULL;
 	struct lttng_ht_iter iter;
@@ -2651,6 +2795,14 @@ void *consumer_thread_channel_poll(void *data)
 	struct lttng_ht *channel_ht;
 
 	rcu_register_thread();
+
+	health_register(health_consumerd, HEALTH_CONSUMERD_TYPE_CHANNEL);
+
+	if (testpoint(consumerd_thread_channel)) {
+		goto error_testpoint;
+	}
+
+	health_code_update();
 
 	channel_ht = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
 	if (!channel_ht) {
@@ -2676,14 +2828,19 @@ void *consumer_thread_channel_poll(void *data)
 	DBG("Channel main loop started");
 
 	while (1) {
+		health_code_update();
+
 		/* Only the channel pipe is set */
 		if (LTTNG_POLL_GETNB(&events) == 0 && consumer_quit == 1) {
+			err = 0;	/* All is OK */
 			goto end;
 		}
 
 restart:
 		DBG("Channel poll wait with %d fd(s)", LTTNG_POLL_GETNB(&events));
+		health_poll_entry();
 		ret = lttng_poll_wait(&events, -1);
+		health_poll_exit();
 		DBG("Channel event catched in thread");
 		if (ret < 0) {
 			if (errno == EINTR) {
@@ -2697,6 +2854,8 @@ restart:
 
 		/* From here, the event is a channel wait fd */
 		for (i = 0; i < nb_fd; i++) {
+			health_code_update();
+
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
@@ -2763,6 +2922,8 @@ restart:
 							/* Delete streams that might have been left in the stream list. */
 							cds_list_for_each_entry_safe(stream, stmp, &chan->streams.head,
 									send_node) {
+								health_code_update();
+
 								cds_list_del(&stream->send_node);
 								lttng_ustconsumer_del_stream(stream);
 								uatomic_sub(&stream->chan->refcount, 1);
@@ -2835,12 +2996,20 @@ restart:
 		}
 	}
 
+	/* All is OK */
+	err = 0;
 end:
 	lttng_poll_clean(&events);
 end_poll:
 	destroy_channel_ht(channel_ht);
 end_ht:
+error_testpoint:
 	DBG("Channel poll thread exiting");
+	if (err) {
+		health_error();
+		ERR("Health error occurred in %s", __func__);
+	}
+	health_unregister(health_consumerd);
 	rcu_unregister_thread();
 	return NULL;
 }
@@ -2878,7 +3047,7 @@ error:
  */
 void *consumer_thread_sessiond_poll(void *data)
 {
-	int sock = -1, client_socket, ret;
+	int sock = -1, client_socket, ret, err = -1;
 	/*
 	 * structure to poll for incoming data on communication socket avoids
 	 * making blocking sockets.
@@ -2887,6 +3056,14 @@ void *consumer_thread_sessiond_poll(void *data)
 	struct lttng_consumer_local_data *ctx = data;
 
 	rcu_register_thread();
+
+	health_register(health_consumerd, HEALTH_CONSUMERD_TYPE_SESSIOND);
+
+	if (testpoint(consumerd_thread_sessiond)) {
+		goto error_testpoint;
+	}
+
+	health_code_update();
 
 	DBG("Creating command socket %s", ctx->consumer_command_sock_path);
 	unlink(ctx->consumer_command_sock_path);
@@ -2948,7 +3125,12 @@ void *consumer_thread_sessiond_poll(void *data)
 	consumer_sockpoll[1].events = POLLIN | POLLPRI;
 
 	while (1) {
-		if (lttng_consumer_poll_socket(consumer_sockpoll) < 0) {
+		health_code_update();
+
+		health_poll_entry();
+		ret = lttng_consumer_poll_socket(consumer_sockpoll);
+		health_poll_exit();
+		if (ret < 0) {
 			goto end;
 		}
 		DBG("Incoming command on sock");
@@ -2963,14 +3145,19 @@ void *consumer_thread_sessiond_poll(void *data)
 			 * ERR() here.
 			 */
 			DBG("Communication interrupted on command socket");
+			err = 0;
 			goto end;
 		}
 		if (consumer_quit) {
 			DBG("consumer_thread_receive_fds received quit from signal");
+			err = 0;	/* All is OK */
 			goto end;
 		}
 		DBG("received command on sock");
 	}
+	/* All is OK */
+	err = 0;
+
 end:
 	DBG("Consumer thread sessiond poll exiting");
 
@@ -2996,6 +3183,8 @@ end:
 
 	notify_channel_pipe(ctx, NULL, -1, CONSUMER_CHANNEL_QUIT);
 
+	notify_health_quit_pipe(health_quit_pipe);
+
 	/* Cleaning up possibly open sockets. */
 	if (sock >= 0) {
 		ret = close(sock);
@@ -3010,6 +3199,13 @@ end:
 		}
 	}
 
+error_testpoint:
+	if (err) {
+		health_error();
+		ERR("Health error occurred in %s", __func__);
+	}
+	health_unregister(health_consumerd);
+
 	rcu_unregister_thread();
 	return NULL;
 }
@@ -3020,6 +3216,9 @@ ssize_t lttng_consumer_read_subbuffer(struct lttng_consumer_stream *stream,
 	ssize_t ret;
 
 	pthread_mutex_lock(&stream->lock);
+	if (stream->metadata_flag) {
+		pthread_mutex_lock(&stream->metadata_rdv_lock);
+	}
 
 	switch (consumer_data.type) {
 	case LTTNG_CONSUMER_KERNEL:
@@ -3036,6 +3235,10 @@ ssize_t lttng_consumer_read_subbuffer(struct lttng_consumer_stream *stream,
 		break;
 	}
 
+	if (stream->metadata_flag) {
+		pthread_cond_broadcast(&stream->metadata_rdv);
+		pthread_mutex_unlock(&stream->metadata_rdv_lock);
+	}
 	pthread_mutex_unlock(&stream->lock);
 	return ret;
 }
@@ -3058,12 +3261,42 @@ int lttng_consumer_on_recv_stream(struct lttng_consumer_stream *stream)
 /*
  * Allocate and set consumer data hash tables.
  */
-void lttng_consumer_init(void)
+int lttng_consumer_init(void)
 {
 	consumer_data.channel_ht = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
+	if (!consumer_data.channel_ht) {
+		goto error;
+	}
+
 	consumer_data.relayd_ht = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
+	if (!consumer_data.relayd_ht) {
+		goto error;
+	}
+
 	consumer_data.stream_list_ht = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
+	if (!consumer_data.stream_list_ht) {
+		goto error;
+	}
+
 	consumer_data.stream_per_chan_id_ht = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
+	if (!consumer_data.stream_per_chan_id_ht) {
+		goto error;
+	}
+
+	data_ht = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
+	if (!data_ht) {
+		goto error;
+	}
+
+	metadata_ht = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
+	if (!metadata_ht) {
+		goto error;
+	}
+
+	return 0;
+
+error:
+	return -1;
 }
 
 /*
@@ -3075,10 +3308,11 @@ void lttng_consumer_init(void)
 int consumer_add_relayd_socket(uint64_t net_seq_idx, int sock_type,
 		struct lttng_consumer_local_data *ctx, int sock,
 		struct pollfd *consumer_sockpoll,
-		struct lttcomm_relayd_sock *relayd_sock, uint64_t sessiond_id)
+		struct lttcomm_relayd_sock *relayd_sock, uint64_t sessiond_id,
+		uint64_t relayd_session_id)
 {
 	int fd = -1, ret = -1, relayd_created = 0;
-	enum lttng_error_code ret_code = LTTNG_OK;
+	enum lttcomm_return_code ret_code = LTTCOMM_CONSUMERD_SUCCESS;
 	struct consumer_relayd_sock_pair *relayd = NULL;
 
 	assert(ctx);
@@ -3114,7 +3348,7 @@ int consumer_add_relayd_socket(uint64_t net_seq_idx, int sock_type,
 	}
 
 	/* First send a status message before receiving the fds. */
-	ret = consumer_send_status_msg(sock, LTTNG_OK);
+	ret = consumer_send_status_msg(sock, LTTCOMM_CONSUMERD_SUCCESS);
 	if (ret < 0) {
 		/* Somehow, the session daemon is not responding anymore. */
 		lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_FATAL);
@@ -3175,29 +3409,7 @@ int consumer_add_relayd_socket(uint64_t net_seq_idx, int sock_type,
 		relayd->control_sock.major = relayd_sock->major;
 		relayd->control_sock.minor = relayd_sock->minor;
 
-		/*
-		 * Create a session on the relayd and store the returned id. Lock the
-		 * control socket mutex if the relayd was NOT created before.
-		 */
-		if (!relayd_created) {
-			pthread_mutex_lock(&relayd->ctrl_sock_mutex);
-		}
-		ret = relayd_create_session(&relayd->control_sock,
-				&relayd->relayd_session_id);
-		if (!relayd_created) {
-			pthread_mutex_unlock(&relayd->ctrl_sock_mutex);
-		}
-		if (ret < 0) {
-			/*
-			 * Close all sockets of a relayd object. It will be freed if it was
-			 * created at the error code path or else it will be garbage
-			 * collect.
-			 */
-			(void) relayd_close(&relayd->control_sock);
-			(void) relayd_close(&relayd->data_sock);
-			ret_code = LTTCOMM_CONSUMERD_RELAYD_FAIL;
-			goto error;
-		}
+		relayd->relayd_session_id = relayd_session_id;
 
 		break;
 	case LTTNG_STREAM_DATA:
@@ -3497,9 +3709,9 @@ int consumer_send_status_channel(int sock,
 	assert(sock >= 0);
 
 	if (!channel) {
-		msg.ret_code = -LTTNG_ERR_UST_CHAN_FAIL;
+		msg.ret_code = LTTCOMM_CONSUMERD_CHANNEL_FAIL;
 	} else {
-		msg.ret_code = LTTNG_OK;
+		msg.ret_code = LTTCOMM_CONSUMERD_SUCCESS;
 		msg.key = channel->key;
 		msg.stream_count = channel->streams.count;
 	}
