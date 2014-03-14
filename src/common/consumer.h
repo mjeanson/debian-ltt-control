@@ -41,7 +41,7 @@ enum lttng_consumer_command {
 	/* pause, delete, active depending on fd state */
 	LTTNG_CONSUMER_UPDATE_STREAM,
 	/* inform the consumer to quit when all fd has hang up */
-	LTTNG_CONSUMER_STOP,
+	LTTNG_CONSUMER_STOP,	/* deprecated */
 	LTTNG_CONSUMER_ADD_RELAYD_SOCKET,
 	/* Inform the consumer to kill a specific relayd connection */
 	LTTNG_CONSUMER_DESTROY_RELAYD,
@@ -622,6 +622,8 @@ ssize_t lttng_consumer_on_read_subbuffer_splice(
 int lttng_consumer_take_snapshot(struct lttng_consumer_stream *stream);
 int lttng_consumer_get_produced_snapshot(struct lttng_consumer_stream *stream,
 		unsigned long *pos);
+int lttng_ustconsumer_get_wakeup_fd(struct lttng_consumer_stream *stream);
+int lttng_ustconsumer_close_wakeup_fd(struct lttng_consumer_stream *stream);
 void *consumer_thread_metadata_poll(void *data);
 void *consumer_thread_data_poll(void *data);
 void *consumer_thread_sessiond_poll(void *data);

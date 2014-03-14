@@ -50,7 +50,7 @@ struct ltt_ust_event {
 	struct lttng_ust_event attr;
 	struct lttng_ht_node_str node;
 	struct lttng_ust_filter_bytecode *filter;
-	const struct lttng_event_exclusion *exclusion;
+	struct lttng_event_exclusion *exclusion;
 };
 
 /* UST channel */
@@ -107,6 +107,9 @@ struct ltt_ust_session {
 	unsigned int snapshot_mode;
 	unsigned int has_non_default_channel;
 	unsigned int live_timer_interval;	/* usec */
+
+	/* Metadata channel attributes. */
+	struct lttng_ust_channel_attr metadata_attr;
 };
 
 /*

@@ -136,7 +136,8 @@
 /* Default JUL domain channel name. */
 #define DEFAULT_JUL_CHANNEL_NAME        "lttng_jul_channel"
 /* Default JUL tracepoint name. This is a wildcard for the JUL domain. */
-#define DEFAULT_JUL_EVENT_NAME          "lttng_jul*"
+#define DEFAULT_SYS_JUL_EVENT_NAME      "lttng_jul:sys*"
+#define DEFAULT_USER_JUL_EVENT_NAME     "lttng_jul:user*"
 /* JUL default channel name. */
 #define DEFAULT_CHANNEL_OVERWRITE       0
 #define DEFAULT_CHANNEL_TRACEFILE_SIZE  0
@@ -201,7 +202,13 @@
  */
 #define DEFAULT_SEM_WAIT_TIMEOUT            30    /* in seconds */
 
-/* Default network ports for trace streaming support */
+/* Default bind addresses for network services. */
+#define DEFAULT_NETWORK_CONTROL_BIND_ADDRESS    "0.0.0.0"
+#define DEFAULT_NETWORK_DATA_BIND_ADDRESS       "0.0.0.0"
+#define DEFAULT_NETWORK_VIEWER_BIND_ADDRESS     "localhost"
+#define DEFAULT_JUL_BIND_ADDRESS                "localhost"
+
+/* Default network ports for trace streaming support. */
 #define DEFAULT_NETWORK_CONTROL_PORT        5342
 #define DEFAULT_NETWORK_DATA_PORT           5343
 #define DEFAULT_NETWORK_VIEWER_PORT         5344
@@ -249,6 +256,9 @@
 /* Suffix of an index file. */
 #define DEFAULT_INDEX_FILE_SUFFIX			".idx"
 #define DEFAULT_INDEX_DIR					"index"
+
+/* Default lttng command live timer value in usec. */
+#define DEFAULT_LTTNG_LIVE_TIMER			1000000
 
 extern size_t default_channel_subbuf_size;
 extern size_t default_metadata_subbuf_size;

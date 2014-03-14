@@ -30,6 +30,11 @@
  */
 struct lttng_ht *jul_apps_ht_by_sock;
 
+struct jul_ht_key {
+	const char *name;
+	enum lttng_loglevel_jul loglevel;
+};
+
 /*
  * Registration message payload from a JUL application. The PID is used to find
  * back the corresponding UST app object so both socket can be linked.
@@ -109,7 +114,10 @@ void jul_destroy_domain(struct jul_domain *dom);
 /* JUL event API. */
 struct jul_event *jul_create_event(const char *name);
 void jul_add_event(struct jul_event *event, struct jul_domain *dom);
-struct jul_event *jul_find_by_name(const char *name, struct jul_domain *dom);
+struct jul_event *jul_find_event(const char *name,
+		enum lttng_loglevel_jul loglevel, struct jul_domain *dom);
+struct jul_event *jul_find_event_by_name(const char *name,
+		struct jul_domain *dom);
 void jul_delete_event(struct jul_event *event, struct jul_domain *dom);
 void jul_destroy_event(struct jul_event *event);
 
@@ -119,6 +127,7 @@ void jul_add_app(struct jul_app *app);
 void jul_delete_app(struct jul_app *app);
 struct jul_app *jul_find_app_by_sock(int sock);
 void jul_destroy_app(struct jul_app *app);
+int jul_send_registration_done(struct jul_app *app);
 
 /* JUL action API */
 int jul_enable_event(struct jul_event *event);

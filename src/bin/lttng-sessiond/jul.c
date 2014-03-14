@@ -27,6 +27,91 @@
 #include "utils.h"
 
 /*
+ * Match function for the events hash table lookup by name.
+ */
+static int ht_match_event_by_name(struct cds_lfht_node *node,
+		const void *_key)
+{
+	struct jul_event *event;
+	const struct jul_ht_key *key;
+
+	assert(node);
+	assert(_key);
+
+	event = caa_container_of(node, struct jul_event, node.node);
+	key = _key;
+
+	/* Match 1 elements of the key: name. */
+
+	/* Event name */
+	if (strncmp(event->name, key->name, sizeof(event->name)) != 0) {
+		goto no_match;
+	}
+	/* Match. */
+	return 1;
+
+no_match:
+	return 0;
+}
+
+/*
+ * Match function for the events hash table lookup by name and loglevel.
+ */
+static int ht_match_event(struct cds_lfht_node *node,
+		const void *_key)
+{
+	struct jul_event *event;
+	const struct jul_ht_key *key;
+
+	assert(node);
+	assert(_key);
+
+	event = caa_container_of(node, struct jul_event, node.node);
+	key = _key;
+
+	/* Match 2 elements of the key: name and loglevel. */
+
+	/* Event name */
+	if (strncmp(event->name, key->name, sizeof(event->name)) != 0) {
+		goto no_match;
+	}
+
+	if (event->loglevel != key->loglevel) {
+		if (event->loglevel_type == LTTNG_EVENT_LOGLEVEL_ALL &&
+				key->loglevel == 0 && event->loglevel == -1) {
+			goto match;
+		}
+		goto no_match;
+	}
+match:
+	return 1;
+
+no_match:
+	return 0;
+}
+
+/*
+ * Add unique JUL event based on the event name and loglevel.
+ */
+static void add_unique_jul_event(struct lttng_ht *ht, struct jul_event *event)
+{
+	struct cds_lfht_node *node_ptr;
+	struct jul_ht_key key;
+
+	assert(ht);
+	assert(ht->ht);
+	assert(event);
+
+	key.name = event->name;
+	key.loglevel = event->loglevel;
+
+	node_ptr = cds_lfht_add_unique(ht->ht,
+			ht->hash_fct(event->node.key, lttng_ht_seed),
+			ht_match_event, &key, &event->node.node);
+	assert(node_ptr == &event->node.node);
+}
+
+/*
  * URCU delayed JUL event reclaim.
  */
 static void destroy_event_jul_rcu(struct rcu_head *head)
@@ -67,6 +152,7 @@ static int send_header(struct lttcomm_sock *sock, uint64_t data_size,
 
 	assert(sock);
 
+	memset(&msg, 0, sizeof(msg));
 	msg.data_size = htobe64(data_size);
 	msg.cmd = htobe32(cmd);
 	msg.cmd_version = htobe32(cmd_version);
@@ -248,6 +334,7 @@ static int enable_event(struct jul_app *app, struct jul_event *event)
 		goto error_io;
 	}
 
+	memset(&msg, 0, sizeof(msg));
 	msg.loglevel = event->loglevel;
 	msg.loglevel_type = event->loglevel_type;
 	strncpy(msg.name, event->name, sizeof(msg.name));
@@ -309,6 +396,7 @@ static int disable_event(struct jul_app *app, struct jul_event *event)
 		goto error_io;
 	}
 
+	memset(&msg, 0, sizeof(msg));
 	strncpy(msg.name, event->name, sizeof(msg.name));
 	ret = send_payload(app->sock, &msg, sizeof(msg));
 	if (ret < 0) {
@@ -339,6 +427,21 @@ error_io:
 	ret = LTTNG_ERR_UST_DISABLE_FAIL;
 error:
 	return ret;
+}
+
+/*
+ * Send back the registration DONE command to a given JUL application.
+ *
+ * Return 0 on success or else a negative value.
+ */
+int jul_send_registration_done(struct jul_app *app)
+{
+	assert(app);
+	assert(app->sock);
+
+	DBG("JUL sending registration done to app socket %d", app->sock->fd);
+
+	return send_header(app->sock, 0, JUL_CMD_REG_DONE, 0);
 }
 
 /*
@@ -443,24 +546,30 @@ int jul_list_events(struct lttng_event **events)
 			goto error_unlock;
 		}
 
-		if (count >= nbmem) {
+		if (count + nb_ev > nbmem) {
 			/* In case the realloc fails, we free the memory */
-			void *ptr;
+			struct lttng_event *new_tmp_events;
+			size_t new_nbmem;
 
-			DBG2("Reallocating JUL event list from %zu to %zu entries", nbmem,
-					2 * nbmem);
-			nbmem *= 2;
-			ptr = realloc(tmp_events, nbmem * sizeof(*tmp_events));
-			if (!ptr) {
+			new_nbmem = max_t(size_t, count + nb_ev, nbmem << 1);
+			DBG2("Reallocating JUL event list from %zu to %zu entries",
+					nbmem, new_nbmem);
+			new_tmp_events = realloc(tmp_events,
+				new_nbmem * sizeof(*new_tmp_events));
+			if (!new_tmp_events) {
 				PERROR("realloc JUL events");
 				ret = -ENOMEM;
 				free(jul_events);
 				goto error_unlock;
 			}
-			tmp_events = ptr;
+			/* Zero the new memory */
+			memset(new_tmp_events + nbmem, 0,
+				(new_nbmem - nbmem) * sizeof(*new_tmp_events));
+			nbmem = new_nbmem;
+			tmp_events = new_tmp_events;
 		}
-		memcpy(tmp_events + (count * sizeof(*tmp_events)), jul_events,
-				nb_ev * sizeof(*tmp_events));
+		memcpy(tmp_events + count, jul_events,
+			nb_ev * sizeof(*tmp_events));
 		free(jul_events);
 		count += nb_ev;
 	}
@@ -644,38 +753,83 @@ void jul_add_event(struct jul_event *event, struct jul_domain *dom)
 	DBG3("JUL adding event %s to domain", event->name);
 
 	rcu_read_lock();
-	lttng_ht_add_unique_str(dom->events, &event->node);
+	add_unique_jul_event(dom->events, event);
 	rcu_read_unlock();
 	dom->being_used = 1;
 }
 
 /*
- * Find a JUL event in the given domain using name.
+ * Find a JUL event in the given domain using name and loglevel.
  *
  * RCU read side lock MUST be acquired.
  *
  * Return object if found else NULL.
  */
-struct jul_event *jul_find_by_name(const char *name, struct jul_domain *dom)
+struct jul_event *jul_find_event_by_name(const char *name,
+		struct jul_domain *dom)
 {
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
+	struct lttng_ht *ht;
+	struct jul_ht_key key;
 
 	assert(name);
 	assert(dom);
 	assert(dom->events);
 
-	lttng_ht_lookup(dom->events, (void *)name, &iter);
+	ht = dom->events;
+	key.name = name;
+
+	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
+			ht_match_event_by_name, &key, &iter.iter);
 	node = lttng_ht_iter_get_node_str(&iter);
 	if (node == NULL) {
 		goto error;
 	}
 
-	DBG3("JUL found by name %s in domain.", name);
+	DBG3("JUL event found %s by name.", name);
 	return caa_container_of(node, struct jul_event, node);
 
 error:
-	DBG3("JUL NOT found by name %s in domain.", name);
+	DBG3("JUL NOT found by name %s.", name);
+	return NULL;
+}
+
+/*
+ * Find a JUL event in the given domain using name and loglevel.
+ *
+ * RCU read side lock MUST be acquired.
+ *
+ * Return object if found else NULL.
+ */
+struct jul_event *jul_find_event(const char *name,
+		enum lttng_loglevel_jul loglevel, struct jul_domain *dom)
+{
+	struct lttng_ht_node_str *node;
+	struct lttng_ht_iter iter;
+	struct lttng_ht *ht;
+	struct jul_ht_key key;
+
+	assert(name);
+	assert(dom);
+	assert(dom->events);
+
+	ht = dom->events;
+	key.name = name;
+	key.loglevel = loglevel;
+
+	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
+			ht_match_event, &key, &iter.iter);
+	node = lttng_ht_iter_get_node_str(&iter);
+	if (node == NULL) {
+		goto error;
+	}
+
+	DBG3("JUL event found %s.", name);
+	return caa_container_of(node, struct jul_event, node);
+
+error:
+	DBG3("JUL NOT found %s.", name);
 	return NULL;
 }
 

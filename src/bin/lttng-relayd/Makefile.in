@@ -102,7 +102,9 @@ PROGRAMS = $(bin_PROGRAMS)
 am_lttng_relayd_OBJECTS = main.$(OBJEXT) utils.$(OBJEXT) \
 	index.$(OBJEXT) live.$(OBJEXT) ctf-trace.$(OBJEXT) \
 	cmd-generic.$(OBJEXT) cmd-2-1.$(OBJEXT) cmd-2-2.$(OBJEXT) \
-	cmd-2-4.$(OBJEXT) health-relayd.$(OBJEXT)
+	cmd-2-4.$(OBJEXT) health-relayd.$(OBJEXT) \
+	viewer-stream.$(OBJEXT) session.$(OBJEXT) stream.$(OBJEXT) \
+	connection.$(OBJEXT)
 lttng_relayd_OBJECTS = $(am_lttng_relayd_OBJECTS)
 lttng_relayd_DEPENDENCIES =  \
 	$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
@@ -341,7 +343,11 @@ lttng_relayd_SOURCES = main.c lttng-relayd.h utils.h utils.c cmd.h \
                        cmd-2-2.c cmd-2-2.h \
                        cmd-2-4.c cmd-2-4.h \
                        health-relayd.c health-relayd.h \
-                       lttng-viewer.h testpoint.h
+                       lttng-viewer-abi.h testpoint.h \
+                       viewer-stream.h viewer-stream.c \
+                       session.c session.h \
+                       stream.c stream.h \
+                       connection.c connection.h
 
 
 # link on liblttngctl for check if relayd is already alive.
@@ -453,12 +459,16 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cmd-2-2.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cmd-2-4.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cmd-generic.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/connection.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ctf-trace.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/health-relayd.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/index.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/live.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/main.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/session.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stream.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/utils.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/viewer-stream.Po@am__quote@
 
 .c.o:
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<

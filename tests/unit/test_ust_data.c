@@ -41,7 +41,7 @@
 /* Number of TAP tests in this file */
 #define NUM_TESTS 10
 
-/* For lttngerr.h */
+/* For error.h */
 int lttng_opt_quiet = 1;
 int lttng_opt_verbose;
 
@@ -172,7 +172,6 @@ static void test_create_ust_event_exclusion(void)
 	   event->attr.name[LTTNG_UST_SYM_NAME_LEN - 1] == '\0',
 	   "Validate UST event and exclusion");
 
-	free(exclusion);
 	trace_ust_destroy_event(event);
 }
 

@@ -1442,7 +1442,13 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		memset(&uevent, 0, sizeof(uevent));
 		uevent.type = LTTNG_EVENT_TRACEPOINT;
 		uevent.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
-		strncpy(uevent.name, DEFAULT_JUL_EVENT_NAME, sizeof(uevent.name));
+		if (is_root) {
+			strncpy(uevent.name, DEFAULT_SYS_JUL_EVENT_NAME,
+					sizeof(uevent.name));
+		} else {
+			strncpy(uevent.name, DEFAULT_USER_JUL_EVENT_NAME,
+					sizeof(uevent.name));
+		}
 		uevent.name[sizeof(uevent.name) - 1] = '\0';
 
 		/*
@@ -1654,7 +1660,13 @@ int cmd_enable_event_all(struct ltt_session *session,
 		/* Create the default JUL tracepoint. */
 		uevent.type = LTTNG_EVENT_TRACEPOINT;
 		uevent.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
-		strncpy(uevent.name, DEFAULT_JUL_EVENT_NAME, sizeof(uevent.name));
+		if (is_root) {
+			strncpy(uevent.name, DEFAULT_SYS_JUL_EVENT_NAME,
+					sizeof(uevent.name));
+		} else {
+			strncpy(uevent.name, DEFAULT_USER_JUL_EVENT_NAME,
+					sizeof(uevent.name));
+		}
 		uevent.name[sizeof(uevent.name) - 1] = '\0';
 
 		/*
@@ -1779,6 +1791,7 @@ error:
 int cmd_start_trace(struct ltt_session *session)
 {
 	int ret;
+	unsigned long nb_chan = 0;
 	struct ltt_kernel_session *ksession;
 	struct ltt_ust_session *usess;
 
@@ -1791,6 +1804,21 @@ int cmd_start_trace(struct ltt_session *session)
 	if (session->enabled) {
 		/* Already started. */
 		ret = LTTNG_ERR_TRACE_ALREADY_STARTED;
+		goto error;
+	}
+
+	/*
+	 * Starting a session without channel is useless since after that it's not
+	 * possible to enable channel thus inform the client.
+	 */
+	if (usess && usess->domain_global.channels) {
+		nb_chan += lttng_ht_get_count(usess->domain_global.channels);
+	}
+	if (ksession) {
+		nb_chan += ksession->channel_count;
+	}
+	if (!nb_chan) {
+		ret = LTTNG_ERR_NO_CHANNEL;
 		goto error;
 	}
 
@@ -2478,6 +2506,7 @@ void cmd_list_lttng_sessions(struct lttng_session *sessions, uid_t uid,
 		sessions[i].name[NAME_MAX - 1] = '\0';
 		sessions[i].enabled = session->enabled;
 		sessions[i].snapshot_mode = session->snapshot_mode;
+		sessions[i].live_timer_interval = session->live_timer;
 		i++;
 	}
 }
