@@ -34,7 +34,8 @@
  * can let the user define a custom one. However, localhost is ALWAYS the
  * default listening address.
  */
-static const char *default_reg_uri = "tcp://localhost";
+static const char *default_reg_uri =
+	"tcp://" DEFAULT_NETWORK_VIEWER_BIND_ADDRESS;
 
 /*
  * Update JUL application using the given socket. This is done just after
@@ -141,6 +142,8 @@ static struct lttcomm_sock *init_tcp_socket(void)
 
 	ret = sock->ops->bind(sock);
 	if (ret < 0) {
+		WARN("An other session daemon is using this JUL port. JUL support "
+				"will be deactivated not interfering with the tracing.");
 		goto error;
 	}
 
@@ -178,12 +181,13 @@ static void destroy_tcp_socket(struct lttcomm_sock *sock)
 /*
  * Handle a new JUL registration using the reg socket. After that, a new JUL
  * application is added to the global hash table and attach to an UST app
- * object.
+ * object. If r_app is not NULL, the created app is set to the pointer.
  *
  * Return the new FD created upon accept() on success or else a negative errno
  * value.
  */
-static int handle_registration(struct lttcomm_sock *reg_sock)
+static int handle_registration(struct lttcomm_sock *reg_sock,
+		struct jul_app **r_app)
 {
 	int ret;
 	pid_t pid;
@@ -227,6 +231,10 @@ static int handle_registration(struct lttcomm_sock *reg_sock)
 	 * so, we should consider both registration order of JUL before
 	 * app and app before JUL.
 	 */
+
+	if (r_app) {
+		*r_app = app;
+	}
 
 	return new_sock->fd;
 
@@ -317,16 +325,19 @@ restart:
 				destroy_jul_app(pollfd);
 			} else if (revents & (LPOLLIN)) {
 				int new_fd;
+				struct jul_app *app = NULL;
 
 				/* Pollin event of JUL app socket should NEVER happen. */
 				assert(pollfd == reg_sock->fd);
 
-				new_fd = handle_registration(reg_sock);
+				new_fd = handle_registration(reg_sock, &app);
 				if (new_fd < 0) {
 					WARN("[jul-thread] JUL registration failed. Ignoring.");
 					/* Somehow the communication failed. Just continue. */
 					continue;
 				}
+				/* Should not have a NULL app on success. */
+				assert(app);
 
 				/* Only add poll error event to only detect shutdown. */
 				ret = lttng_poll_add(&events, new_fd,
@@ -338,6 +349,9 @@ restart:
 
 				/* Update newly registered app. */
 				update_jul_app(new_fd);
+
+				/* On failure, the poll will detect it and clean it up. */
+				(void) jul_send_registration_done(app);
 			} else {
 				ERR("Unknown poll events %u for sock %d", revents, pollfd);
 				continue;

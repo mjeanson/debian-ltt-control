@@ -217,6 +217,20 @@ static const char *loglevel_string(int value)
 	}
 }
 
+static const char *logleveltype_string(enum lttng_loglevel_type value)
+{
+	switch (value) {
+	case LTTNG_EVENT_LOGLEVEL_ALL:
+		return ":";
+	case LTTNG_EVENT_LOGLEVEL_RANGE:
+		return " <=";
+	case LTTNG_EVENT_LOGLEVEL_SINGLE:
+		return " ==";
+	default:
+		return " <<TYPE UNKN>>";
+	}
+}
+
 /*
  * Pretty print single event.
  */
@@ -226,9 +240,10 @@ static void print_events(struct lttng_event *event)
 	case LTTNG_EVENT_TRACEPOINT:
 	{
 		if (event->loglevel != -1) {
-			MSG("%s%s (loglevel: %s (%d)) (type: tracepoint)%s%s%s",
+			MSG("%s%s (loglevel%s %s (%d)) (type: tracepoint)%s%s%s",
 				indent6,
 				event->name,
+				logleveltype_string(event->loglevel_type),
 				loglevel_string(event->loglevel),
 				event->loglevel,
 				enabled_string(event->enabled),
@@ -920,7 +935,7 @@ int cmd_list(int argc, const char **argv)
 			goto end;
 		}
 
-		if (opt_kernel) {
+		if (opt_kernel || opt_userspace) {
 			/* Channel listing */
 			ret = list_channels(opt_channel);
 			if (ret < 0) {

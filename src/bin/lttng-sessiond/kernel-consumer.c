@@ -105,7 +105,7 @@ int kernel_consumer_add_channel(struct consumer_socket *sock,
 		}
 	} else {
 		/* Empty path. */
-		pathname = "";
+		pathname = strdup("");
 	}
 
 	/* Prep channel message structure */
@@ -136,6 +136,7 @@ int kernel_consumer_add_channel(struct consumer_socket *sock,
 	health_code_update();
 
 error:
+	free(pathname);
 	return ret;
 }
 
@@ -168,7 +169,7 @@ int kernel_consumer_add_metadata(struct consumer_socket *sock,
 		}
 	} else {
 		/* Empty path. */
-		pathname = "";
+		pathname = strdup("");
 	}
 
 	/* Prep channel message structure */
@@ -215,6 +216,7 @@ int kernel_consumer_add_metadata(struct consumer_socket *sock,
 	health_code_update();
 
 error:
+	free(pathname);
 	return ret;
 }
 
@@ -305,7 +307,6 @@ int kernel_consumer_send_channel_stream(struct consumer_socket *sock,
 {
 	int ret;
 	struct ltt_kernel_stream *stream;
-	uint64_t channel_key = -1ULL;
 
 	/* Safety net */
 	assert(channel);
@@ -339,22 +340,8 @@ int kernel_consumer_send_channel_stream(struct consumer_socket *sock,
 		if (ret < 0) {
 			goto error;
 		}
-		if (channel_key == -1ULL) {
-			channel_key = channel->fd;
-		}
 	}
 
-	if (!monitor || channel_key == -1ULL) {
-		goto end;
-	}
-
-	/* Add stream on the kernel consumer side. */
-	ret = kernel_consumer_streams_sent(sock, session, channel_key);
-	if (ret < 0) {
-		goto error;
-	}
-
-end:
 error:
 	return ret;
 }
@@ -391,9 +378,6 @@ int kernel_consumer_send_session(struct consumer_socket *sock,
 		if (ret < 0) {
 			goto error;
 		}
-
-		/* Flag that at least the metadata has been sent to the consumer. */
-		session->consumer_fds_sent = 1;
 	}
 
 	/* Send channel and streams of it */
@@ -403,10 +387,21 @@ int kernel_consumer_send_session(struct consumer_socket *sock,
 		if (ret < 0) {
 			goto error;
 		}
+		if (monitor) {
+			/*
+			 * Inform the relay that all the streams for the
+			 * channel were sent.
+			 */
+			ret = kernel_consumer_streams_sent(sock, session, chan->fd);
+			if (ret < 0) {
+				goto error;
+			}
+		}
 	}
 
 	DBG("Kernel consumer FDs of metadata and channel streams sent");
 
+	session->consumer_fds_sent = 1;
 	return 0;
 
 error:
@@ -424,6 +419,7 @@ int kernel_consumer_destroy_channel(struct consumer_socket *socket,
 
 	DBG("Sending kernel consumer destroy channel key %d", channel->fd);
 
+	memset(&msg, 0, sizeof(msg));
 	msg.cmd_type = LTTNG_CONSUMER_DESTROY_CHANNEL;
 	msg.u.destroy_channel.key = channel->fd;
 
@@ -452,6 +448,7 @@ int kernel_consumer_destroy_metadata(struct consumer_socket *socket,
 
 	DBG("Sending kernel consumer destroy channel key %d", metadata->fd);
 
+	memset(&msg, 0, sizeof(msg));
 	msg.cmd_type = LTTNG_CONSUMER_DESTROY_CHANNEL;
 	msg.u.destroy_channel.key = metadata->fd;
 

@@ -76,7 +76,6 @@ static int opt_sig_parent;
 static int opt_verbose_consumer;
 static int opt_daemon, opt_background;
 static int opt_no_kernel;
-static int is_root;			/* Set to 1 if the daemon is running as root */
 static pid_t ppid;          /* Parent PID for --sig-parent option */
 static pid_t child_ppid;    /* Internal parent PID use with daemonize. */
 static char *rundir;
@@ -243,6 +242,9 @@ struct health_app *health_sessiond;
 
 /* JUL TCP port for registration. Used by the JUL thread. */
 unsigned int jul_tcp_port = DEFAULT_JUL_TCP_PORT;
+
+/* Am I root or not. */
+int is_root;			/* Set to 1 if the daemon is running as root */
 
 /*
  * Whether sessiond is ready for commands/health check requests.
@@ -1084,7 +1086,6 @@ restart:
 	}
 
 	health_code_update();
-
 	if (code == LTTCOMM_CONSUMERD_COMMAND_SOCK_READY) {
 		/* Connect both socket, command and metadata. */
 		consumer_data->cmd_sock =
@@ -1241,13 +1242,13 @@ error:
 		}
 		consumer_data->cmd_sock = -1;
 	}
-	if (*consumer_data->metadata_sock.fd_ptr >= 0) {
+	if (consumer_data->metadata_sock.fd_ptr &&
+	    *consumer_data->metadata_sock.fd_ptr >= 0) {
 		ret = close(*consumer_data->metadata_sock.fd_ptr);
 		if (ret) {
 			PERROR("close");
 		}
 	}
-
 	if (sock >= 0) {
 		ret = close(sock);
 		if (ret) {
@@ -1261,9 +1262,10 @@ error:
 	pthread_mutex_unlock(&consumer_data->lock);
 
 	/* Cleanup metadata socket mutex. */
-	pthread_mutex_destroy(consumer_data->metadata_sock.lock);
-	free(consumer_data->metadata_sock.lock);
-
+	if (consumer_data->metadata_sock.lock) {
+		pthread_mutex_destroy(consumer_data->metadata_sock.lock);
+		free(consumer_data->metadata_sock.lock);
+	}
 	lttng_poll_clean(&events);
 error_poll:
 	if (err) {
@@ -2085,19 +2087,23 @@ static int spawn_consumer_thread(struct consumer_data *consumer_data)
 	if (ret != 0) {
 		errno = ret;
 		if (ret == ETIMEDOUT) {
+			int pth_ret;
+
 			/*
 			 * Call has timed out so we kill the kconsumerd_thread and return
 			 * an error.
 			 */
 			ERR("Condition timed out. The consumer thread was never ready."
 					" Killing it");
-			ret = pthread_cancel(consumer_data->thread);
-			if (ret < 0) {
+			pth_ret = pthread_cancel(consumer_data->thread);
+			if (pth_ret < 0) {
 				PERROR("pthread_cancel consumer thread");
 			}
 		} else {
 			PERROR("pthread_cond_wait failed consumer thread");
 		}
+		/* Caller is expecting a negative value on failure. */
+		ret = -1;
 		goto error;
 	}
 
@@ -2183,10 +2189,11 @@ static pid_t spawn_consumerd(struct consumer_data *consumer_data)
 				consumer_to_use = consumerd32_bin;
 			} else {
 				DBG("Could not find any valid consumerd executable");
+				ret = -EINVAL;
 				break;
 			}
 			DBG("Using kernel consumer at: %s",  consumer_to_use);
-			execl(consumer_to_use,
+			ret = execl(consumer_to_use,
 				"lttng-consumerd", verbosity, "-k",
 				"--consumerd-cmd-sock", consumer_data->cmd_unix_sock_path,
 				"--consumerd-err-sock", consumer_data->err_unix_sock_path,
@@ -2234,9 +2241,6 @@ static pid_t spawn_consumerd(struct consumer_data *consumer_data)
 			if (consumerd64_libdir[0] != '\0') {
 				free(tmpnew);
 			}
-			if (ret) {
-				goto error;
-			}
 			break;
 		}
 		case LTTNG_CONSUMER32_UST:
@@ -2280,9 +2284,6 @@ static pid_t spawn_consumerd(struct consumer_data *consumer_data)
 			if (consumerd32_libdir[0] != '\0') {
 				free(tmpnew);
 			}
-			if (ret) {
-				goto error;
-			}
 			break;
 		}
 		default:
@@ -2290,8 +2291,9 @@ static pid_t spawn_consumerd(struct consumer_data *consumer_data)
 			exit(EXIT_FAILURE);
 		}
 		if (errno != 0) {
-			PERROR("kernel start consumer exec");
+			PERROR("Consumer execl()");
 		}
+		/* Reaching this point, we got a failure on our execl(). */
 		exit(EXIT_FAILURE);
 	} else if (pid > 0) {
 		ret = pid;
@@ -3668,7 +3670,7 @@ restart:
 
 		rcu_thread_online();
 
-		reply.ret_code = 0;
+		memset(&reply, 0, sizeof(reply));
 		for (i = 0; i < NR_HEALTH_SESSIOND_TYPES; i++) {
 			/*
 			 * health_check_state returns 0 if health is

@@ -176,10 +176,12 @@ int lttng_kconsumer_snapshot_channel(uint64_t key, char *path,
 			DBG("Kernel consumer snapshot stream %s/%s (%" PRIu64 ")",
 					path, stream->name, stream->key);
 		}
-		ret = consumer_send_relayd_streams_sent(relayd_id);
-		if (ret < 0) {
-			ERR("sending streams sent to relayd");
-			goto end_unlock;
+		if (relayd_id != -1ULL) {
+			ret = consumer_send_relayd_streams_sent(relayd_id);
+			if (ret < 0) {
+				ERR("sending streams sent to relayd");
+				goto end_unlock;
+			}
 		}
 
 		ret = kernctl_buffer_flush(stream->wait_fd);
@@ -439,17 +441,8 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 
 	health_code_update();
 
-	if (msg.cmd_type == LTTNG_CONSUMER_STOP) {
-		/*
-		 * Notify the session daemon that the command is completed.
-		 *
-		 * On transport layer error, the function call will print an error
-		 * message so handling the returned code is a bit useless since we
-		 * return an error code anyway.
-		 */
-		(void) consumer_send_status_msg(sock, ret_code);
-		return -ENOENT;
-	}
+	/* Deprecated command */
+	assert(msg.cmd_type != LTTNG_CONSUMER_STOP);
 
 	health_code_update();
 
@@ -591,9 +584,8 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		health_poll_entry();
 		ret = lttng_consumer_poll_socket(consumer_sockpoll);
 		health_poll_exit();
-		if (ret < 0) {
-			rcu_read_unlock();
-			return -EINTR;
+		if (ret) {
+			goto error_fatal;
 		}
 
 		health_code_update();
@@ -926,6 +918,11 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 
 		health_code_update();
 
+		/* Stop right now if no channel was found. */
+		if (!channel) {
+			goto end_nosignal;
+		}
+
 		/*
 		 * This command should ONLY be issued for channel with streams set in
 		 * no monitor mode.
@@ -1152,9 +1149,10 @@ ssize_t lttng_kconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
 				(ret != len && stream->net_seq_idx == (uint64_t) -1ULL)) {
 			/*
 			 * Display the error but continue processing to try to release the
-			 * subbuffer
+			 * subbuffer. This is a DBG statement since this is possible to
+			 * happen without being a critical error.
 			 */
-			ERR("Error writing to tracefile "
+			DBG("Error writing to tracefile "
 					"(ret: %zd != len: %lu != subbuf_size: %lu)",
 					ret, len, subbuf_size);
 			write_index = 0;
