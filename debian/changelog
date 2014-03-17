@@ -1,3 +1,9 @@
+ltt-control (2.4.0-2) unstable; urgency=low
+
+  * [74b3a25] Bump dependency on liburcu to version 0.8.4
+
+ -- Jon Bernard <jbernard@debian.org>  Mon, 17 Mar 2014 16:17:47 -0400
+
 ltt-control (2.4.0-1) unstable; urgency=low
 
   * [e1e3941] New upstream version 2.4.0
