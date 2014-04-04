@@ -5,8 +5,8 @@ Maintainer: Jon Bernard <jbernard@debian.org>
 Build-Depends: debhelper (>= 9), libpopt-dev, liburcu-dev (>= 0.8.4),
   liblttng-ust-dev (>= 2.4.0~), dh-autoreconf
 Standards-Version: 3.9.5
-Vcs-Git: git://git.debian.org/git/collab-maint/ltt-control.git
-Vcs-Browser: http://git.debian.org/?p=collab-maint/ltt-control.git;a=summary
+Vcs-Git: git://anonscm.debian.org/collab-maint/ltt-control.git
+Vcs-Browser: http://anonscm.debian.org/gitweb/?p=collab-maint/ltt-control.git;a=summary
 Homepage: http://lttng.org/
 
 Package: lttng-tools
