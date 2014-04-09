@@ -458,6 +458,7 @@ static int add_uri_to_consumer(struct consumer_output *consumer,
 			 * URI was the same in the consumer so we do not append the subdir
 			 * again so to not duplicate output dir.
 			 */
+			ret = LTTNG_OK;
 			goto error;
 		}
 
@@ -2527,6 +2528,21 @@ int cmd_data_pending(struct ltt_session *session)
 	if (session->enabled) {
 		ret = LTTNG_ERR_SESSION_STARTED;
 		goto error;
+	} else {
+		/*
+		 * If stopped, just make sure we've started before else the above call
+		 * will always send that there is data pending.
+		 *
+		 * The consumer assumes that when the data pending command is received,
+		 * the trace has been started before or else no output data is written
+		 * by the streams which is a condition for data pending. So, this is
+		 * *VERY* important that we don't ask the consumer before a start
+		 * trace.
+		 */
+		if (!session->started) {
+			ret = 0;
+			goto error;
+		}
 	}
 
 	if (ksess && ksess->consumer) {
