@@ -1,3 +1,13 @@
+ltt-control (2.4.1-1) unstable; urgency=low
+
+  [ Michael Jeanson ]
+  * [57baa87] Use canonical VCS urls in control file
+  * [babcde6] Add symbols file for liblttng-ctl0
+  * [f9f33f5] Imported Upstream version 2.4.1
+  * [1fff18b] Stripped debian revision from symbols file
+
+ -- Jon Bernard <jbernard@debian.org>  Wed, 09 Apr 2014 13:07:11 -0400
+
 ltt-control (2.4.0-2) unstable; urgency=low
 
   * [74b3a25] Bump dependency on liburcu to version 0.8.4
