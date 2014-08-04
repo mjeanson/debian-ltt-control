@@ -1,3 +1,13 @@
+ltt-control (2.5.0-1) unstable; urgency=medium
+
+  * [df7a0f4] New upstream version 2.5.0
+  * [51e2531] Include bison as a build dependency
+  * [5c140a9] Prevent masking of compiler arguments during build
+  * [4f34fda] Add libxml2-dev as a build dependency
+  * [7981aee] Update liblttng-ctl0.symbols for 2.5.0
+
+ -- Jon Bernard <jbernard@debian.org>  Mon, 04 Aug 2014 13:13:33 -0400
+
 ltt-control (2.4.1-1) unstable; urgency=low
 
   [ Michael Jeanson ]
