@@ -10,6 +10,11 @@ endif
 %:
 	dh $@ --with autoreconf
 
+override_dh_auto_build:
+	dh_auto_build -- V=1
+
+override_dh_auto_test:
+
 override_dh_auto_install:
 	# rename the bash completion file before installation
 	mkdir $(CURDIR)/debian/bash_completion
@@ -22,8 +27,6 @@ override_dh_installinit:
 override_dh_clean:
 	dh_clean
 	rm -Rf $(CURDIR)/debian/bash_completion
-
-override_dh_auto_test:
 
 override_dh_makeshlibs:
 	dh_makeshlibs -V
