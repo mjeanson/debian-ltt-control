@@ -37,18 +37,22 @@ int event_kernel_enable_all(struct ltt_kernel_channel *kchan,
 
 int event_ust_enable_tracepoint(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct lttng_event *event,
+		char *filter_expression,
 		struct lttng_filter_bytecode *filter,
 		struct lttng_event_exclusion *exclusion);
 int event_ust_disable_tracepoint(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, char *event_name);
 int event_ust_enable_all_tracepoints(struct ltt_ust_session *usess,
-		struct ltt_ust_channel *uchan, struct lttng_filter_bytecode *filter);
+		struct ltt_ust_channel *uchan,
+		char *filter_expression,
+		struct lttng_filter_bytecode *filter);
 int event_ust_disable_all_tracepoints(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan);
 
-int event_jul_enable(struct ltt_ust_session *usess, struct lttng_event *event);
+int event_jul_enable(struct ltt_ust_session *usess, struct lttng_event *event,
+		struct lttng_filter_bytecode *filter);
 int event_jul_enable_all(struct ltt_ust_session *usess,
-		struct lttng_event *event);
+		struct lttng_event *event, struct lttng_filter_bytecode *filter);
 
 int event_jul_disable(struct ltt_ust_session *usess, char *event_name);
 int event_jul_disable_all(struct ltt_ust_session *usess);

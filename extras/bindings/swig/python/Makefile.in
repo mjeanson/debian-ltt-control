@@ -83,9 +83,11 @@ subdir = extras/bindings/swig/python
 DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 	$(top_srcdir)/config/depcomp $(top_srcdir)/config/py-compile
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/config/ax_pkg_swig.m4 \
+am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
+	$(top_srcdir)/config/ax_pkg_swig.m4 \
 	$(top_srcdir)/config/config_feature.m4 \
 	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
+	$(top_srcdir)/config/libxml.m4 \
 	$(top_srcdir)/config/ltoptions.m4 \
 	$(top_srcdir)/config/ltsugar.m4 \
 	$(top_srcdir)/config/ltversion.m4 \
@@ -127,7 +129,8 @@ am__installdirs = "$(DESTDIR)$(pyexecdir)" "$(DESTDIR)$(pythondir)"
 LTLIBRARIES = $(pyexec_LTLIBRARIES)
 _lttng_la_DEPENDENCIES =  \
 	$(top_srcdir)/src/lib/lttng-ctl/liblttng-ctl.la \
-	$(top_srcdir)/src/common/sessiond-comm/libsessiond-comm.la
+	$(top_srcdir)/src/common/sessiond-comm/libsessiond-comm.la \
+	$(top_srcdir)/src/common/libcommon.la
 nodist__lttng_la_OBJECTS = lttng_wrap.lo
 _lttng_la_OBJECTS = $(nodist__lttng_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
@@ -213,6 +216,8 @@ BABELTRACE_BIN = @BABELTRACE_BIN@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
+CONFDIR = @CONFDIR@
+CONFIG_LTTNG_SYSTEM_DATADIR = @CONFIG_LTTNG_SYSTEM_DATADIR@
 CONSUMERD32_BIN = @CONSUMERD32_BIN@
 CONSUMERD32_LIBDIR = @CONSUMERD32_LIBDIR@
 CONSUMERD64_BIN = @CONSUMERD64_BIN@
@@ -289,6 +294,9 @@ STRIP = @STRIP@
 SWIG = @SWIG@
 SWIG_LIB = @SWIG_LIB@
 VERSION = @VERSION@
+XML2_CONFIG = @XML2_CONFIG@
+XML_CPPFLAGS = @XML_CPPFLAGS@
+XML_LIBS = @XML_LIBS@
 YACC = @YACC@
 YFLAGS = @YFLAGS@
 abs_builddir = @abs_builddir@
@@ -364,7 +372,8 @@ MAINTAINERCLEANFILES = lttng_wrap.c lttng.py
 nodist__lttng_la_SOURCES = lttng_wrap.c
 _lttng_la_LDFLAGS = -module
 _lttng_la_LIBADD = $(top_srcdir)/src/lib/lttng-ctl/liblttng-ctl.la 		\
-			$(top_srcdir)/src/common/sessiond-comm/libsessiond-comm.la
+			$(top_srcdir)/src/common/sessiond-comm/libsessiond-comm.la		\
+			$(top_srcdir)/src/common/libcommon.la
 
 CLEANFILES = lttng.i lttng.py lttng_wrap.c lttng.pyc
 all: all-am

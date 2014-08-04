@@ -89,6 +89,10 @@
 #define DEFAULT_LTTNG_HOME_RUNDIR               "%s/.lttng"
 #define DEFAULT_LTTNG_SESSIOND_PIDFILE          "lttng-sessiond.pid"
 #define DEFAULT_LTTNG_SESSIOND_JULPORT_FILE     "jul.port"
+#define DEFAULT_LTTNG_SESSIOND_LOCKFILE         "lttng-sessiond.lck"
+
+/* Default probes list */
+#define DEFAULT_LTTNG_KMOD_PROBES		"LTTNG_KMOD_PROBES"
 
 /* Default unix socket path */
 #define DEFAULT_GLOBAL_CLIENT_UNIX_SOCK         DEFAULT_LTTNG_RUNDIR "/client-lttng-sessiond"
@@ -107,6 +111,29 @@
 /* Default relay health unix socket path */
 #define DEFAULT_GLOBAL_RELAY_HEALTH_UNIX_SOCK		DEFAULT_LTTNG_RUNDIR "/relayd/health-%d"
 #define DEFAULT_HOME_RELAY_HEALTH_UNIX_SOCK		DEFAULT_LTTNG_HOME_RUNDIR "/relayd/health-%d"
+
+/* Default daemon configuration file path */
+#define DEFAULT_SYSTEM_CONFIGPATH               CONFIG_LTTNG_SYSTEM_CONFIGDIR \
+	"/lttng"
+
+#define DEFAULT_DAEMON_CONFIG_FILE              "lttng.conf"
+#define DEFAULT_DAEMON_HOME_CONFIGPATH          DEFAULT_LTTNG_HOME_RUNDIR "/" \
+	DEFAULT_DAEMON_CONFIG_FILE
+#define DEFAULT_DAEMON_SYSTEM_CONFIGPATH        DEFAULT_SYSTEM_CONFIGPATH "/" \
+	DEFAULT_DAEMON_CONFIG_FILE
+
+/* Default session configuration file path */
+#define DEFAULT_SESSION_PATH                    "sessions"
+/* Auto load session in that directory. */
+#define DEFAULT_SESSION_CONFIG_AUTOLOAD         "auto"
+#define DEFAULT_SESSION_HOME_CONFIGPATH         DEFAULT_LTTNG_HOME_RUNDIR "/" \
+	DEFAULT_SESSION_PATH
+#define DEFAULT_SESSION_SYSTEM_CONFIGPATH       DEFAULT_SYSTEM_CONFIGPATH "/" \
+	DEFAULT_SESSION_PATH
+#define DEFAULT_SESSION_CONFIG_FILE_EXTENSION   ".lttng"
+#define DEFAULT_SESSION_CONFIG_XSD_FILENAME     "session.xsd"
+#define DEFAULT_SESSION_CONFIG_XSD_PATH         CONFIG_LTTNG_SYSTEM_DATADIR "/xml/lttng/"
+#define DEFAULT_SESSION_CONFIG_XSD_PATH_ENV     "LTTNG_SESSION_CONFIG_XSD_PATH"
 
 #define DEFAULT_GLOBAL_APPS_UNIX_SOCK \
 	DEFAULT_LTTNG_RUNDIR "/" LTTNG_UST_SOCK_FILENAME

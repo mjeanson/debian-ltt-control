@@ -86,9 +86,11 @@ subdir = tests/regression/ust/overlap/demo
 DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 	$(top_srcdir)/config/depcomp
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/config/ax_pkg_swig.m4 \
+am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
+	$(top_srcdir)/config/ax_pkg_swig.m4 \
 	$(top_srcdir)/config/config_feature.m4 \
 	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
+	$(top_srcdir)/config/libxml.m4 \
 	$(top_srcdir)/config/ltoptions.m4 \
 	$(top_srcdir)/config/ltsugar.m4 \
 	$(top_srcdir)/config/ltversion.m4 \
@@ -213,6 +215,8 @@ BABELTRACE_BIN = @BABELTRACE_BIN@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
+CONFDIR = @CONFDIR@
+CONFIG_LTTNG_SYSTEM_DATADIR = @CONFIG_LTTNG_SYSTEM_DATADIR@
 CONSUMERD32_BIN = @CONSUMERD32_BIN@
 CONSUMERD32_LIBDIR = @CONSUMERD32_LIBDIR@
 CONSUMERD64_BIN = @CONSUMERD64_BIN@
@@ -289,6 +293,9 @@ STRIP = @STRIP@
 SWIG = @SWIG@
 SWIG_LIB = @SWIG_LIB@
 VERSION = @VERSION@
+XML2_CONFIG = @XML2_CONFIG@
+XML_CPPFLAGS = @XML_CPPFLAGS@
+XML_LIBS = @XML_LIBS@
 YACC = @YACC@
 YFLAGS = @YFLAGS@
 abs_builddir = @abs_builddir@

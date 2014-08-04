@@ -1419,10 +1419,12 @@ AC_SUBST([am__tar])
 AC_SUBST([am__untar])
 ]) # _AM_PROG_TAR
 
+m4_include([config/ac_define_dir.m4])
 m4_include([config/ax_pkg_swig.m4])
 m4_include([config/config_feature.m4])
 m4_include([config/epoll.m4])
 m4_include([config/libtool.m4])
+m4_include([config/libxml.m4])
 m4_include([config/ltoptions.m4])
 m4_include([config/ltsugar.m4])
 m4_include([config/ltversion.m4])

@@ -195,10 +195,11 @@ static int list_output(void)
 	MSG("Snapshot output list for session %s", current_session_name);
 
 	while ((s_iter = lttng_snapshot_output_list_get_next(list)) != NULL) {
-		MSG("%s[%" PRIu32 "] %s: %s", indent4,
+		MSG("%s[%" PRIu32 "] %s: %s (max-size: %" PRId64 ")", indent4,
 				lttng_snapshot_output_get_id(s_iter),
 				lttng_snapshot_output_get_name(s_iter),
-				lttng_snapshot_output_get_ctrl_url(s_iter));
+				lttng_snapshot_output_get_ctrl_url(s_iter),
+				lttng_snapshot_output_get_maxsize(s_iter));
 		output_seen = 1;
 	}
 
@@ -371,6 +372,11 @@ static int record(const char *url)
 
 	ret = lttng_snapshot_record(current_session_name, output, 0);
 	if (ret < 0) {
+		if (ret == -LTTNG_ERR_MAX_SIZE_INVALID) {
+			ERR("The minimum size of a snapshot is computed by multiplying "
+					"the total amount of streams with the largest subbuffer "
+					"in the session.");
+		}
 		goto error;
 	}
 

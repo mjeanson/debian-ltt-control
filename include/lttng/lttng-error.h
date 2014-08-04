@@ -29,16 +29,6 @@
 extern "C" {
 #endif
 
-#ifndef LTTNG_DEPRECATED
-#if defined (__GNUC__) \
-	&& ((__GNUC_MAJOR__ == 4) && (__GNUC_MINOR__ >= 5)  \
-			|| __GNUC_MAJOR__ >= 5)
-#define LTTNG_DEPRECATED(msg) __attribute__((deprecated(msg)))
-#else
-#define LTTNG_DEPRECATED(msg) __attribute__((deprecated))
-#endif /* defined __GNUC__ */
-#endif /* LTTNG_DEPRECATED */
-
 enum lttng_error_code {
 	LTTNG_OK                         = 10,  /* Ok */
 	LTTNG_ERR_UNK                    = 11,  /* Unknown Error */
@@ -115,12 +105,12 @@ enum lttng_error_code {
 	LTTNG_ERR_KERN_EVENT_ENOSYS      = 82,  /* Kernel event type not supported */
 	LTTNG_ERR_NEED_CHANNEL_NAME      = 83,	/* Non-default channel exists within session: channel name needs to be specified with '-c name' */
 	LTTNG_ERR_NO_UST                 = 84,  /* LTTng-UST tracer is not supported. Please rebuild lttng-tools with lttng-ust support enabled. */
-	/* 85 */
-	/* 86 */
-	/* 87 */
-	/* 88 */
-	/* 89 */
-	/* 90 */
+	LTTNG_ERR_SAVE_FILE_EXIST        = 85,  /* Session file already exists. */
+	LTTNG_ERR_SAVE_IO_FAIL           = 86,  /* IO error while writting session configuration */
+	LTTNG_ERR_LOAD_INVALID_CONFIG    = 87,  /* Invalid session configuration */
+	LTTNG_ERR_LOAD_IO_FAIL           = 88,  /* IO error while reading a session configuration */
+	LTTNG_ERR_LOAD_SESSION_NOENT     = 89,  /* Session file not found */
+	LTTNG_ERR_MAX_SIZE_INVALID       = 90,  /* Snapshot max size is invalid. */
 	/* 91 */
 	/* 92 */
 	/* 93 */
@@ -146,6 +136,13 @@ enum lttng_error_code {
 	/* MUST be last element */
 	LTTNG_ERR_NR,                           /* Last element */
 };
+
+/*
+ * Return a human-readable error message for a LTTng error code.
+ *
+ * Parameter MUST be a negative value or else you'll get a generic message.
+ */
+extern const char *lttng_strerror(int code);
 
 #ifdef __cplusplus
 }

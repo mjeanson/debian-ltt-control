@@ -27,7 +27,9 @@ lttng_sessiond_SOURCES = utils.c utils.h \
                        buffer-registry.c buffer-registry.h \
                        testpoint.h ht-cleanup.c \
                        snapshot.c snapshot.h \
-                       jul.c jul.h
+                       jul.c jul.h \
+                       save.h save.c \
+                       load-session-thread.h load-session-thread.c
 
 if HAVE_LIBLTTNG_UST_CTL
 lttng_sessiond_SOURCES += trace-ust.c ust-registry.c ust-app.c \
@@ -48,7 +50,9 @@ lttng_sessiond_LDADD = -lrt -lurcu-common -lurcu \
 		$(top_builddir)/src/common/compat/libcompat.la \
 		$(top_builddir)/src/common/relayd/librelayd.la \
 		$(top_builddir)/src/common/testpoint/libtestpoint.la \
-		$(top_builddir)/src/common/health/libhealth.la
+		$(top_builddir)/src/common/health/libhealth.la \
+		$(top_builddir)/src/common/config/libconfig.la
+
 
 if HAVE_LIBLTTNG_UST_CTL
 lttng_sessiond_LDADD += -llttng-ust-ctl

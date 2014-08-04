@@ -1,4 +1,4 @@
-AC_INIT([lttng-tools],[2.4.1],[dgoulet@efficios.com],[],[http://lttng.org])
+AC_INIT([lttng-tools],[2.5.0],[dgoulet@efficios.com],[],[http://lttng.org])
 AC_CONFIG_AUX_DIR([config])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
@@ -19,8 +19,8 @@ AC_DEFINE_UNQUOTED([VERSION_MAJOR], $major_version, [LTTng-Tools major version n
 AC_DEFINE_UNQUOTED([VERSION_MINOR], $minor_version, [LTTng-Tools minor version number])
 AC_DEFINE_UNQUOTED([VERSION_PATCHLEVEL], $patchlevel_version, [LTTng-Tools patchlevel version number])
 
-version_name="Époque Opaque"
-version_description="The Époque Opaque is a black IPA from Trou du Diable brewery. The nose is eerily reminiscent of the coffee crisp candy from of our childhood. These strong mocha accents are present on the palate, which are quickly subdued by Japanese and Australian hops leading to a final state of satisfaction enjoyable for any fan of bitter beer."
+version_name="Fumisterie"
+version_description="The Fumisterie is a beer whose style is at the confluence of English and German ales. On the palate, it is full-bodied, malty and slightly caramelized. The organic hemp seeds incorporated during the brewing gives it a unique and original taste. The hop flavour comes through delicately in the after taste."
 
 AC_DEFINE_UNQUOTED([VERSION_NAME], ["$version_name"], "")
 AC_DEFINE_UNQUOTED([VERSION_DESCRIPTION], ["$version_description"], "")
@@ -127,6 +127,16 @@ AC_DEFINE_UNQUOTED([CONFIG_LTTV_GUI_BIN], "$LTTV_GUI_BIN", [Location of the lttv
 AC_DEFINE_UNQUOTED([CONFIG_SESSIOND_BIN], "$SESSIOND_BIN", [Location of the sessiond executable.])
 AC_DEFINE_UNQUOTED([CONFIG_LTTNG_SYSTEM_RUNDIR], ["$LTTNG_SYSTEM_RUNDIR"], [LTTng system runtime directory])
 
+if test "x$prefix" = "xNONE"; then
+	prefix=$ac_default_prefix
+fi
+CONFDIR=`eval echo $sysconfdir`
+AC_SUBST(CONFDIR)
+AC_DEFINE_UNQUOTED([CONFIG_LTTNG_SYSTEM_CONFIGDIR],"$CONFDIR", [LTTng system configuration directory.])
+
+AC_DEFINE_DIR([CONFIG_LTTNG_SYSTEM_DATADIR],[datadir], [LTTng system data directory.])
+
+#
 # Check for pthread
 AC_CHECK_LIB([pthread], [pthread_create], [],
 	[AC_MSG_ERROR([Cannot find libpthread. Use [LDFLAGS]=-Ldir to specify its location.])]
@@ -136,6 +146,8 @@ AC_CHECK_LIB([pthread], [pthread_create], [],
 AC_CHECK_LIB([popt], [poptGetContext], [],
 	[AC_MSG_ERROR([Cannot find libpopt. Use [LDFLAGS]=-Ldir to specify its location.])]
 )
+
+AM_PATH_XML2(2.7.6, true, AC_MSG_ERROR(No supported version of libxml2 found.))
 
 # Check for libuuid
 AC_CHECK_LIB([uuid], [uuid_generate],
@@ -283,13 +295,6 @@ else
 
 fi
 
-# Option to only build the consumer daemon and its libraries
-AC_ARG_WITH([consumerd-only],
-	AS_HELP_STRING([--with-consumerd-only],[Only build the consumer daemon [default=no]]),
-	[consumerd_only=$withval],
-	[consumerd_only=no])
-AM_CONDITIONAL([BUILD_CONSUMERD_ONLY], [test "x$consumerd_only" = "xyes"])
-
 # Epoll check. If not present, the build will fallback on poll() API
 AX_HAVE_EPOLL(
 	[AX_CONFIG_FEATURE_ENABLE(epoll)],
@@ -393,6 +398,7 @@ AC_CONFIG_FILES([
 	src/common/testpoint/Makefile
 	src/common/index/Makefile
 	src/common/health/Makefile
+	src/common/config/Makefile
 	src/lib/Makefile
 	src/lib/lttng-ctl/Makefile
 	src/lib/lttng-ctl/filter/Makefile
@@ -413,6 +419,7 @@ AC_CONFIG_FILES([
 	tests/regression/tools/snapshots/Makefile
 	tests/regression/tools/live/Makefile
 	tests/regression/tools/exclusion/Makefile
+	tests/regression/tools/save-load/Makefile
 	tests/regression/ust/Makefile
 	tests/regression/ust/nprocesses/Makefile
 	tests/regression/ust/high-throughput/Makefile
@@ -431,11 +438,13 @@ AC_CONFIG_FILES([
 	tests/regression/ust/java-jul/Makefile
 	tests/stress/Makefile
 	tests/unit/Makefile
+	tests/unit/ini_config/Makefile
 	tests/utils/Makefile
 	tests/utils/tap/Makefile
 	tests/utils/testapp/Makefile
 	tests/utils/testapp/gen-ust-events/Makefile
 	tests/utils/testapp/gen-ust-nevents/Makefile
+	tests/utils/testapp/gen-ust-tracef/Makefile
 ])
 
 AC_OUTPUT

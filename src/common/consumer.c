@@ -34,6 +34,7 @@
 #include <common/common.h>
 #include <common/utils.h>
 #include <common/compat/poll.h>
+#include <common/compat/endian.h>
 #include <common/index/index.h>
 #include <common/kernel-ctl/kernel-ctl.h>
 #include <common/sessiond-comm/relayd.h>
@@ -1402,6 +1403,10 @@ void lttng_consumer_destroy(struct lttng_consumer_local_data *ctx)
 	int ret;
 
 	DBG("Consumer destroying it. Closing everything.");
+
+	if (!ctx) {
+		return;
+	}
 
 	destroy_data_stream_ht(data_ht);
 	destroy_metadata_stream_ht(metadata_ht);

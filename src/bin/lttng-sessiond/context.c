@@ -34,7 +34,7 @@
  * Add kernel context to all channel.
  */
 static int add_kctx_all_channels(struct ltt_kernel_session *ksession,
-		struct lttng_kernel_context *kctx)
+		struct ltt_kernel_context *kctx)
 {
 	int ret;
 	struct ltt_kernel_channel *kchan;
@@ -62,7 +62,7 @@ error:
 /*
  * Add kernel context to a specific channel.
  */
-static int add_kctx_to_channel(struct lttng_kernel_context *kctx,
+static int add_kctx_to_channel(struct ltt_kernel_context *kctx,
 		struct ltt_kernel_channel *kchan)
 {
 	int ret;
@@ -92,12 +92,18 @@ static int add_uctx_to_channel(struct ltt_ust_session *usess, int domain,
 {
 	int ret;
 	struct ltt_ust_context *uctx;
-	struct lttng_ht_iter iter;
-	struct lttng_ht_node_ulong *uctx_node;
 
 	assert(usess);
 	assert(uchan);
 	assert(ctx);
+
+	/* Check if context is duplicate */
+	cds_list_for_each_entry(uctx, &uchan->ctx_list, list) {
+		if (trace_ust_match_context(uctx, ctx)) {
+			ret = -EEXIST;
+			goto duplicate;
+		}
+	}
 
 	/* Create ltt UST context */
 	uctx = trace_ust_create_context(ctx);
@@ -120,17 +126,8 @@ static int add_uctx_to_channel(struct ltt_ust_session *usess, int domain,
 
 	rcu_read_lock();
 
-	/* Lookup context before adding it */
-	lttng_ht_lookup(uchan->ctx, (void *)((unsigned long)uctx->ctx.ctx), &iter);
-	uctx_node = lttng_ht_iter_get_node_ulong(&iter);
-	if (uctx_node != NULL) {
-		ret = -EEXIST;
-		rcu_read_unlock();
-		goto error;
-	}
-
 	/* Add ltt UST context node to ltt UST channel */
-	lttng_ht_add_unique_ulong(uchan->ctx, &uctx->node);
+	lttng_ht_add_ulong(uchan->ctx, &uctx->node);
 	rcu_read_unlock();
 	cds_list_add_tail(&uctx->list, &uchan->ctx_list);
 
@@ -140,6 +137,7 @@ static int add_uctx_to_channel(struct ltt_ust_session *usess, int domain,
 
 error:
 	free(uctx);
+duplicate:
 	return ret;
 }
 
@@ -151,59 +149,66 @@ int context_kernel_add(struct ltt_kernel_session *ksession,
 {
 	int ret;
 	struct ltt_kernel_channel *kchan;
-	struct lttng_kernel_context kctx;
+	struct ltt_kernel_context *kctx;
 
 	assert(ksession);
 	assert(ctx);
 	assert(channel_name);
 
+	kctx = trace_kernel_create_context(NULL);
+	if (!kctx) {
+		ret = LTTNG_ERR_NOMEM;
+		goto error;
+	}
+
 	/* Setup kernel context structure */
 	switch (ctx->ctx) {
 	case LTTNG_EVENT_CONTEXT_PID:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_PID;
-		break;
-	case LTTNG_EVENT_CONTEXT_PERF_COUNTER:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_PERF_COUNTER;
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_PID;
 		break;
 	case LTTNG_EVENT_CONTEXT_PROCNAME:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_PROCNAME;
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_PROCNAME;
 		break;
 	case LTTNG_EVENT_CONTEXT_PRIO:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_PRIO;
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_PRIO;
 		break;
 	case LTTNG_EVENT_CONTEXT_NICE:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_NICE;
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_NICE;
 		break;
 	case LTTNG_EVENT_CONTEXT_VPID:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_VPID;
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_VPID;
 		break;
 	case LTTNG_EVENT_CONTEXT_TID:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_TID;
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_TID;
 		break;
 	case LTTNG_EVENT_CONTEXT_VTID:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_VTID;
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_VTID;
 		break;
 	case LTTNG_EVENT_CONTEXT_PPID:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_PPID;
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_PPID;
 		break;
 	case LTTNG_EVENT_CONTEXT_VPPID:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_VPPID;
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_VPPID;
 		break;
 	case LTTNG_EVENT_CONTEXT_HOSTNAME:
-		kctx.ctx = LTTNG_KERNEL_CONTEXT_HOSTNAME;
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_HOSTNAME;
+		break;
+	case LTTNG_EVENT_CONTEXT_PERF_CPU_COUNTER:
+	case LTTNG_EVENT_CONTEXT_PERF_COUNTER:
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_PERF_CPU_COUNTER;
 		break;
 	default:
 		return LTTNG_ERR_KERN_CONTEXT_FAIL;
 	}
 
-	kctx.u.perf_counter.type = ctx->u.perf_counter.type;
-	kctx.u.perf_counter.config = ctx->u.perf_counter.config;
-	strncpy(kctx.u.perf_counter.name, ctx->u.perf_counter.name,
+	kctx->ctx.u.perf_counter.type = ctx->u.perf_counter.type;
+	kctx->ctx.u.perf_counter.config = ctx->u.perf_counter.config;
+	strncpy(kctx->ctx.u.perf_counter.name, ctx->u.perf_counter.name,
 			LTTNG_SYMBOL_NAME_LEN);
-	kctx.u.perf_counter.name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
+	kctx->ctx.u.perf_counter.name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
 
 	if (*channel_name == '\0') {
-		ret = add_kctx_all_channels(ksession, &kctx);
+		ret = add_kctx_all_channels(ksession, kctx);
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
@@ -215,7 +220,7 @@ int context_kernel_add(struct ltt_kernel_session *ksession,
 			goto error;
 		}
 
-		ret = add_kctx_to_channel(&kctx, kchan);
+		ret = add_kctx_to_channel(kctx, kchan);
 		if (ret != LTTNG_OK) {
 			goto error;
 		}

@@ -1552,7 +1552,7 @@ static void shadow_copy_channel(struct ust_app_channel *ua_chan,
 		}
 		lttng_ht_node_init_ulong(&ua_ctx->node,
 				(unsigned long) ua_ctx->ctx.ctx);
-		lttng_ht_add_unique_ulong(ua_chan->ctx, &ua_ctx->node);
+		lttng_ht_add_ulong(ua_chan->ctx, &ua_ctx->node);
 		cds_list_add_tail(&ua_ctx->list, &ua_chan->ctx_list);
 	}
 
@@ -1955,7 +1955,7 @@ int create_ust_app_channel_context(struct ust_app_session *ua_sess,
 	}
 
 	lttng_ht_node_init_ulong(&ua_ctx->node, (unsigned long) ua_ctx->ctx.ctx);
-	lttng_ht_add_unique_ulong(ua_chan->ctx, &ua_ctx->node);
+	lttng_ht_add_ulong(ua_chan->ctx, &ua_ctx->node);
 	cds_list_add_tail(&ua_ctx->list, &ua_chan->ctx_list);
 
 	ret = create_ust_channel_context(ua_chan, ua_ctx, app);
@@ -2953,9 +2953,9 @@ int ust_app_version(struct ust_app *app)
 	ret = ustctl_tracer_version(app->sock, &app->version);
 	if (ret < 0) {
 		if (ret != -LTTNG_UST_ERR_EXITING && ret != -EPIPE) {
-			ERR("UST app %d verson failed with ret %d", app->sock, ret);
+			ERR("UST app %d version failed with ret %d", app->sock, ret);
 		} else {
-			DBG3("UST app %d verion failed. Application is dead", app->sock);
+			DBG3("UST app %d version failed. Application is dead", app->sock);
 		}
 	}
 
@@ -4238,7 +4238,7 @@ void ust_app_global_update(struct ltt_ust_session *usess, int sock)
 
 	pthread_mutex_unlock(&ua_sess->lock);
 
-	if (usess->start_trace) {
+	if (usess->active) {
 		ret = ust_app_start_trace(usess, app);
 		if (ret < 0) {
 			goto error;
@@ -4911,27 +4911,18 @@ void ust_app_destroy(struct ust_app *app)
  * Return 0 on success or else a negative value.
  */
 int ust_app_snapshot_record(struct ltt_ust_session *usess,
-		struct snapshot_output *output, int wait, unsigned int nb_streams)
+		struct snapshot_output *output, int wait, uint64_t max_stream_size)
 {
 	int ret = 0;
 	unsigned int snapshot_done = 0;
 	struct lttng_ht_iter iter;
 	struct ust_app *app;
 	char pathname[PATH_MAX];
-	uint64_t max_stream_size = 0;
 
 	assert(usess);
 	assert(output);
 
 	rcu_read_lock();
-
-	/*
-	 * Compute the maximum size of a single stream if a max size is asked by
-	 * the caller.
-	 */
-	if (output->max_size > 0 && nb_streams > 0) {
-		max_stream_size = output->max_size / nb_streams;
-	}
 
 	switch (usess->buffer_type) {
 	case LTTNG_BUFFER_PER_UID:
@@ -4962,30 +4953,16 @@ int ust_app_snapshot_record(struct ltt_ust_session *usess,
 			/* Add the UST default trace dir to path. */
 			cds_lfht_for_each_entry(reg->registry->channels->ht, &iter.iter,
 					reg_chan, node.node) {
-
-				/*
-				 * Make sure the maximum stream size is not lower than the
-				 * subbuffer size or else it's an error since we won't be able to
-				 * snapshot anything.
-				 */
-				if (max_stream_size &&
-						reg_chan->subbuf_size > max_stream_size) {
-					ret = -EINVAL;
-					DBG3("UST app snapshot record maximum stream size %" PRIu64
-							" is smaller than subbuffer size of %zu",
-							max_stream_size, reg_chan->subbuf_size);
-					goto error;
-				}
-				ret = consumer_snapshot_channel(socket, reg_chan->consumer_key, output, 0,
-						usess->uid, usess->gid, pathname, wait,
+				ret = consumer_snapshot_channel(socket, reg_chan->consumer_key,
+						output, 0, usess->uid, usess->gid, pathname, wait,
 						max_stream_size);
 				if (ret < 0) {
 					goto error;
 				}
 			}
-			ret = consumer_snapshot_channel(socket, reg->registry->reg.ust->metadata_key, output,
-					1, usess->uid, usess->gid, pathname, wait,
-					max_stream_size);
+			ret = consumer_snapshot_channel(socket,
+					reg->registry->reg.ust->metadata_key, output, 1,
+					usess->uid, usess->gid, pathname, wait, max_stream_size);
 			if (ret < 0) {
 				goto error;
 			}
@@ -5027,22 +5004,8 @@ int ust_app_snapshot_record(struct ltt_ust_session *usess,
 
 			cds_lfht_for_each_entry(ua_sess->channels->ht, &chan_iter.iter,
 					ua_chan, node.node) {
-				/*
-				 * Make sure the maximum stream size is not lower than the
-				 * subbuffer size or else it's an error since we won't be able to
-				 * snapshot anything.
-				 */
-				if (max_stream_size &&
-						ua_chan->attr.subbuf_size > max_stream_size) {
-					ret = -EINVAL;
-					DBG3("UST app snapshot record maximum stream size %" PRIu64
-							" is smaller than subbuffer size of %" PRIu64,
-							max_stream_size, ua_chan->attr.subbuf_size);
-					goto error;
-				}
-
-				ret = consumer_snapshot_channel(socket, ua_chan->key, output, 0,
-						ua_sess->euid, ua_sess->egid, pathname, wait,
+				ret = consumer_snapshot_channel(socket, ua_chan->key, output,
+						0, ua_sess->euid, ua_sess->egid, pathname, wait,
 						max_stream_size);
 				if (ret < 0) {
 					goto error;

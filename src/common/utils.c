@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2012 - David Goulet <dgoulet@efficios.com>
  * Copyright (C) 2013 - Raphaël Beamonte <raphael.beamonte@gmail.com>
+ * Copyright (C) 2013 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License, version 2 only, as
@@ -27,8 +28,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <inttypes.h>
-#include <regex.h>
 #include <grp.h>
+#include <pwd.h>
+#include <sys/file.h>
 
 #include <common/common.h>
 #include <common/runas.h>
@@ -468,6 +470,44 @@ error:
 }
 
 /*
+ * Create lock file to the given path and filename.
+ * Returns the associated file descriptor, -1 on error.
+ */
+LTTNG_HIDDEN
+int utils_create_lock_file(const char *filepath)
+{
+	int ret;
+	int fd;
+
+	assert(filepath);
+
+	fd = open(filepath, O_CREAT,
+		O_WRONLY | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+	if (fd < 0) {
+		PERROR("open lock file %s", filepath);
+		ret = -1;
+		goto error;
+	}
+
+	/*
+	 * Attempt to lock the file. If this fails, there is
+	 * already a process using the same lock file running
+	 * and we should exit.
+	 */
+	ret = flock(fd, LOCK_EX | LOCK_NB);
+	if (ret) {
+		WARN("Could not get lock file %s, another instance is running.",
+			filepath);
+		close(fd);
+		fd = ret;
+		goto error;
+	}
+
+error:
+	return fd;
+}
+
+/*
  * Recursively create directory using the given path and mode.
  *
  * On success, return 0 else a negative error code.
@@ -648,42 +688,10 @@ error:
 	return ret;
 }
 
-/**
- * Prints the error message corresponding to a regex error code.
- *
- * @param errcode	The error code.
- * @param regex		The regex object that produced the error code.
- */
-static void regex_print_error(int errcode, regex_t *regex)
-{
-	/* Get length of error message and allocate accordingly */
-	size_t length;
-	char *buffer;
-
-	assert(regex != NULL);
-
-	length = regerror(errcode, regex, NULL, 0);
-	if (length == 0) {
-		ERR("regerror returned a length of 0");
-		return;
-	}
-
-	buffer = zmalloc(length);
-	if (!buffer) {
-		ERR("regex_print_error: zmalloc failed");
-		return;
-	}
-
-	/* Get and print error message */
-	regerror(errcode, regex, buffer, length);
-	ERR("regex error: %s\n", buffer);
-	free(buffer);
-
-}
 
 /**
  * Parse a string that represents a size in human readable format. It
- * supports decimal integers suffixed by 'k', 'M' or 'G'.
+ * supports decimal integers suffixed by 'k', 'K', 'M' or 'G'.
  *
  * The suffix multiply the integer by:
  * 'k': 1024
@@ -691,83 +699,90 @@ static void regex_print_error(int errcode, regex_t *regex)
  * 'G': 1024^3
  *
  * @param str	The string to parse.
- * @param size	Pointer to a size_t that will be filled with the
+ * @param size	Pointer to a uint64_t that will be filled with the
  *		resulting size.
  *
  * @return 0 on success, -1 on failure.
  */
 LTTNG_HIDDEN
-int utils_parse_size_suffix(char *str, uint64_t *size)
+int utils_parse_size_suffix(const char * const str, uint64_t * const size)
 {
-	regex_t regex;
 	int ret;
-	const int nmatch = 3;
-	regmatch_t suffix_match, matches[nmatch];
-	unsigned long long base_size;
+	uint64_t base_size;
 	long shift = 0;
+	const char *str_end;
+	char *num_end;
 
 	if (!str) {
-		return 0;
-	}
-
-	/* Compile regex */
-	ret = regcomp(&regex, "^\\(0x\\)\\{0,1\\}[0-9][0-9]*\\([kKMG]\\{0,1\\}\\)$", 0);
-	if (ret != 0) {
-		regex_print_error(ret, &regex);
+		DBG("utils_parse_size_suffix: received a NULL string.");
 		ret = -1;
 		goto end;
 	}
 
-	/* Match regex */
-	ret = regexec(&regex, str, nmatch, matches, 0);
-	if (ret != 0) {
+	/* strtoull will accept a negative number, but we don't want to. */
+	if (strchr(str, '-') != NULL) {
+		DBG("utils_parse_size_suffix: invalid size string, should not contain '-'.");
 		ret = -1;
-		goto free;
+		goto end;
 	}
 
-	/* There is a match ! */
+	/* str_end will point to the \0 */
+	str_end = str + strlen(str);
 	errno = 0;
-	base_size = strtoull(str, NULL, 0);
+	base_size = strtoull(str, &num_end, 0);
 	if (errno != 0) {
-		PERROR("strtoull");
+		PERROR("utils_parse_size_suffix strtoull");
 		ret = -1;
-		goto free;
+		goto end;
 	}
 
-	/* Check if there is a suffix */
-	suffix_match = matches[2];
-	if (suffix_match.rm_eo - suffix_match.rm_so == 1) {
-		switch (*(str + suffix_match.rm_so)) {
-		case 'K':
-		case 'k':
-			shift = KIBI_LOG2;
-			break;
-		case 'M':
-			shift = MEBI_LOG2;
-			break;
-		case 'G':
-			shift = GIBI_LOG2;
-			break;
-		default:
-			ERR("parse_human_size: invalid suffix");
-			ret = -1;
-			goto free;
-		}
+	if (num_end == str) {
+		/* strtoull parsed nothing, not good. */
+		DBG("utils_parse_size_suffix: strtoull had nothing good to parse.");
+		ret = -1;
+		goto end;
+	}
+
+	/* Check if a prefix is present. */
+	switch (*num_end) {
+	case 'G':
+		shift = GIBI_LOG2;
+		num_end++;
+		break;
+	case 'M': /*  */
+		shift = MEBI_LOG2;
+		num_end++;
+		break;
+	case 'K':
+	case 'k':
+		shift = KIBI_LOG2;
+		num_end++;
+		break;
+	case '\0':
+		break;
+	default:
+		DBG("utils_parse_size_suffix: invalid suffix.");
+		ret = -1;
+		goto end;
+	}
+
+	/* Check for garbage after the valid input. */
+	if (num_end != str_end) {
+		DBG("utils_parse_size_suffix: Garbage after size string.");
+		ret = -1;
+		goto end;
 	}
 
 	*size = base_size << shift;
 
 	/* Check for overflow */
 	if ((*size >> shift) != base_size) {
-		ERR("parse_size_suffix: oops, overflow detected.");
+		DBG("utils_parse_size_suffix: oops, overflow detected.");
 		ret = -1;
-		goto free;
+		goto end;
 	}
 
 	ret = 0;
-
-free:
-	regfree(&regex);
 end:
 	return ret;
 }
@@ -846,11 +861,78 @@ LTTNG_HIDDEN
 char *utils_get_home_dir(void)
 {
 	char *val = NULL;
+	struct passwd *pwd;
+
 	val = getenv(DEFAULT_LTTNG_HOME_ENV_VAR);
 	if (val != NULL) {
-		return val;
+		goto end;
 	}
-	return getenv(DEFAULT_LTTNG_FALLBACK_HOME_ENV_VAR);
+	val = getenv(DEFAULT_LTTNG_FALLBACK_HOME_ENV_VAR);
+	if (val != NULL) {
+		goto end;
+	}
+
+	/* Fallback on the password file entry. */
+	pwd = getpwuid(getuid());
+	if (!pwd) {
+		goto end;
+	}
+	val = pwd->pw_dir;
+
+	DBG3("Home directory is '%s'", val);
+
+end:
+	return val;
+}
+
+/**
+ * Get user's home directory. Dynamically allocated, must be freed
+ * by the caller.
+ */
+LTTNG_HIDDEN
+char *utils_get_user_home_dir(uid_t uid)
+{
+	struct passwd pwd;
+	struct passwd *result;
+	char *home_dir = NULL;
+	char *buf = NULL;
+	long buflen;
+	int ret;
+
+	buflen = sysconf(_SC_GETPW_R_SIZE_MAX);
+	if (buflen == -1) {
+		goto end;
+	}
+retry:
+	buf = zmalloc(buflen);
+	if (!buf) {
+		goto end;
+	}
+
+	ret = getpwuid_r(uid, &pwd, buf, buflen, &result);
+	if (ret || !result) {
+		if (ret == ERANGE) {
+			free(buf);
+			buflen *= 2;
+			goto retry;
+		}
+		goto end;
+	}
+
+	home_dir = strdup(pwd.pw_dir);
+end:
+	free(buf);
+	return home_dir;
+}
+
+/*
+ * Obtain the value of LTTNG_KMOD_PROBES environment variable, if exists.
+ * Otherwise returns an empty string.
+ */
+LTTNG_HIDDEN
+char *utils_get_kmod_probes_list(void)
+{
+	return getenv(DEFAULT_LTTNG_KMOD_PROBES);
 }
 
 /*
@@ -873,7 +955,7 @@ size_t utils_get_current_time_str(const char *format, char *dst, size_t len)
 	timeinfo = localtime(&rawtime);
 	ret = strftime(dst, len, format, timeinfo);
 	if (ret == 0) {
-		ERR("Unable to strftime with format %s at dst %p of len %lu", format,
+		ERR("Unable to strftime with format %s at dst %p of len %zu", format,
 				dst, len);
 	}
 
@@ -899,4 +981,47 @@ gid_t utils_get_group_id(const char *name)
 		return 0;
 	}
 	return grp->gr_gid;
+}
+
+/*
+ * Return a newly allocated option string. This string is to be used as the
+ * optstring argument of getopt_long(), see GETOPT(3). opt_count is the number
+ * of elements in the long_options array. Returns NULL if the string's
+ * allocation fails.
+ */
+LTTNG_HIDDEN
+char *utils_generate_optstring(const struct option *long_options,
+		size_t opt_count)
+{
+	int i;
+	size_t string_len = opt_count, str_pos = 0;
+	char *optstring;
+
+	/*
+	 * Compute the necessary string length. One letter per option, two when an
+	 * argument is necessary, and a trailing NULL.
+	 */
+	for (i = 0; i < opt_count; i++) {
+		string_len += long_options[i].has_arg ? 1 : 0;
+	}
+
+	optstring = zmalloc(string_len);
+	if (!optstring) {
+		goto end;
+	}
+
+	for (i = 0; i < opt_count; i++) {
+		if (!long_options[i].name) {
+			/* Got to the trailing NULL element */
+			break;
+		}
+
+		optstring[str_pos++] = (char)long_options[i].val;
+		if (long_options[i].has_arg) {
+			optstring[str_pos++] = ':';
+		}
+	}
+
+end:
+	return optstring;
 }

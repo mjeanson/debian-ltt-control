@@ -1,3 +1,42 @@
+2014-07-16 lttng-tools 2.5.0 (Take Your Poet to Work Day)
+	* Fix: validate file path creds in autoload mode
+	* Fix: change session file loading order
+	* Fix: add Loading Sessions section to lttng-sessiond.8
+	* Fix: add default session conf. dir to manpage
+	* Fix: on session load, add it to the .lttngrc
+	* Fix: clarify session conf. directory in man
+	* Fix: filter error path could free invalid ptr
+	* Fix: Create a lock file to prevent multiple session daemons
+	* Fix: relayd stream set close_flag on stream close
+	* Fix: ustctl_get_stream_id without UST support
+	* Fix: avoid freeing invalid ptr in filter bytecode
+	* Fix: get the stream_id when generating live beacons
+	* Fix: use biggest subbuffer size for snapshot max-size
+	* Fix: Possible memory leak when multiple config files are loaded
+	* Fix: Clamp verbosity value read from config file
+	* Fix: Unchecked strdup return values in set_option
+
+2014-06-27 lttng-tools 2.5.0-rc2
+	* Test: add JUL disable event tests
+	* Fix: disable JUL event on UST side
+	* Fix: accept override flag even without a load path
+	* Fix: bad error code path when loading session
+	* Fix: set session in output mode if URL are set afterwards
+	* Fix: add a kernel context list to the channel
+	* Fix: Add vpid, vppid and vtid info in add-context help
+	* Fix: wrong behavior of save command when no session name is provided
+	* Fix: missing context type string in save for ust context
+	* Fix: wrong casting of return value
+	* Fix: add dependency to libcommon for python binding
+	* Fix: remove the default GIT_VERSION
+
+2014-05-28 lttng-tools 2.5.0-rc1 (International Hamburger Day)
+	* Save/load session feature
+	* Daemon configuration file support
+	* UST perf counter support with add-context
+	* Kernel tracer probe user define list
+	* Multiple fixes! The diff is just too big to put here.
+
 2014-04-08 lttng-tools 2.4.1 (OpenSSL heartbleed day)
 	* Fix: don't delete stream from connection recv list
 	* Fix: use after free of a relayd stream
@@ -198,6 +237,16 @@
 	* Event exclusion support
 	* Java Util Logging support
 	* Multiple fixes! The diff is just too big to put here.
+
+2013-11-13 lttng-tools 2.3.1
+	* Fix: typo in --sig-parent help
+	* Fix: application SIGBUS when starting in parallel with sessiond
+	* Fix: missing LTTNG_OK return value for snapshot
+	* Fix: arguments in the wrong order for fd-limit
+	* Fix: Some corrections to the lttng man page
+	* Fix: recv creds comm should handle partial receive
+	* Fix: set app socket timeout just after accept()
+	* Fix typo in lttng snapshot add-output example of lttng(1)
 
 2013-09-03 lttng-tools 2.3.0
 	* Fix: remove periodical flush test from make check

@@ -80,6 +80,8 @@ static struct cmd_struct commands[] =  {
 	{ "calibrate", cmd_calibrate},
 	{ "view", cmd_view},
 	{ "snapshot", cmd_snapshot},
+	{ "save", cmd_save},
+	{ "load", cmd_load},
 	{ "enable-consumer", cmd_enable_consumer}, /* OBSOLETE */
 	{ "disable-consumer", cmd_disable_consumer}, /* OBSOLETE */
 	{ NULL, NULL}	/* Array closure */
@@ -87,7 +89,7 @@ static struct cmd_struct commands[] =  {
 
 static void usage(FILE *ofp)
 {
-	fprintf(ofp, "LTTng Trace Control " VERSION" - " VERSION_NAME"\n\n");
+	fprintf(ofp, "LTTng Trace Control " FULL_VERSION" - " VERSION_NAME"\n\n");
 	fprintf(ofp, "usage: lttng [OPTIONS] <COMMAND> [<ARGS>]\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Options:\n");
@@ -118,6 +120,8 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "    stop              Stop tracing\n");
 	fprintf(ofp, "    version           Show version information\n");
 	fprintf(ofp, "    view              Start trace viewer\n");
+	fprintf(ofp, "    save              Save session configuration\n");
+	fprintf(ofp, "    load              Load session configuration\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Each command also has its own -h, --help option.\n");
 	fprintf(ofp, "\n");
@@ -127,7 +131,7 @@ static void usage(FILE *ofp)
 
 static void version(FILE *ofp)
 {
-	fprintf(ofp, "%s (LTTng Trace Control) " VERSION" - " VERSION_NAME"\n",
+	fprintf(ofp, "%s (LTTng Trace Control) " FULL_VERSION" - " VERSION_NAME"\n",
 			progname);
 }
 
@@ -433,7 +437,10 @@ static int parse_args(int argc, char **argv)
 			ret = 0;
 			goto end;
 		case 'v':
-			lttng_opt_verbose += 1;
+			/* There is only 3 possible level of verbosity. (-vvv) */
+			if (lttng_opt_verbose < 3) {
+				lttng_opt_verbose += 1;
+			}
 			break;
 		case 'q':
 			lttng_opt_quiet = 1;

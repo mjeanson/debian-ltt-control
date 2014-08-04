@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 - David Goulet <david.goulet@polymtl.ca>
+ * Copyright (C) 2013 - Raphaël Beamonte <raphael.beamonte@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -28,6 +29,7 @@
 
 #include "session.h"
 #include "ust-app.h"
+#include "version.h"
 
 extern const char default_home_dir[],
 	default_tracing_group[],
@@ -108,6 +110,11 @@ extern long page_size;
  */
 extern unsigned int jul_tcp_port;
 
+/*
+ * Section name to look for in the daemon configuration file.
+ */
+extern const char * const config_section_name;
+
 /* Is this daemon root or not. */
 extern int is_root;
 
@@ -115,5 +122,7 @@ int sessiond_set_thread_pollset(struct lttng_poll_event *events, size_t size);
 int sessiond_check_thread_quit_pipe(int fd, uint32_t events);
 
 void *thread_ht_cleanup(void *data);
+
+void sessiond_notify_ready(void);
 
 #endif /* _LTT_SESSIOND_H */

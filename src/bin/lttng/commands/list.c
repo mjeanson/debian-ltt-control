@@ -107,7 +107,7 @@ static char *get_cmdline_by_pid(pid_t pid)
 	int ret;
 	FILE *fp;
 	char *cmdline = NULL;
-	char path[24];	/* Can't go bigger than /proc/65535/cmdline */
+	char path[20];	/* Can't go bigger than /proc/65535/cmdline */
 
 	snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
 	fp = fopen(path, "r");
@@ -117,6 +117,10 @@ static char *get_cmdline_by_pid(pid_t pid)
 
 	/* Caller must free() *cmdline */
 	cmdline = malloc(PATH_MAX);
+	if (!cmdline) {
+		perror("malloc cmdline");
+		goto end;
+	}
 	ret = fread(cmdline, 1, PATH_MAX, fp);
 	if (ret < 0) {
 		perror("fread proc list");
@@ -174,6 +178,34 @@ const char *exclusion_string(int value)
 	switch (value) {
 	case 1: return " [has exclusions]";
 	default: return "";
+	}
+}
+
+static const char *loglevel_jul_string(int value)
+{
+	switch (value) {
+	case -1:
+		return "";
+	case LTTNG_LOGLEVEL_JUL_OFF:
+		return "JUL_OFF";
+	case LTTNG_LOGLEVEL_JUL_SEVERE:
+		return "JUL_SEVERE";
+	case LTTNG_LOGLEVEL_JUL_WARNING:
+		return "JUL_WARNING";
+	case LTTNG_LOGLEVEL_JUL_INFO:
+		return "JUL_INFO";
+	case LTTNG_LOGLEVEL_JUL_CONFIG:
+		return "JUL_CONFIG";
+	case LTTNG_LOGLEVEL_JUL_FINE:
+		return "JUL_FINE";
+	case LTTNG_LOGLEVEL_JUL_FINER:
+		return "JUL_FINER";
+	case LTTNG_LOGLEVEL_JUL_FINEST:
+		return "JUL_FINEST";
+	case LTTNG_LOGLEVEL_JUL_ALL:
+		return "JUL_ALL";
+	default:
+		return "<<UNKNOWN>>";
 	}
 }
 
@@ -583,8 +615,10 @@ static int list_session_jul_events(void)
 	}
 
 	for (i = 0; i < count; i++) {
-		MSG("%s- %s%s", indent4, events[i].name,
-				enabled_string(events[i].enabled));
+		MSG("%s- %s%s (loglevel%s %s)", indent4, events[i].name,
+				enabled_string(events[i].enabled),
+				logleveltype_string(events[i].loglevel_type),
+				loglevel_jul_string(events[i].loglevel));
 	}
 
 	MSG("");
@@ -645,6 +679,8 @@ static void print_channel(struct lttng_channel *channel)
 	MSG("%snumber of subbufers: %" PRIu64, indent6, channel->attr.num_subbuf);
 	MSG("%sswitch timer interval: %u", indent6, channel->attr.switch_timer_interval);
 	MSG("%sread timer interval: %u", indent6, channel->attr.read_timer_interval);
+	MSG("%strace file count: %" PRIu64, indent6, channel->attr.tracefile_count);
+	MSG("%strace file size (bytes): %" PRIu64, indent6, channel->attr.tracefile_size);
 	switch (channel->attr.output) {
 		case LTTNG_EVENT_SPLICE:
 			MSG("%soutput: splice()", indent6);
@@ -756,7 +792,9 @@ static int list_sessions(const char *session_name)
 				MSG("Tracing session %s: [%s%s]", session_name,
 						active_string(sessions[i].enabled),
 						snapshot_string(sessions[i].snapshot_mode));
-				MSG("%sTrace path: %s\n", indent4, sessions[i].path);
+				MSG("%sTrace path: %s", indent4, sessions[i].path);
+				MSG("%sLive timer interval (usec): %u\n", indent4,
+						sessions[i].live_timer_interval);
 				break;
 			}
 		} else {

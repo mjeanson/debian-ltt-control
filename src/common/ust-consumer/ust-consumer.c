@@ -37,6 +37,7 @@
 #include <common/sessiond-comm/sessiond-comm.h>
 #include <common/relayd/relayd.h>
 #include <common/compat/fcntl.h>
+#include <common/compat/endian.h>
 #include <common/consumer-metadata-cache.h>
 #include <common/consumer-stream.h>
 #include <common/consumer-timer.h>
@@ -1145,7 +1146,7 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		relayd = consumer_find_relayd(index);
 		if (relayd == NULL) {
 			DBG("Unable to find relayd %" PRIu64, index);
-			ret_code = LTTNG_ERR_NO_CONSUMER;
+			ret_code = LTTCOMM_CONSUMERD_RELAYD_FAIL;
 		}
 
 		/*
@@ -1326,7 +1327,7 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		channel = consumer_find_channel(key);
 		if (!channel) {
 			ERR("UST consumer get channel key %" PRIu64 " not found", key);
-			ret_code = LTTNG_ERR_UST_CHAN_NOT_FOUND;
+			ret_code = LTTCOMM_CONSUMERD_CHAN_NOT_FOUND;
 			goto end_msg_sessiond;
 		}
 
@@ -1482,7 +1483,7 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 					ctx);
 			if (ret < 0) {
 				ERR("Snapshot metadata failed");
-				ret_code = LTTNG_ERR_UST_META_FAIL;
+				ret_code = LTTCOMM_CONSUMERD_ERROR_METADATA;
 			}
 		} else {
 			ret = snapshot_channel(msg.u.snapshot_channel.key,
@@ -1492,7 +1493,7 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 					ctx);
 			if (ret < 0) {
 				ERR("Snapshot channel failed");
-				ret_code = LTTNG_ERR_UST_CHAN_FAIL;
+				ret_code = LTTCOMM_CONSUMERD_CHANNEL_FAIL;
 			}
 		}
 
@@ -2381,4 +2382,16 @@ end:
 
 	pthread_mutex_unlock(&ctx->metadata_socket_lock);
 	return ret;
+}
+
+/*
+ * Return the ustctl call for the get stream id.
+ */
+int lttng_ustconsumer_get_stream_id(struct lttng_consumer_stream *stream,
+		uint64_t *stream_id)
+{
+	assert(stream);
+	assert(stream_id);
+
+	return ustctl_get_stream_id(stream->ustream, stream_id);
 }

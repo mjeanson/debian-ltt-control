@@ -17,6 +17,7 @@
 
 #define _GNU_SOURCE
 #include <assert.h>
+#include <inttypes.h>
 
 #include <lttng/lttng-error.h>
 #include <common/common.h>
@@ -24,6 +25,43 @@
 #include "error.h"
 
 #define ERROR_INDEX(code) (code - LTTNG_OK)
+
+/* TLS variable that contains the time of one single log entry. */
+DEFINE_URCU_TLS(struct log_time, error_log_time);
+
+LTTNG_HIDDEN
+const char *log_add_time(void)
+{
+	int ret;
+	struct tm tm, *res;
+	struct timespec tp;
+	time_t now;
+
+	ret = clock_gettime(CLOCK_REALTIME, &tp);
+	if (ret < 0) {
+		goto error;
+	}
+	now = (time_t) tp.tv_sec;
+
+	res = localtime_r(&now, &tm);
+	if (!res) {
+		goto error;
+	}
+
+	/* Format time in the TLS variable. */
+	ret = snprintf(URCU_TLS(error_log_time).str, sizeof(error_log_time.str),
+			"%02d:%02d:%02d.%06ld",
+			tm.tm_hour, tm.tm_min, tm.tm_sec, tp.tv_nsec);
+	if (ret < 0) {
+		goto error;
+	}
+
+	return URCU_TLS(error_log_time).str;
+
+error:
+	/* Return an empty string on error so logging is not affected. */
+	return "";
+}
 
 /*
  * Human readable error message.
@@ -117,6 +155,12 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_SNAPSHOT_NODATA) ] = "No data available in snapshot",
 	[ ERROR_INDEX(LTTNG_ERR_NO_CHANNEL) ] = "No channel found in the session",
 	[ ERROR_INDEX(LTTNG_ERR_SESSION_INVALID_CHAR) ] = "Invalid character found in session name",
+	[ ERROR_INDEX(LTTNG_ERR_SAVE_FILE_EXIST) ] = "Session file already exists",
+	[ ERROR_INDEX(LTTNG_ERR_SAVE_IO_FAIL) ] = "IO error while writting session configuration",
+	[ ERROR_INDEX(LTTNG_ERR_LOAD_INVALID_CONFIG) ] = "Invalid session configuration",
+	[ ERROR_INDEX(LTTNG_ERR_LOAD_IO_FAIL) ] = "IO error while reading a session configuration",
+	[ ERROR_INDEX(LTTNG_ERR_LOAD_SESSION_NOENT) ] = "Session file not found",
+	[ ERROR_INDEX(LTTNG_ERR_MAX_SIZE_INVALID) ] = "Snapshot max size is invalid",
 
 	/* Last element */
 	[ ERROR_INDEX(LTTNG_ERR_NR) ] = "Unknown error code"
