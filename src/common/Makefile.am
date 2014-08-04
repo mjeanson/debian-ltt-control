@@ -1,7 +1,7 @@
 AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
 
 SUBDIRS = compat health hashtable kernel-ctl sessiond-comm relayd \
-		  kernel-consumer ust-consumer testpoint index
+		  kernel-consumer ust-consumer testpoint index config
 
 AM_CFLAGS = -fno-strict-aliasing
 
@@ -17,7 +17,7 @@ libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
                        common.h futex.c futex.h uri.c uri.h defaults.c \
                        pipe.c pipe.h readwrite.c readwrite.h \
                        daemonize.c daemonize.h
-libcommon_la_LIBADD = -luuid
+libcommon_la_LIBADD = -luuid -lrt
 
 # Consumer library
 noinst_LTLIBRARIES += libconsumer.la

@@ -166,6 +166,8 @@ function start_lttng_sessiond()
 	fi
 
 	DIR=$(readlink -f $TESTDIR)
+	: ${LTTNG_SESSION_CONFIG_XSD_PATH=${DIR}/../src/common/config/}
+	export LTTNG_SESSION_CONFIG_XSD_PATH
 
 	if [ -z $(pidof lt-$SESSIOND_BIN) ]; then
 		$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
@@ -348,6 +350,15 @@ function disable_ust_lttng_event ()
 	ok $? "Disable event $event_name for session $sess_name"
 }
 
+function disable_jul_lttng_event ()
+{
+	local sess_name="$1"
+	local event_name="$2"
+
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN disable-event "$event_name" -s $sess_name -j >/dev/null 2>&1
+	ok $? "Disable JUL event $event_name for session $sess_name"
+}
+
 function start_lttng_tracing ()
 {
 	sess_name=$1
@@ -398,6 +409,23 @@ function lttng_snapshot_record ()
 
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN snapshot record -s $sess_name >/dev/null 2>&1
 	ok $? "Snapshot recorded"
+}
+
+function lttng_save()
+{
+	local sess_name=$1
+	local opts=$2
+
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN save $sess_name $opts >/dev/null 2>&1
+	ok $? "Session successfully saved"
+}
+
+function lttng_load()
+{
+	local opts=$1
+
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN load $opts >/dev/null 2>&1
+	ok $? "Load command successful"
 }
 
 function trace_matches ()

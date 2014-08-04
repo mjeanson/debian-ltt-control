@@ -49,6 +49,7 @@ struct ltt_ust_event {
 	unsigned int enabled;
 	struct lttng_ust_event attr;
 	struct lttng_ht_node_str node;
+	char *filter_expression;
 	struct lttng_ust_filter_bytecode *filter;
 	struct lttng_event_exclusion *exclusion;
 };
@@ -76,12 +77,13 @@ struct ltt_ust_domain_global {
 /* UST session */
 struct ltt_ust_session {
 	uint64_t id;    /* Unique identifier of session */
-	int start_trace;
 	struct ltt_ust_domain_global domain_global;
 	struct jul_domain domain_jul;
 	/* UID/GID of the user owning the session */
 	uid_t uid;
 	gid_t gid;
+	/* Is the session active meaning has is been started or stopped. */
+	unsigned int active:1;
 	/*
 	 * Two consumer_output object are needed where one is for the current
 	 * output object and the second one is the temporary object used to store
@@ -162,9 +164,12 @@ struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 struct ltt_ust_session *trace_ust_create_session(uint64_t session_id);
 struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr);
 struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
+		char *filter_expression,
 		struct lttng_filter_bytecode *filter,
 		struct lttng_event_exclusion *exclusion);
 struct ltt_ust_context *trace_ust_create_context(
+		struct lttng_event_context *ctx);
+int trace_ust_match_context(struct ltt_ust_context *uctx,
 		struct lttng_event_context *ctx);
 void trace_ust_delete_channel(struct lttng_ht *ht,
 		struct ltt_ust_channel *channel);
@@ -208,6 +213,7 @@ struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr)
 }
 static inline
 struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
+		const char *filter_expression,
 		struct lttng_filter_bytecode *filter,
 		struct lttng_event_exclusion *exclusion)
 {
@@ -232,6 +238,12 @@ struct ltt_ust_context *trace_ust_create_context(
 		struct lttng_event_context *ctx)
 {
 	return NULL;
+}
+static inline
+int trace_ust_match_context(struct ltt_ust_context *uctx,
+		struct lttng_event_context *ctx)
+{
+	return 0;
 }
 static inline struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
 		char *name, struct lttng_filter_bytecode *filter, int loglevel,

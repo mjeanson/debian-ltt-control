@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2011 - David Goulet <david.goulet@polymtl.ca>
  *                      Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+ *               2013 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -46,6 +47,7 @@
 #include <common/relayd/relayd.h>
 #include <common/utils.h>
 #include <common/daemonize.h>
+#include <common/config/config.h>
 
 #include "lttng-sessiond.h"
 #include "buffer-registry.h"
@@ -66,19 +68,24 @@
 #include "testpoint.h"
 #include "ust-thread.h"
 #include "jul-thread.h"
+#include "save.h"
+#include "load-session-thread.h"
 
 #define CONSUMERD_FILE	"lttng-consumerd"
 
 const char *progname;
 static const char *tracing_group_name = DEFAULT_TRACING_GROUP;
-static const char *opt_pidfile;
+static int tracing_group_name_override;
+static char *opt_pidfile;
 static int opt_sig_parent;
 static int opt_verbose_consumer;
 static int opt_daemon, opt_background;
 static int opt_no_kernel;
+static char *opt_load_session_path;
 static pid_t ppid;          /* Parent PID for --sig-parent option */
 static pid_t child_ppid;    /* Internal parent PID use with daemonize. */
 static char *rundir;
+static int lockfile_fd = -1;
 
 /* Set to 1 when a SIGUSR1 signal is received. */
 static int recv_child_signal;
@@ -120,6 +127,41 @@ static struct consumer_data ustconsumer32_data = {
 	.cond = PTHREAD_COND_INITIALIZER,
 	.cond_mutex = PTHREAD_MUTEX_INITIALIZER,
 };
+
+/* Command line options */
+static const struct option long_options[] = {
+	{ "client-sock", 1, 0, 'c' },
+	{ "apps-sock", 1, 0, 'a' },
+	{ "kconsumerd-cmd-sock", 1, 0, 'C' },
+	{ "kconsumerd-err-sock", 1, 0, 'E' },
+	{ "ustconsumerd32-cmd-sock", 1, 0, 'G' },
+	{ "ustconsumerd32-err-sock", 1, 0, 'H' },
+	{ "ustconsumerd64-cmd-sock", 1, 0, 'D' },
+	{ "ustconsumerd64-err-sock", 1, 0, 'F' },
+	{ "consumerd32-path", 1, 0, 'u' },
+	{ "consumerd32-libdir", 1, 0, 'U' },
+	{ "consumerd64-path", 1, 0, 't' },
+	{ "consumerd64-libdir", 1, 0, 'T' },
+	{ "daemonize", 0, 0, 'd' },
+	{ "background", 0, 0, 'b' },
+	{ "sig-parent", 0, 0, 'S' },
+	{ "help", 0, 0, 'h' },
+	{ "group", 1, 0, 'g' },
+	{ "version", 0, 0, 'V' },
+	{ "quiet", 0, 0, 'q' },
+	{ "verbose", 0, 0, 'v' },
+	{ "verbose-consumer", 0, 0, 'Z' },
+	{ "no-kernel", 0, 0, 'N' },
+	{ "pidfile", 1, 0, 'p' },
+	{ "jul-tcp-port", 1, 0, 'J' },
+	{ "config", 1, 0, 'f' },
+	{ "load", 1, 0, 'l' },
+	{ "kmod-probes", 1, 0, 'P' },
+	{ NULL, 0, 0, 0 }
+};
+
+/* Command line options to ignore from configuration file */
+static const char *config_ignore_options[] = { "help", "version", "config" };
 
 /* Shared between threads */
 static int dispatch_thread_exit;
@@ -163,13 +205,16 @@ static pthread_t dispatch_thread;
 static pthread_t health_thread;
 static pthread_t ht_cleanup_thread;
 static pthread_t jul_reg_thread;
+static pthread_t load_session_thread;
 
 /*
  * UST registration command queue. This queue is tied with a futex and uses a N
  * wakers / 1 waiter implemented and detailed in futex.c/.h
  *
- * The thread_manage_apps and thread_dispatch_ust_registration interact with
- * this queue and the wait/wake scheme.
+ * The thread_registration_apps and thread_dispatch_ust_registration uses this
+ * queue along with the wait/wake scheme. The thread_manage_apps receives down
+ * the line new application socket and monitors it for any I/O error or clean
+ * close that triggers an unregistration of the application.
  */
 static struct ust_cmd_queue ust_cmd_queue;
 
@@ -192,6 +237,10 @@ static const char *consumerd32_bin = CONFIG_CONSUMERD32_BIN;
 static const char *consumerd64_bin = CONFIG_CONSUMERD64_BIN;
 static const char *consumerd32_libdir = CONFIG_CONSUMERD32_LIBDIR;
 static const char *consumerd64_libdir = CONFIG_CONSUMERD64_LIBDIR;
+static int consumerd32_bin_override;
+static int consumerd64_bin_override;
+static int consumerd32_libdir_override;
+static int consumerd64_libdir_override;
 
 static const char *module_proc_lttng = "/proc/lttng";
 
@@ -246,17 +295,22 @@ unsigned int jul_tcp_port = DEFAULT_JUL_TCP_PORT;
 /* Am I root or not. */
 int is_root;			/* Set to 1 if the daemon is running as root */
 
+const char * const config_section_name = "sessiond";
+
+/* Load session thread information to operate. */
+struct load_session_thread_data *load_info;
+
 /*
  * Whether sessiond is ready for commands/health check requests.
  * NR_LTTNG_SESSIOND_READY must match the number of calls to
- * lttng_sessiond_notify_ready().
+ * sessiond_notify_ready().
  */
-#define NR_LTTNG_SESSIOND_READY		2
+#define NR_LTTNG_SESSIOND_READY		3
 int lttng_sessiond_ready = NR_LTTNG_SESSIOND_READY;
 
 /* Notify parents that we are ready for cmd and health check */
-static
-void lttng_sessiond_notify_ready(void)
+LTTNG_HIDDEN
+void sessiond_notify_ready(void)
 {
 	if (uatomic_sub_return(&lttng_sessiond_ready, 1) == 0) {
 		/*
@@ -459,6 +513,27 @@ static void close_consumer_sockets(void)
 }
 
 /*
+ * Generate the full lock file path using the rundir.
+ *
+ * Return the snprintf() return value thus a negative value is an error.
+ */
+static int generate_lock_file_path(char *path, size_t len)
+{
+	int ret;
+
+	assert(path);
+	assert(rundir);
+
+	/* Build lockfile path from rundir. */
+	ret = snprintf(path, len, "%s/" DEFAULT_LTTNG_SESSIOND_LOCKFILE, rundir);
+	if (ret < 0) {
+		PERROR("snprintf lockfile path");
+	}
+
+	return ret;
+}
+
+/*
  * Cleanup the daemon
  */
 static void cleanup(void)
@@ -539,14 +614,6 @@ static void cleanup(void)
 	DBG("Removing directory %s", path);
 	(void) rmdir(path);
 
-	/*
-	 * We do NOT rmdir rundir because there are other processes
-	 * using it, for instance lttng-relayd, which can start in
-	 * parallel with this teardown.
-	 */
-
-	free(rundir);
-
 	DBG("Cleaning up all sessions");
 
 	/* Destroy session list mutex */
@@ -577,6 +644,67 @@ static void cleanup(void)
 	}
 
 	close_consumer_sockets();
+
+	/*
+	 * If the override option is set, the pointer points to a *non* const thus
+	 * freeing it even though the variable type is set to const.
+	 */
+	if (tracing_group_name_override) {
+		free((void *) tracing_group_name);
+	}
+	if (consumerd32_bin_override) {
+		free((void *) consumerd32_bin);
+	}
+	if (consumerd64_bin_override) {
+		free((void *) consumerd64_bin);
+	}
+	if (consumerd32_libdir_override) {
+		free((void *) consumerd32_libdir);
+	}
+	if (consumerd64_libdir_override) {
+		free((void *) consumerd64_libdir);
+	}
+
+	if (opt_pidfile) {
+		free(opt_pidfile);
+	}
+
+	if (opt_load_session_path) {
+		free(opt_load_session_path);
+	}
+
+	if (load_info) {
+		load_session_destroy_data(load_info);
+		free(load_info);
+	}
+
+	/*
+	 * Cleanup lock file by deleting it and finaly closing it which will
+	 * release the file system lock.
+	 */
+	if (lockfile_fd >= 0) {
+		char lockfile_path[PATH_MAX];
+
+		ret = generate_lock_file_path(lockfile_path, sizeof(lockfile_path));
+		if (ret > 0) {
+			ret = remove(lockfile_path);
+			if (ret < 0) {
+				PERROR("remove lock file");
+			}
+			ret = close(lockfile_fd);
+			if (ret < 0) {
+				PERROR("close lock file");
+			}
+		}
+	}
+
+	/*
+	 * We do NOT rmdir rundir because there are other processes
+	 * using it, for instance lttng-relayd, which can start in
+	 * parallel with this teardown.
+	 */
+
+	free(rundir);
 
 	/* <fun> */
 	DBG("%c[%d;%dm*** assert failed :-) *** ==> %c[%dm%c[%d;%dm"
@@ -2164,9 +2292,12 @@ static pid_t spawn_consumerd(struct consumer_data *consumer_data)
 		 */
 		if (opt_verbose_consumer) {
 			verbosity = "--verbose";
-		} else {
+		} else if (lttng_opt_quiet) {
 			verbosity = "--quiet";
+		} else {
+			verbosity = "";
 		}
+
 		switch (consumer_data->type) {
 		case LTTNG_CONSUMER_KERNEL:
 			/*
@@ -2652,6 +2783,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 	case LTTNG_SNAPSHOT_DEL_OUTPUT:
 	case LTTNG_SNAPSHOT_LIST_OUTPUT:
 	case LTTNG_SNAPSHOT_RECORD:
+	case LTTNG_SAVE_SESSION:
 		need_domain = 0;
 		break;
 	default:
@@ -2710,6 +2842,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 	case LTTNG_LIST_SESSIONS:
 	case LTTNG_LIST_TRACEPOINTS:
 	case LTTNG_LIST_TRACEPOINT_FIELDS:
+	case LTTNG_SAVE_SESSION:
 		need_tracing_session = 0;
 		break;
 	default:
@@ -2728,6 +2861,38 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 			/* Acquire lock for the session */
 			session_lock(cmd_ctx->session);
 		}
+		break;
+	}
+
+	/*
+	 * Commands that need a valid session but should NOT create one if none
+	 * exists. Instead of creating one and destroying it when the command is
+	 * handled, process that right before so we save some round trip in useless
+	 * code path.
+	 */
+	switch (cmd_ctx->lsm->cmd_type) {
+	case LTTNG_DISABLE_CHANNEL:
+	case LTTNG_DISABLE_EVENT:
+	case LTTNG_DISABLE_ALL_EVENT:
+		switch (cmd_ctx->lsm->domain.type) {
+		case LTTNG_DOMAIN_KERNEL:
+			if (!cmd_ctx->session->kernel_session) {
+				ret = LTTNG_ERR_NO_CHANNEL;
+				goto error;
+			}
+			break;
+		case LTTNG_DOMAIN_JUL:
+		case LTTNG_DOMAIN_UST:
+			if (!cmd_ctx->session->ust_session) {
+				ret = LTTNG_ERR_NO_CHANNEL;
+				goto error;
+			}
+			break;
+		default:
+			ret = LTTNG_ERR_UNKNOWN_DOMAIN;
+			goto error;
+		}
+	default:
 		break;
 	}
 
@@ -2973,6 +3138,7 @@ skip_domain:
 	{
 		struct lttng_event_exclusion *exclusion = NULL;
 		struct lttng_filter_bytecode *bytecode = NULL;
+		char *filter_expression = NULL;
 
 		/* Handle exclusion events and receive it from the client. */
 		if (cmd_ctx->lsm->u.enable.exclusion_count > 0) {
@@ -2994,6 +3160,38 @@ skip_domain:
 				*sock_error = 1;
 				free(exclusion);
 				ret = LTTNG_ERR_EXCLUSION_INVAL;
+				goto error;
+			}
+		}
+
+		/* Get filter expression from client. */
+		if (cmd_ctx->lsm->u.enable.expression_len > 0) {
+			size_t expression_len =
+				cmd_ctx->lsm->u.enable.expression_len;
+
+			if (expression_len > LTTNG_FILTER_MAX_LEN) {
+				ret = LTTNG_ERR_FILTER_INVAL;
+				free(exclusion);
+				goto error;
+			}
+
+			filter_expression = zmalloc(expression_len);
+			if (!filter_expression) {
+				free(exclusion);
+				ret = LTTNG_ERR_FILTER_NOMEM;
+				goto error;
+			}
+
+			/* Receive var. len. data */
+			DBG("Receiving var len filter's expression from client ...");
+			ret = lttcomm_recv_unix_sock(sock, filter_expression,
+				expression_len);
+			if (ret <= 0) {
+				DBG("Nothing recv() from client car len data... continuing");
+				*sock_error = 1;
+				free(filter_expression);
+				free(exclusion);
+				ret = LTTNG_ERR_FILTER_INVAL;
 				goto error;
 			}
 		}
@@ -3037,7 +3235,8 @@ skip_domain:
 
 		ret = cmd_enable_event(cmd_ctx->session, &cmd_ctx->lsm->domain,
 				cmd_ctx->lsm->u.enable.channel_name,
-				&cmd_ctx->lsm->u.enable.event, bytecode, exclusion,
+				&cmd_ctx->lsm->u.enable.event,
+				filter_expression, bytecode, exclusion,
 				kernel_poll_pipe[1]);
 		break;
 	}
@@ -3047,7 +3246,8 @@ skip_domain:
 
 		ret = cmd_enable_event_all(cmd_ctx->session, &cmd_ctx->lsm->domain,
 				cmd_ctx->lsm->u.enable.channel_name,
-				cmd_ctx->lsm->u.enable.event.type, NULL, kernel_poll_pipe[1]);
+				cmd_ctx->lsm->u.enable.event.type, NULL, NULL,
+				kernel_poll_pipe[1]);
 		break;
 	}
 	case LTTNG_LIST_TRACEPOINTS:
@@ -3510,6 +3710,12 @@ skip_domain:
 		free(uris);
 		break;
 	}
+	case LTTNG_SAVE_SESSION:
+	{
+		ret = cmd_save_sessions(&cmd_ctx->lsm->u.save_session.attr,
+			&cmd_ctx->creds);
+		break;
+	}
 	default:
 		ret = LTTNG_ERR_UND;
 		break;
@@ -3608,7 +3814,7 @@ static void *thread_manage_health(void *data)
 		goto error;
 	}
 
-	lttng_sessiond_notify_ready();
+	sessiond_notify_ready();
 
 	while (1) {
 		DBG("Health check ready");
@@ -3760,7 +3966,12 @@ static void *thread_manage_clients(void *data)
 		goto error;
 	}
 
-	lttng_sessiond_notify_ready();
+	sessiond_notify_ready();
+	ret = sem_post(&load_info->message_thread_ready);
+	if (ret) {
+		PERROR("sem_post message_thread_ready");
+		goto error;
+	}
 
 	/* This testpoint is after we signal readiness to the parent. */
 	if (testpoint(sessiond_thread_manage_clients)) {
@@ -3994,154 +4205,325 @@ static void usage(void)
 	fprintf(stderr, "      --verbose-consumer             Verbose mode for consumer. Activate DBG() macro.\n");
 	fprintf(stderr, "      --no-kernel                    Disable kernel tracer\n");
 	fprintf(stderr, "      --jul-tcp-port                 JUL application registration TCP port\n");
+	fprintf(stderr, "  -f  --config                       Load daemon configuration file\n");
+	fprintf(stderr, "  -l  --load PATH                    Load session configuration\n");
+	fprintf(stderr, "      --kmod-probes                  Specify kernel module probes to load\n");
 }
 
 /*
- * daemon argument parsing
+ * Take an option from the getopt output and set it in the right variable to be
+ * used later.
+ *
+ * Return 0 on success else a negative value.
  */
-static int parse_args(int argc, char **argv)
+static int set_option(int opt, const char *arg, const char *optname)
 {
-	int c;
+	int ret = 0;
 
-	static struct option long_options[] = {
-		{ "client-sock", 1, 0, 'c' },
-		{ "apps-sock", 1, 0, 'a' },
-		{ "kconsumerd-cmd-sock", 1, 0, 'C' },
-		{ "kconsumerd-err-sock", 1, 0, 'E' },
-		{ "ustconsumerd32-cmd-sock", 1, 0, 'G' },
-		{ "ustconsumerd32-err-sock", 1, 0, 'H' },
-		{ "ustconsumerd64-cmd-sock", 1, 0, 'D' },
-		{ "ustconsumerd64-err-sock", 1, 0, 'F' },
-		{ "consumerd32-path", 1, 0, 'u' },
-		{ "consumerd32-libdir", 1, 0, 'U' },
-		{ "consumerd64-path", 1, 0, 't' },
-		{ "consumerd64-libdir", 1, 0, 'T' },
-		{ "daemonize", 0, 0, 'd' },
-		{ "sig-parent", 0, 0, 'S' },
-		{ "help", 0, 0, 'h' },
-		{ "group", 1, 0, 'g' },
-		{ "version", 0, 0, 'V' },
-		{ "quiet", 0, 0, 'q' },
-		{ "verbose", 0, 0, 'v' },
-		{ "verbose-consumer", 0, 0, 'Z' },
-		{ "no-kernel", 0, 0, 'N' },
-		{ "pidfile", 1, 0, 'p' },
-		{ "jul-tcp-port", 1, 0, 'J' },
-		{ "background", 0, 0, 'b' },
-		{ NULL, 0, 0, 0 }
-	};
+	switch (opt) {
+	case 0:
+		fprintf(stderr, "option %s", optname);
+		if (arg) {
+			fprintf(stderr, " with arg %s\n", arg);
+		}
+		break;
+	case 'c':
+		snprintf(client_unix_sock_path, PATH_MAX, "%s", arg);
+		break;
+	case 'a':
+		snprintf(apps_unix_sock_path, PATH_MAX, "%s", arg);
+		break;
+	case 'd':
+		opt_daemon = 1;
+		break;
+	case 'b':
+		opt_background = 1;
+		break;
+	case 'g':
+		/*
+		 * If the override option is set, the pointer points to a
+		 * *non* const thus freeing it even though the variable type is
+		 * set to const.
+		 */
+		if (tracing_group_name_override) {
+			free((void *) tracing_group_name);
+		}
+		tracing_group_name = strdup(arg);
+		if (!tracing_group_name) {
+			perror("strdup");
+			ret = -ENOMEM;
+		}
+		tracing_group_name_override = 1;
+		break;
+	case 'h':
+		usage();
+		exit(EXIT_FAILURE);
+	case 'V':
+		fprintf(stdout, "%s\n", VERSION);
+		exit(EXIT_SUCCESS);
+	case 'S':
+		opt_sig_parent = 1;
+		break;
+	case 'E':
+		snprintf(kconsumer_data.err_unix_sock_path, PATH_MAX, "%s", arg);
+		break;
+	case 'C':
+		snprintf(kconsumer_data.cmd_unix_sock_path, PATH_MAX, "%s", arg);
+		break;
+	case 'F':
+		snprintf(ustconsumer64_data.err_unix_sock_path, PATH_MAX, "%s", arg);
+		break;
+	case 'D':
+		snprintf(ustconsumer64_data.cmd_unix_sock_path, PATH_MAX, "%s", arg);
+		break;
+	case 'H':
+		snprintf(ustconsumer32_data.err_unix_sock_path, PATH_MAX, "%s", arg);
+		break;
+	case 'G':
+		snprintf(ustconsumer32_data.cmd_unix_sock_path, PATH_MAX, "%s", arg);
+		break;
+	case 'N':
+		opt_no_kernel = 1;
+		break;
+	case 'q':
+		lttng_opt_quiet = 1;
+		break;
+	case 'v':
+		/* Verbose level can increase using multiple -v */
+		if (arg) {
+			/* Value obtained from config file */
+			lttng_opt_verbose = config_parse_value(arg);
+		} else {
+			/* -v used on command line */
+			lttng_opt_verbose++;
+		}
+		/* Clamp value to [0, 3] */
+		lttng_opt_verbose = lttng_opt_verbose < 0 ? 0 :
+			(lttng_opt_verbose <= 3 ? lttng_opt_verbose : 3);
+		break;
+	case 'Z':
+		if (arg) {
+			opt_verbose_consumer = config_parse_value(arg);
+		} else {
+			opt_verbose_consumer += 1;
+		}
+		break;
+	case 'u':
+		if (consumerd32_bin_override) {
+			free((void *) consumerd32_bin);
+		}
+		consumerd32_bin = strdup(arg);
+		if (!consumerd32_bin) {
+			perror("strdup");
+			ret = -ENOMEM;
+		}
+		consumerd32_bin_override = 1;
+		break;
+	case 'U':
+		if (consumerd32_libdir_override) {
+			free((void *) consumerd32_libdir);
+		}
+		consumerd32_libdir = strdup(arg);
+		if (!consumerd32_libdir) {
+			perror("strdup");
+			ret = -ENOMEM;
+		}
+		consumerd32_libdir_override = 1;
+		break;
+	case 't':
+		if (consumerd64_bin_override) {
+			free((void *) consumerd64_bin);
+		}
+		consumerd64_bin = strdup(arg);
+		if (!consumerd64_bin) {
+			perror("strdup");
+			ret = -ENOMEM;
+		}
+		consumerd64_bin_override = 1;
+		break;
+	case 'T':
+		if (consumerd64_libdir_override) {
+			free((void *) consumerd64_libdir);
+		}
+		consumerd64_libdir = strdup(arg);
+		if (!consumerd64_libdir) {
+			perror("strdup");
+			ret = -ENOMEM;
+		}
+		consumerd64_libdir_override = 1;
+		break;
+	case 'p':
+		free(opt_pidfile);
+		opt_pidfile = strdup(arg);
+		if (!opt_pidfile) {
+			perror("strdup");
+			ret = -ENOMEM;
+		}
+		break;
+	case 'J': /* JUL TCP port. */
+	{
+		unsigned long v;
 
+		errno = 0;
+		v = strtoul(arg, NULL, 0);
+		if (errno != 0 || !isdigit(arg[0])) {
+			ERR("Wrong value in --jul-tcp-port parameter: %s", arg);
+			return -1;
+		}
+		if (v == 0 || v >= 65535) {
+			ERR("Port overflow in --jul-tcp-port parameter: %s", arg);
+			return -1;
+		}
+		jul_tcp_port = (uint32_t) v;
+		DBG3("JUL TCP port set to non default: %u", jul_tcp_port);
+		break;
+	}
+	case 'l':
+		free(opt_load_session_path);
+		opt_load_session_path = strdup(arg);
+		if (!opt_load_session_path) {
+			perror("strdup");
+			ret = -ENOMEM;
+		}
+		break;
+	case 'P': /* probe modules list */
+		free(kmod_probes_list);
+		kmod_probes_list = strdup(arg);
+		if (!kmod_probes_list) {
+			perror("strdup");
+			ret = -ENOMEM;
+		}
+		break;
+	case 'f':
+		/* This is handled in set_options() thus silent break. */
+		break;
+	default:
+		/* Unknown option or other error.
+		 * Error is printed by getopt, just return */
+		ret = -1;
+	}
+
+	return ret;
+}
+
+/*
+ * config_entry_handler_cb used to handle options read from a config file.
+ * See config_entry_handler_cb comment in common/config/config.h for the
+ * return value conventions.
+ */
+static int config_entry_handler(const struct config_entry *entry, void *unused)
+{
+	int ret = 0, i;
+
+	if (!entry || !entry->name || !entry->value) {
+		ret = -EINVAL;
+		goto end;
+	}
+
+	/* Check if the option is to be ignored */
+	for (i = 0; i < sizeof(config_ignore_options) / sizeof(char *); i++) {
+		if (!strcmp(entry->name, config_ignore_options[i])) {
+			goto end;
+		}
+	}
+
+	for (i = 0; i < (sizeof(long_options) / sizeof(struct option)) - 1;
+		i++) {
+
+		/* Ignore if not fully matched. */
+		if (strcmp(entry->name, long_options[i].name)) {
+			continue;
+		}
+
+		/*
+		 * If the option takes no argument on the command line, we have to
+		 * check if the value is "true". We support non-zero numeric values,
+		 * true, on and yes.
+		 */
+		if (!long_options[i].has_arg) {
+			ret = config_parse_value(entry->value);
+			if (ret <= 0) {
+				if (ret) {
+					WARN("Invalid configuration value \"%s\" for option %s",
+							entry->value, entry->name);
+				}
+				/* False, skip boolean config option. */
+				goto end;
+			}
+		}
+
+		ret = set_option(long_options[i].val, entry->value, entry->name);
+		goto end;
+	}
+
+	WARN("Unrecognized option \"%s\" in daemon configuration file.", entry->name);
+
+end:
+	return ret;
+}
+
+/*
+ * daemon configuration loading and argument parsing
+ */
+static int set_options(int argc, char **argv)
+{
+	int ret = 0, c = 0, option_index = 0;
+	int orig_optopt = optopt, orig_optind = optind;
+	char *optstring;
+	const char *config_path = NULL;
+
+	optstring = utils_generate_optstring(long_options,
+			sizeof(long_options) / sizeof(struct option));
+	if (!optstring) {
+		ret = -ENOMEM;
+		goto end;
+	}
+
+	/* Check for the --config option */
+	while ((c = getopt_long(argc, argv, optstring, long_options,
+					&option_index)) != -1) {
+		if (c == '?') {
+			ret = -EINVAL;
+			goto end;
+		} else if (c != 'f') {
+			/* if not equal to --config option. */
+			continue;
+		}
+
+		config_path = utils_expand_path(optarg);
+		if (!config_path) {
+			ERR("Failed to resolve path: %s", optarg);
+		}
+	}
+
+	ret = config_get_section_entries(config_path, config_section_name,
+			config_entry_handler, NULL);
+	if (ret) {
+		if (ret > 0) {
+			ERR("Invalid configuration option at line %i", ret);
+			ret = -1;
+		}
+		goto end;
+	}
+
+	/* Reset getopt's global state */
+	optopt = orig_optopt;
+	optind = orig_optind;
 	while (1) {
-		int option_index = 0;
-		c = getopt_long(argc, argv, "dhqvVSN" "a:c:g:s:C:E:D:F:Z:u:t:p:J:b",
-				long_options, &option_index);
+		c = getopt_long(argc, argv, optstring, long_options, &option_index);
 		if (c == -1) {
 			break;
 		}
 
-		switch (c) {
-		case 0:
-			fprintf(stderr, "option %s", long_options[option_index].name);
-			if (optarg) {
-				fprintf(stderr, " with arg %s\n", optarg);
-			}
+		ret = set_option(c, optarg, long_options[option_index].name);
+		if (ret < 0) {
 			break;
-		case 'c':
-			snprintf(client_unix_sock_path, PATH_MAX, "%s", optarg);
-			break;
-		case 'a':
-			snprintf(apps_unix_sock_path, PATH_MAX, "%s", optarg);
-			break;
-		case 'd':
-			opt_daemon = 1;
-			break;
-		case 'b':
-			opt_background = 1;
-			break;
-		case 'g':
-			tracing_group_name = optarg;
-			break;
-		case 'h':
-			usage();
-			exit(EXIT_FAILURE);
-		case 'V':
-			fprintf(stdout, "%s\n", VERSION);
-			exit(EXIT_SUCCESS);
-		case 'S':
-			opt_sig_parent = 1;
-			break;
-		case 'E':
-			snprintf(kconsumer_data.err_unix_sock_path, PATH_MAX, "%s", optarg);
-			break;
-		case 'C':
-			snprintf(kconsumer_data.cmd_unix_sock_path, PATH_MAX, "%s", optarg);
-			break;
-		case 'F':
-			snprintf(ustconsumer64_data.err_unix_sock_path, PATH_MAX, "%s", optarg);
-			break;
-		case 'D':
-			snprintf(ustconsumer64_data.cmd_unix_sock_path, PATH_MAX, "%s", optarg);
-			break;
-		case 'H':
-			snprintf(ustconsumer32_data.err_unix_sock_path, PATH_MAX, "%s", optarg);
-			break;
-		case 'G':
-			snprintf(ustconsumer32_data.cmd_unix_sock_path, PATH_MAX, "%s", optarg);
-			break;
-		case 'N':
-			opt_no_kernel = 1;
-			break;
-		case 'q':
-			lttng_opt_quiet = 1;
-			break;
-		case 'v':
-			/* Verbose level can increase using multiple -v */
-			lttng_opt_verbose += 1;
-			break;
-		case 'Z':
-			opt_verbose_consumer += 1;
-			break;
-		case 'u':
-			consumerd32_bin= optarg;
-			break;
-		case 'U':
-			consumerd32_libdir = optarg;
-			break;
-		case 't':
-			consumerd64_bin = optarg;
-			break;
-		case 'T':
-			consumerd64_libdir = optarg;
-			break;
-		case 'p':
-			opt_pidfile = optarg;
-			break;
-		case 'J': /* JUL TCP port. */
-		{
-			unsigned long v;
-
-			errno = 0;
-			v = strtoul(optarg, NULL, 0);
-			if (errno != 0 || !isdigit(optarg[0])) {
-				ERR("Wrong value in --jul-tcp-port parameter: %s", optarg);
-				return -1;
-			}
-			if (v == 0 || v >= 65535) {
-				ERR("Port overflow in --jul-tcp-port parameter: %s", optarg);
-				return -1;
-			}
-			jul_tcp_port = (uint32_t) v;
-			DBG3("JUL TCP port set to non default: %u", jul_tcp_port);
-			break;
-		}
-		default:
-			/* Unknown option or other error.
-			 * Error is printed by getopt, just return */
-			return -1;
 		}
 	}
 
-	return 0;
+end:
+	free(optstring);
+	return ret;
 }
 
 /*
@@ -4515,6 +4897,24 @@ error:
 }
 
 /*
+ * Create lockfile using the rundir and return its fd.
+ */
+static int create_lockfile(void)
+{
+	int ret;
+	char lockfile_path[PATH_MAX];
+
+	ret = generate_lock_file_path(lockfile_path, sizeof(lockfile_path));
+	if (ret < 0) {
+		goto error;
+	}
+
+	ret = utils_create_lock_file(lockfile_path);
+error:
+	return ret;
+}
+
+/*
  * Write JUL TCP port using the rundir.
  */
 static void write_julport(void)
@@ -4539,6 +4939,35 @@ static void write_julport(void)
 	(void) utils_create_pid_file(jul_tcp_port, path);
 
 error:
+	return;
+}
+
+/*
+ * Start the load session thread and dettach from it so the main thread can
+ * continue. This does not return a value since whatever the outcome, the main
+ * thread will continue.
+ */
+static void start_load_session_thread(void)
+{
+	int ret;
+
+	/* Create session loading thread. */
+	ret = pthread_create(&load_session_thread, NULL, thread_load_session,
+			load_info);
+	if (ret != 0) {
+		PERROR("pthread_create load_session_thread");
+		goto error_create;
+	}
+
+	ret = pthread_detach(load_session_thread);
+	if (ret != 0) {
+		PERROR("pthread_detach load_session_thread");
+	}
+
+	/* Everything went well so don't cleanup anything. */
+
+error_create:
+	/* The cleanup() function will destroy the load_info data. */
 	return;
 }
 
@@ -4568,9 +4997,9 @@ int main(int argc, char **argv)
 		WARN("Fallback page size to %ld", page_size);
 	}
 
-	/* Parse arguments */
+	/* Parse arguments and load the daemon configuration file */
 	progname = argv[0];
-	if ((ret = parse_args(argc, argv)) < 0) {
+	if ((ret = set_options(argc, argv)) < 0) {
 		goto error;
 	}
 
@@ -4688,6 +5117,11 @@ int main(int argc, char **argv)
 			snprintf(health_unix_sock_path, sizeof(health_unix_sock_path),
 					DEFAULT_HOME_HEALTH_UNIX_SOCK, home_path);
 		}
+	}
+
+	lockfile_fd = create_lockfile();
+	if (lockfile_fd < 0) {
+		goto error;
 	}
 
 	/* Set consumer initial state */
@@ -4851,6 +5285,11 @@ int main(int argc, char **argv)
 	/* This is to get the TCP timeout value. */
 	lttcomm_inet_init();
 
+	if (load_session_init_data(&load_info) < 0) {
+		goto exit;
+	}
+	load_info->path = opt_load_session_path;
+
 	/*
 	 * Initialize the health check subsystem. This call should set the
 	 * appropriate time values.
@@ -4913,7 +5352,7 @@ int main(int argc, char **argv)
 	ret = pthread_create(&apps_notify_thread, NULL,
 			ust_thread_manage_notify, (void *) NULL);
 	if (ret != 0) {
-		PERROR("pthread_create apps");
+		PERROR("pthread_create notify");
 		goto exit_apps_notify;
 	}
 
@@ -4921,7 +5360,7 @@ int main(int argc, char **argv)
 	ret = pthread_create(&jul_reg_thread, NULL,
 			jul_thread_manage_registration, (void *) NULL);
 	if (ret != 0) {
-		PERROR("pthread_create apps");
+		PERROR("pthread_create JUL");
 		goto exit_jul_reg;
 	}
 
@@ -4934,7 +5373,12 @@ int main(int argc, char **argv)
 			PERROR("pthread_create kernel");
 			goto exit_kernel;
 		}
+	}
 
+	/* Load possible session(s). */
+	start_load_session_thread();
+
+	if (is_root && !opt_no_kernel) {
 		ret = pthread_join(kernel_thread, &status);
 		if (ret != 0) {
 			PERROR("pthread_join");

@@ -1,4 +1,4 @@
-.TH "LTTNG" "1" "February 05th, 2014" "" ""
+.TH "LTTNG" "1" "May 13th, 2014" "" ""
 
 .SH "NAME"
 lttng \(em LTTng 2.x tracer control command line tool
@@ -87,19 +87,24 @@ Add context to event(s) and/or channel(s).
 A context is basically extra information appended to a channel. For instance,
 you could ask the tracer to add the PID information for all events in a
 channel. You can also add performance monitoring unit counters (perf PMU) using
-the perf kernel API).
+the perf kernel API.
 
-For example, this command will add the context information 'prio' and two perf
-counters (hardware branch misses and cache misses), to all events in the trace
+For example, this command will add the context information 'prio' and two per-CPU
+perf counters (hardware branch misses and cache misses), to all events in the trace
 data output:
 
 .nf
-# lttng add-context \-k \-t prio \-t perf:branch-misses \\
-		\-t perf:cache-misses
+# lttng add-context \-k \-t prio \-t perf:cpu:branch-misses \\
+		\-t perf:cpu:cache-misses
 .fi
 
 Please take a look at the help (\-h/\-\-help) for a detailed list of available
 contexts.
+
+Perf counters are available as per-CPU ("perf:cpu:...") and per-thread
+("perf:thread:...") counters. Currently, per-CPU counters can only be
+used with the kernel tracing domain, and per-thread counters can only be
+used with the UST tracing domain.
 
 If no channel is given (\-c), the context is added to all channels that were
 already enabled. If the session has no channel, a default channel is created.
@@ -160,9 +165,9 @@ counters).
 # lttng create calibrate-function
 # lttng enable-event calibrate \-\-kernel \\
 	\-\-function lttng_calibrate_kretprobe
-# lttng add-context \-\-kernel \-t perf:LLC-load-misses \\
-	\-t perf:LLC-store-misses \\
-	\-t perf:LLC-prefetch-misses
+# lttng add-context \-\-kernel \-t perf:cpu:LLC-load-misses \\
+	\-t perf:cpu:LLC-store-misses \\
+	\-t perf:cpu:LLC-prefetch-misses
 # lttng start
 # for a in $(seq 1 10); do \\
         lttng calibrate \-\-kernel \-\-function;
@@ -397,7 +402,8 @@ Apply to the user-space tracer
 Discard event when subbuffers are full (default)
 .TP
 .BR "\-\-overwrite"
-Flight recorder mode : overwrites events when subbuffers are full
+Flight recorder mode: overwrites events when subbuffers are full. The
+number of subbuffer must be 2 or more.
 .TP
 .BR "\-\-subbuf-size SIZE"
 Subbuffer size in bytes {+k,+M,+G}.
@@ -437,6 +443,8 @@ Use shared buffer for the whole system (\-k only)
 .BR "\-C, \-\-tracefile-size SIZE"
 Maximum size of each tracefile within a stream (in bytes).
 0 means unlimited. (default: 0)
+Note: traces generated with this option may inaccurately report
+discarded events as of CTF 1.8.
 .TP
 .BR "\-W, \-\-tracefile-count COUNT"
 Used in conjunction with \-C option, this will limit the number of files
@@ -541,7 +549,9 @@ Dynamic function entry/return probe. Addr and offset can be octal
 .BR "\-\-syscall"
 System call event. Enabling syscalls tracing (kernel tracer), you will
 not be able to disable them with disable-event. This is a known
-limitation. You can disable the entire channel to do the trick.
+limitation. You can disable the entire channel to do the trick. Also note
+that per-syscall selection is not supported yet. Use with "-a" to enable
+all syscalls.
 .TP
 .BR "\-\-filter 'expression'"
 Set a filter on a newly enabled event. Filter expression on event
@@ -580,6 +590,11 @@ running applications can be found under columns "PID" and "LWP" of the
   '$ctx.vtid == 1234'
 .fi
 
+Context information is available to all filters whether or not the add-context
+command has been used to add it to the event's channel, as long as the context
+field exists for that domain. For example, the filter examples given above will
+never fail to link: no add-context is required for the event's channel.
+
 .TP
 .BR "\-x, \-\-exclude LIST"
 Add exclusions to UST tracepoints:
@@ -598,7 +613,7 @@ names match any of the items in LIST.
 Disable tracing channel
 
 Disabling a channel disables the tracing of all of the channel's events. A channel
-can be reenabled by calling \fBlttng enable-channel NAME\fP again.
+can be re-enabled by calling \fBlttng enable-channel NAME\fP again.
 
 If \fB\-s, \-\-session\fP is omitted, the session name is taken from the .lttngrc
 file.
@@ -729,6 +744,67 @@ List available domain(s)
 .PP
 
 .PP
+\fBload\fP [OPTIONS] [NAME]
+.RS
+Load tracing session configuration
+
+If NAME is omitted, all session configurations found in both the user's session
+configuration directory (default: ~/.lttng/sessions/) and the system session
+configuration directory (default: /etc/lttng/sessions/) will be loaded. Note
+that the sessions in the user directory are loaded first and then the system
+wide directory are loaded.
+
+.B OPTIONS:
+
+.TP
+.BR "\-h, \-\-help"
+Show summary of possible options and commands.
+.TP
+.BR "\-a, \-\-all"
+Load all session configurations (default).
+.TP
+.BR "\-i, \-\-input-path PATH"
+Specify the input path for session configurations. This overrides the default
+session configuration directory.
+.TP
+.BR "\-f, -\-force"
+Overwrite current session configuration(s) if a session of the same name
+already exists.
+.RE
+.PP
+
+.PP
+\fBsave\fP [OPTIONS] [SESSION]
+.RS
+Save tracing session configuration
+
+If SESSION is omitted, all session configurations will be saved to individual
+\fB.lttng\fP files under the user's session configuration directory (default:
+~/.lttng/sessions/). The default session configuration file naming scheme is
+\fBSESSION.lttng\fP.
+
+For instance, a user in the tracing group saving a session from a root session
+daemon will save it in her/his user directory.
+
+.B OPTIONS:
+
+.TP
+.BR "\-h, \-\-help"
+Show summary of possible options and commands.
+.TP
+.BR "\-a, \-\-all"
+Save all session configurations (default).
+.TP
+.BR "\-o, \-\-output-path PATH"
+Specify the output path for saved sessions. This overrides the default session
+configuration directory.
+.TP
+.BR "\-f, -\-force"
+Overwrite session configuration file if session name clashes.
+.RE
+.PP
+
+.PP
 \fBset-session\fP NAME [OPTIONS]
 .RS
 Set current session name
@@ -812,6 +888,10 @@ Name of the snapshot's output.
 Maximum size in bytes of the snapshot. The maxium size does not include the
 metadata file. Human readable format is accepted: {+k,+M,+G}. For instance,
 \-\-max-size 5M
+
+The minimum size of a snapshot is computed by multiplying the total amount of
+streams in the session by the largest subbuffer size. This is to ensure
+fairness between channels when extracting data.
 .TP
 .BR "\-C, \-\-ctrl-url URL"
 Set control path URL. (Must use -D also)
@@ -971,6 +1051,12 @@ Note that all command line options override environment variables.
 .IP "LTTNG_SESSIOND_PATH"
 Allows one to specify the full session daemon binary path to lttng command line
 tool. You can also use \-\-sessiond-path option having the same effect.
+.PP
+
+.PP
+.IP "LTTNG_SESSION_CONFIG_XSD_PATH"
+Set the path in which the \fBsession.xsd\fP session configuration schema may be
+found.
 .PP
 
 .SH "SEE ALSO"

@@ -166,6 +166,8 @@ static void list_lttng_channels(int domain, struct ltt_session *session,
 			channels[i].attr.read_timer_interval =
 				uchan->attr.read_timer_interval;
 			channels[i].enabled = uchan->enabled;
+			channels[i].attr.tracefile_size = uchan->tracefile_size;
+			channels[i].attr.tracefile_count = uchan->tracefile_count;
 			switch (uchan->attr.output) {
 			case LTTNG_UST_MMAP:
 			default:
@@ -219,6 +221,8 @@ static int list_lttng_jul_events(struct jul_domain *dom,
 		strncpy(tmp_events[i].name, event->name, sizeof(tmp_events[i].name));
 		tmp_events[i].name[sizeof(tmp_events[i].name) - 1] = '\0';
 		tmp_events[i].enabled = event->enabled;
+		tmp_events[i].loglevel = event->loglevel;
+		tmp_events[i].loglevel_type = event->loglevel_type;
 		i++;
 	}
 	rcu_read_unlock();
@@ -823,7 +827,7 @@ static int start_kernel_session(struct ltt_kernel_session *ksess, int wpipe)
 	/* Quiescent wait after starting trace */
 	kernel_wait_quiescent(kernel_tracer_fd);
 
-	ksess->started = 1;
+	ksess->active = 1;
 
 	ret = LTTNG_OK;
 
@@ -916,7 +920,7 @@ int cmd_enable_channel(struct ltt_session *session,
 	 * Don't try to enable a channel if the session has been started at
 	 * some point in time before. The tracer does not allow it.
 	 */
-	if (session->started) {
+	if (session->has_been_started) {
 		ret = LTTNG_ERR_TRACE_ALREADY_STARTED;
 		goto error;
 	}
@@ -931,6 +935,16 @@ int cmd_enable_channel(struct ltt_session *session,
 		attr->attr.switch_timer_interval = 0;
 	}
 
+	/*
+	 * The ringbuffer (both in user space and kernel) behave badly in overwrite
+	 * mode and with less than 2 subbuf so block it right away and send back an
+	 * invalid attribute error.
+	 */
+	if (attr->attr.overwrite && attr->attr.num_subbuf < 2) {
+		ret = LTTNG_ERR_INVALID;
+		goto error;
+	}
+
 	switch (domain->type) {
 	case LTTNG_DOMAIN_KERNEL:
 	{
@@ -939,15 +953,6 @@ int cmd_enable_channel(struct ltt_session *session,
 		kchan = trace_kernel_get_channel_by_name(attr->name,
 				session->kernel_session);
 		if (kchan == NULL) {
-			/*
-			 * Don't try to create a channel if the session
-			 * has been started at some point in time
-			 * before. The tracer does not allow it.
-			 */
-			if (session->started) {
-				ret = LTTNG_ERR_TRACE_ALREADY_STARTED;
-				goto error;
-			}
 			ret = channel_kernel_create(session->kernel_session, attr, wpipe);
 			if (attr->name[0] != '\0') {
 				session->kernel_session->has_non_default_channel = 1;
@@ -971,15 +976,6 @@ int cmd_enable_channel(struct ltt_session *session,
 
 		uchan = trace_ust_find_channel_by_name(chan_ht, attr->name);
 		if (uchan == NULL) {
-			/*
-			 * Don't try to create a channel if the session
-			 * has been started at some point in time
-			 * before. The tracer does not allow it.
-			 */
-			if (session->started) {
-				ret = LTTNG_ERR_TRACE_ALREADY_STARTED;
-				goto error;
-			}
 			ret = channel_ust_create(usess, attr, domain->buf_type);
 			if (attr->name[0] != '\0') {
 				usess->has_non_default_channel = 1;
@@ -1310,6 +1306,7 @@ error:
  */
 int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		char *channel_name, struct lttng_event *event,
+		char *filter_expression,
 		struct lttng_filter_bytecode *filter,
 		struct lttng_event_exclusion *exclusion,
 		int wpipe)
@@ -1425,7 +1422,8 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		}
 
 		/* At this point, the session and channel exist on the tracer */
-		ret = event_ust_enable_tracepoint(usess, uchan, event, filter, exclusion);
+		ret = event_ust_enable_tracepoint(usess, uchan, event,
+				filter_expression, filter, exclusion);
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
@@ -1461,16 +1459,16 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		tmp_dom.type = LTTNG_DOMAIN_UST;
 
 		ret = cmd_enable_event(session, &tmp_dom, DEFAULT_JUL_CHANNEL_NAME,
-				&uevent, NULL, NULL, wpipe);
+			&uevent, filter_expression, filter, NULL, wpipe);
 		if (ret != LTTNG_OK && ret != LTTNG_ERR_UST_EVENT_ENABLED) {
 			goto error;
 		}
 
 		/* The wild card * means that everything should be enabled. */
 		if (strncmp(event->name, "*", 1) == 0 && strlen(event->name) == 1) {
-			ret = event_jul_enable_all(usess, event);
+			ret = event_jul_enable_all(usess, event, filter);
 		} else {
-			ret = event_jul_enable(usess, event);
+			ret = event_jul_enable(usess, event, filter);
 		}
 		if (ret != LTTNG_OK) {
 			goto error;
@@ -1500,6 +1498,7 @@ error:
  */
 int cmd_enable_event_all(struct ltt_session *session,
 		struct lttng_domain *domain, char *channel_name, int event_type,
+		char *filter_expression,
 		struct lttng_filter_bytecode *filter, int wpipe)
 {
 	int ret;
@@ -1633,7 +1632,8 @@ int cmd_enable_event_all(struct ltt_session *session,
 		switch (event_type) {
 		case LTTNG_EVENT_ALL:
 		case LTTNG_EVENT_TRACEPOINT:
-			ret = event_ust_enable_all_tracepoints(usess, uchan, filter);
+			ret = event_ust_enable_all_tracepoints(usess, uchan,
+				filter_expression, filter);
 			if (ret != LTTNG_OK) {
 				goto error;
 			}
@@ -1679,7 +1679,7 @@ int cmd_enable_event_all(struct ltt_session *session,
 		tmp_dom.type = LTTNG_DOMAIN_UST;
 
 		ret = cmd_enable_event(session, &tmp_dom, DEFAULT_JUL_CHANNEL_NAME,
-				&uevent, NULL, NULL, wpipe);
+			&uevent, NULL, NULL, NULL, wpipe);
 		if (ret != LTTNG_OK && ret != LTTNG_ERR_UST_EVENT_ENABLED) {
 			goto error;
 		}
@@ -1689,7 +1689,7 @@ int cmd_enable_event_all(struct ltt_session *session,
 		strncpy(event.name, "*", sizeof(event.name));
 		event.name[sizeof(event.name) - 1] = '\0';
 
-		ret = event_jul_enable_all(usess, &event);
+		ret = event_jul_enable_all(usess, &event, filter);
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
@@ -1802,8 +1802,8 @@ int cmd_start_trace(struct ltt_session *session)
 	ksession = session->kernel_session;
 	usess = session->ust_session;
 
-	if (session->enabled) {
-		/* Already started. */
+	/* Is the session already started? */
+	if (session->active) {
 		ret = LTTNG_ERR_TRACE_ALREADY_STARTED;
 		goto error;
 	}
@@ -1823,8 +1823,6 @@ int cmd_start_trace(struct ltt_session *session)
 		goto error;
 	}
 
-	session->enabled = 1;
-
 	/* Kernel tracing */
 	if (ksession != NULL) {
 		ret = start_kernel_session(ksession, kernel_tracer_fd);
@@ -1835,7 +1833,11 @@ int cmd_start_trace(struct ltt_session *session)
 
 	/* Flag session that trace should start automatically */
 	if (usess) {
-		usess->start_trace = 1;
+		/*
+		 * Even though the start trace might fail, flag this session active so
+		 * other application coming in are started by default.
+		 */
+		usess->active = 1;
 
 		ret = ust_app_start_trace_all(usess);
 		if (ret < 0) {
@@ -1844,7 +1846,9 @@ int cmd_start_trace(struct ltt_session *session)
 		}
 	}
 
-	session->started = 1;
+	/* Flag this after a successful start. */
+	session->has_been_started = 1;
+	session->active = 1;
 
 	ret = LTTNG_OK;
 
@@ -1868,15 +1872,14 @@ int cmd_stop_trace(struct ltt_session *session)
 	ksession = session->kernel_session;
 	usess = session->ust_session;
 
-	if (!session->enabled) {
+	/* Session is not active. Skip everythong and inform the client. */
+	if (!session->active) {
 		ret = LTTNG_ERR_TRACE_ALREADY_STOPPED;
 		goto error;
 	}
 
-	session->enabled = 0;
-
 	/* Kernel tracer */
-	if (ksession && ksession->started) {
+	if (ksession && ksession->active) {
 		DBG("Stop kernel tracing");
 
 		/* Flush metadata if exist */
@@ -1903,11 +1906,15 @@ int cmd_stop_trace(struct ltt_session *session)
 
 		kernel_wait_quiescent(kernel_tracer_fd);
 
-		ksession->started = 0;
+		ksession->active = 0;
 	}
 
-	if (usess && usess->start_trace) {
-		usess->start_trace = 0;
+	if (usess && usess->active) {
+		/*
+		 * Even though the stop trace might fail, flag this session inactive so
+		 * other application coming in are not started by default.
+		 */
+		usess->active = 0;
 
 		ret = ust_app_stop_trace_all(usess);
 		if (ret < 0) {
@@ -1916,6 +1923,8 @@ int cmd_stop_trace(struct ltt_session *session)
 		}
 	}
 
+	/* Flag inactive after a successful stop. */
+	session->active = 0;
 	ret = LTTNG_OK;
 
 error:
@@ -1937,8 +1946,8 @@ int cmd_set_consumer_uri(int domain, struct ltt_session *session,
 	assert(uris);
 	assert(nb_uri > 0);
 
-	/* Can't enable consumer after session started. */
-	if (session->enabled) {
+	/* Can't set consumer URI if the session is active. */
+	if (session->active) {
 		ret = LTTNG_ERR_TRACE_ALREADY_STARTED;
 		goto error;
 	}
@@ -1976,6 +1985,17 @@ int cmd_set_consumer_uri(int domain, struct ltt_session *session,
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
+	}
+
+	/*
+	 * Make sure to set the session in output mode after we set URI since a
+	 * session can be created without URL (thus flagged in no output mode).
+	 */
+	session->output_traces = 1;
+	if (ksess) {
+		ksess->output_traces = 1;
+	} else if (usess) {
+		usess->output_traces = 1;
 	}
 
 	/* All good! */
@@ -2505,7 +2525,7 @@ void cmd_list_lttng_sessions(struct lttng_session *sessions, uid_t uid,
 
 		strncpy(sessions[i].name, session->name, NAME_MAX);
 		sessions[i].name[NAME_MAX - 1] = '\0';
-		sessions[i].enabled = session->enabled;
+		sessions[i].enabled = session->active;
 		sessions[i].snapshot_mode = session->snapshot_mode;
 		sessions[i].live_timer_interval = session->live_timer;
 		i++;
@@ -2525,7 +2545,7 @@ int cmd_data_pending(struct ltt_session *session)
 	assert(session);
 
 	/* Session MUST be stopped to ask for data availability. */
-	if (session->enabled) {
+	if (session->active) {
 		ret = LTTNG_ERR_SESSION_STARTED;
 		goto error;
 	} else {
@@ -2539,7 +2559,7 @@ int cmd_data_pending(struct ltt_session *session)
 		 * *VERY* important that we don't ask the consumer before a start
 		 * trace.
 		 */
-		if (!session->started) {
+		if (!session->has_been_started) {
 			ret = 0;
 			goto error;
 		}
@@ -2812,7 +2832,7 @@ error:
  */
 static int record_kernel_snapshot(struct ltt_kernel_session *ksess,
 		struct snapshot_output *output, struct ltt_session *session,
-		int wait, int nb_streams)
+		int wait, uint64_t max_stream_size)
 {
 	int ret;
 
@@ -2843,7 +2863,7 @@ static int record_kernel_snapshot(struct ltt_kernel_session *ksess,
 		goto error_snapshot;
 	}
 
-	ret = kernel_snapshot_record(ksess, output, wait, nb_streams);
+	ret = kernel_snapshot_record(ksess, output, wait, max_stream_size);
 	if (ret != LTTNG_OK) {
 		goto error_snapshot;
 	}
@@ -2864,7 +2884,7 @@ error:
  */
 static int record_ust_snapshot(struct ltt_ust_session *usess,
 		struct snapshot_output *output, struct ltt_session *session,
-		int wait, int nb_streams)
+		int wait, uint64_t max_stream_size)
 {
 	int ret;
 
@@ -2895,7 +2915,7 @@ static int record_ust_snapshot(struct ltt_ust_session *usess,
 		goto error_snapshot;
 	}
 
-	ret = ust_app_snapshot_record(usess, output, wait, nb_streams);
+	ret = ust_app_snapshot_record(usess, output, wait, max_stream_size);
 	if (ret < 0) {
 		switch (-ret) {
 		case EINVAL:
@@ -2921,10 +2941,50 @@ error:
 }
 
 /*
+ * Return the biggest subbuffer size of all channels in the given session.
+ */
+static uint64_t get_session_max_subbuf_size(struct ltt_session *session)
+{
+	uint64_t max_size = 0;
+
+	assert(session);
+
+	if (session->kernel_session) {
+		struct ltt_kernel_channel *chan;
+		struct ltt_kernel_session *ksess = session->kernel_session;
+
+		/*
+		 * For each channel, add to the max size the size of each subbuffer
+		 * multiplied by their sized.
+		 */
+		cds_list_for_each_entry(chan, &ksess->channel_list.head, list) {
+			if (chan->channel->attr.subbuf_size > max_size) {
+				max_size = chan->channel->attr.subbuf_size;
+			}
+		}
+	}
+
+	if (session->ust_session) {
+		struct lttng_ht_iter iter;
+		struct ltt_ust_channel *uchan;
+		struct ltt_ust_session *usess = session->ust_session;
+
+		cds_lfht_for_each_entry(usess->domain_global.channels->ht, &iter.iter,
+				uchan, node.node) {
+			if (uchan->attr.subbuf_size > max_size) {
+				max_size = uchan->attr.subbuf_size;
+			}
+		}
+	}
+
+	return max_size;
+}
+
+/*
  * Returns the total number of streams for a session or a negative value
  * on error.
  */
-static unsigned int get_total_nb_stream(struct ltt_session *session)
+static unsigned int get_session_nb_streams(struct ltt_session *session)
 {
 	unsigned int total_streams = 0;
 
@@ -2958,6 +3018,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 	unsigned int use_tmp_output = 0;
 	struct snapshot_output tmp_output;
 	unsigned int nb_streams, snapshot_success = 0;
+	uint64_t session_max_size = 0, max_stream_size = 0;
 
 	assert(session);
 
@@ -2973,7 +3034,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 	}
 
 	/* The session needs to be started at least once. */
-	if (!session->started) {
+	if (!session->has_been_started) {
 		ret = LTTNG_ERR_START_SESSION_ONCE;
 		goto error;
 	}
@@ -2997,17 +3058,43 @@ int cmd_snapshot_record(struct ltt_session *session,
 	}
 
 	/*
-	 * Get the total number of stream of that session which is used by the
-	 * maximum size of the snapshot feature.
+	 * Get the session maximum size for a snapshot meaning it will compute the
+	 * size of all streams from all domain.
 	 */
-	nb_streams = get_total_nb_stream(session);
+	max_stream_size = get_session_max_subbuf_size(session);
+
+	nb_streams = get_session_nb_streams(session);
+	if (nb_streams) {
+		/*
+		 * The maximum size of the snapshot is the number of streams multiplied
+		 * by the biggest subbuf size of all channels in a session which is the
+		 * maximum stream size available for each stream. The session max size
+		 * is now checked against the snapshot max size value given by the user
+		 * and if lower, an error is returned.
+		 */
+		session_max_size = max_stream_size * nb_streams;
+	}
+
+	DBG3("Snapshot max size is %" PRIu64 " for max stream size of %" PRIu64,
+			session_max_size, max_stream_size);
+
+	/*
+	 * If we use a temporary output, check right away if the max size fits else
+	 * for each output the max size will be checked.
+	 */
+	if (use_tmp_output &&
+			(tmp_output.max_size != 0 &&
+			tmp_output.max_size < session_max_size)) {
+		ret = LTTNG_ERR_MAX_SIZE_INVALID;
+		goto error;
+	}
 
 	if (session->kernel_session) {
 		struct ltt_kernel_session *ksess = session->kernel_session;
 
 		if (use_tmp_output) {
 			ret = record_kernel_snapshot(ksess, &tmp_output, session,
-					wait, nb_streams);
+					wait, max_stream_size);
 			if (ret != LTTNG_OK) {
 				goto error;
 			}
@@ -3031,6 +3118,13 @@ int cmd_snapshot_record(struct ltt_session *session,
 					tmp_output.max_size = output->max_size;
 				}
 
+				if (tmp_output.max_size != 0 &&
+						tmp_output.max_size < session_max_size) {
+					rcu_read_unlock();
+					ret = LTTNG_ERR_MAX_SIZE_INVALID;
+					goto error;
+				}
+
 				/* Use temporary name. */
 				if (*output->name != '\0') {
 					strncpy(tmp_output.name, output->name,
@@ -3040,7 +3134,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 				tmp_output.nb_snapshot = session->snapshot.nb_snapshot;
 
 				ret = record_kernel_snapshot(ksess, &tmp_output,
-						session, wait, nb_streams);
+						session, wait, max_stream_size);
 				if (ret != LTTNG_OK) {
 					rcu_read_unlock();
 					goto error;
@@ -3056,7 +3150,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 
 		if (use_tmp_output) {
 			ret = record_ust_snapshot(usess, &tmp_output, session,
-					wait, nb_streams);
+					wait, max_stream_size);
 			if (ret != LTTNG_OK) {
 				goto error;
 			}
@@ -3080,6 +3174,13 @@ int cmd_snapshot_record(struct ltt_session *session,
 					tmp_output.max_size = output->max_size;
 				}
 
+				if (tmp_output.max_size != 0 &&
+						tmp_output.max_size < session_max_size) {
+					rcu_read_unlock();
+					ret = LTTNG_ERR_MAX_SIZE_INVALID;
+					goto error;
+				}
+
 				/* Use temporary name. */
 				if (*output->name != '\0') {
 					strncpy(tmp_output.name, output->name,
@@ -3089,7 +3190,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 				tmp_output.nb_snapshot = session->snapshot.nb_snapshot;
 
 				ret = record_ust_snapshot(usess, &tmp_output, session,
-						wait, nb_streams);
+						wait, max_stream_size);
 				if (ret != LTTNG_OK) {
 					rcu_read_unlock();
 					goto error;

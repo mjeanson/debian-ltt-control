@@ -579,9 +579,6 @@ static int _lttng_stop_tracing(const char *session_name, int wait)
 		goto end;
 	}
 
-	_MSG("Waiting for data availability");
-	fflush(stdout);
-
 	/* Check for data availability */
 	do {
 		data_ret = lttng_data_pending(session_name);
@@ -597,12 +594,8 @@ static int _lttng_stop_tracing(const char *session_name, int wait)
 		 */
 		if (data_ret) {
 			usleep(DEFAULT_DATA_AVAILABILITY_WAIT_TIME);
-			_MSG(".");
-			fflush(stdout);
 		}
 	} while (data_ret != 0);
-
-	MSG("");
 
 end:
 error:
@@ -695,6 +688,180 @@ int lttng_enable_event_with_filter(struct lttng_handle *handle,
 }
 
 /*
+ * Depending on the event, return a newly allocated JUL filter expression or
+ * NULL if not applicable.
+ *
+ * An event with NO loglevel and the name is * will return NULL.
+ */
+static char *set_jul_filter(const char *filter, struct lttng_event *ev)
+{
+	int err;
+	char *jul_filter = NULL;
+
+	assert(ev);
+
+	/* Don't add filter for the '*' event. */
+	if (ev->name[0] != '*') {
+		if (filter) {
+			err = asprintf(&jul_filter, "%s && logger_name == \"%s\"", filter,
+					ev->name);
+		} else {
+			err = asprintf(&jul_filter, "logger_name == \"%s\"", ev->name);
+		}
+		if (err < 0) {
+			PERROR("asprintf");
+			goto error;
+		}
+	}
+
+	/* Add loglevel filtering if any for the JUL domain. */
+	if (ev->loglevel_type != LTTNG_EVENT_LOGLEVEL_ALL) {
+		char *op;
+
+		if (ev->loglevel_type == LTTNG_EVENT_LOGLEVEL_RANGE) {
+			op = ">=";
+		} else {
+			op = "==";
+		}
+
+		if (filter || jul_filter) {
+			char *new_filter;
+
+			err = asprintf(&new_filter, "%s && int_loglevel %s %d",
+					jul_filter ? jul_filter : filter, op,
+					ev->loglevel);
+			if (jul_filter) {
+				free(jul_filter);
+			}
+			jul_filter = new_filter;
+		} else {
+			err = asprintf(&jul_filter, "int_loglevel %s %d", op,
+					ev->loglevel);
+		}
+		if (err < 0) {
+			PERROR("asprintf");
+			goto error;
+		}
+	}
+
+	return jul_filter;
+error:
+	free(jul_filter);
+	return NULL;
+}
+
+/*
+ * Generate the filter bytecode from a give filter expression string. Put the
+ * newly allocated parser context in ctxp and populate the lsm object with the
+ * expression len.
+ *
+ * Return 0 on success else a LTTNG_ERR_* code and ctxp is untouched.
+ */
+static int generate_filter(char *filter_expression,
+		struct lttcomm_session_msg *lsm, struct filter_parser_ctx **ctxp)
+{
+	int ret;
+	struct filter_parser_ctx *ctx = NULL;
+	FILE *fmem = NULL;
+
+	assert(filter_expression);
+	assert(lsm);
+	assert(ctxp);
+
+	/*
+	 * Casting const to non-const, as the underlying function will use it in
+	 * read-only mode.
+	 */
+	fmem = lttng_fmemopen((void *) filter_expression,
+			strlen(filter_expression), "r");
+	if (!fmem) {
+		fprintf(stderr, "Error opening memory as stream\n");
+		ret = -LTTNG_ERR_FILTER_NOMEM;
+		goto error;
+	}
+	ctx = filter_parser_ctx_alloc(fmem);
+	if (!ctx) {
+		fprintf(stderr, "Error allocating parser\n");
+		ret = -LTTNG_ERR_FILTER_NOMEM;
+		goto filter_alloc_error;
+	}
+	ret = filter_parser_ctx_append_ast(ctx);
+	if (ret) {
+		fprintf(stderr, "Parse error\n");
+		ret = -LTTNG_ERR_FILTER_INVAL;
+		goto parse_error;
+	}
+	ret = filter_visitor_set_parent(ctx);
+	if (ret) {
+		fprintf(stderr, "Set parent error\n");
+		ret = -LTTNG_ERR_FILTER_INVAL;
+		goto parse_error;
+	}
+	if (print_xml) {
+		ret = filter_visitor_print_xml(ctx, stdout, 0);
+		if (ret) {
+			fflush(stdout);
+			fprintf(stderr, "XML print error\n");
+			ret = -LTTNG_ERR_FILTER_INVAL;
+			goto parse_error;
+		}
+	}
+
+	dbg_printf("Generating IR... ");
+	fflush(stdout);
+	ret = filter_visitor_ir_generate(ctx);
+	if (ret) {
+		fprintf(stderr, "Generate IR error\n");
+		ret = -LTTNG_ERR_FILTER_INVAL;
+		goto parse_error;
+	}
+	dbg_printf("done\n");
+
+	dbg_printf("Validating IR... ");
+	fflush(stdout);
+	ret = filter_visitor_ir_check_binary_op_nesting(ctx);
+	if (ret) {
+		ret = -LTTNG_ERR_FILTER_INVAL;
+		goto parse_error;
+	}
+	dbg_printf("done\n");
+
+	dbg_printf("Generating bytecode... ");
+	fflush(stdout);
+	ret = filter_visitor_bytecode_generate(ctx);
+	if (ret) {
+		fprintf(stderr, "Generate bytecode error\n");
+		ret = -LTTNG_ERR_FILTER_INVAL;
+		goto parse_error;
+	}
+	dbg_printf("done\n");
+	dbg_printf("Size of bytecode generated: %u bytes.\n",
+			bytecode_get_len(&ctx->bytecode->b));
+
+	lsm->u.enable.bytecode_len = sizeof(ctx->bytecode->b)
+		+ bytecode_get_len(&ctx->bytecode->b);
+	lsm->u.enable.expression_len = strlen(filter_expression) + 1;
+
+	/* No need to keep the memory stream. */
+	if (fclose(fmem) != 0) {
+		perror("fclose");
+	}
+
+	*ctxp = ctx;
+	return 0;
+
+parse_error:
+	filter_ir_free(ctx);
+	filter_parser_ctx_free(ctx);
+filter_alloc_error:
+	if (fclose(fmem) != 0) {
+		perror("fclose");
+	}
+error:
+	return ret;
+}
+
+/*
  * Enable event(s) for a channel, possibly with exclusions and a filter.
  * If no event name is specified, all events are enabled.
  * If no channel name is specified, the default name is used.
@@ -704,17 +871,24 @@ int lttng_enable_event_with_filter(struct lttng_handle *handle,
  */
 int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 		struct lttng_event *ev, const char *channel_name,
-		const char *filter_expression,
+		const char *original_filter_expression,
 		int exclusion_count, char **exclusion_list)
 {
 	struct lttcomm_session_msg lsm;
 	char *varlen_data;
 	int ret = 0;
+	unsigned int free_filter_expression = 0;
 	struct filter_parser_ctx *ctx = NULL;
-	FILE *fmem = NULL;
+	/*
+	 * Cast as non-const since we may replace the filter expression
+	 * by a dynamically allocated string. Otherwise, the original
+	 * string is not modified.
+	 */
+	char *filter_expression = (char *) original_filter_expression;
 
 	if (handle == NULL || ev == NULL) {
-		return -LTTNG_ERR_INVALID;
+		ret = -LTTNG_ERR_INVALID;
+		goto error;
 	}
 
 	/* Empty filter string will always be rejected by the parser
@@ -722,7 +896,8 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 	 * lttng_fmemopen error for 0-byte allocation.
 	 */
 	if (filter_expression && filter_expression[0] == '\0') {
-		return -LTTNG_ERR_INVALID;
+		ret = -LTTNG_ERR_INVALID;
+		goto error;
 	}
 
 	memset(&lsm, 0, sizeof(lsm));
@@ -750,9 +925,14 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 	lsm.u.enable.exclusion_count = exclusion_count;
 	lsm.u.enable.bytecode_len = 0;
 
-	if (exclusion_count == 0 && filter_expression == NULL) {
-		ret = lttng_ctl_ask_sessiond(&lsm, NULL);
-		return ret;
+	/*
+	 * For the JUL domain, a filter is enforced except for the enable all
+	 * event. This is done to avoid having the event in all sessions thus
+	 * filtering by logger name.
+	 */
+	if (exclusion_count == 0 && filter_expression == NULL &&
+			handle->domain.type != LTTNG_DOMAIN_JUL) {
+		goto ask_sessiond;
 	}
 
 	/*
@@ -761,133 +941,90 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 	 */
 
 	/* Parse filter expression */
-	if (filter_expression != NULL) {
+	if (filter_expression != NULL || handle->domain.type == LTTNG_DOMAIN_JUL) {
+		if (handle->domain.type == LTTNG_DOMAIN_JUL) {
+			char *jul_filter;
 
-		/*
-		 * casting const to non-const, as the underlying function will
-		 * use it in read-only mode.
-		 */
-		fmem = lttng_fmemopen((void *) filter_expression,
-				strlen(filter_expression), "r");
-		if (!fmem) {
-			fprintf(stderr, "Error opening memory as stream\n");
-			return -LTTNG_ERR_FILTER_NOMEM;
-		}
-		ctx = filter_parser_ctx_alloc(fmem);
-		if (!ctx) {
-			fprintf(stderr, "Error allocating parser\n");
-			ret = -LTTNG_ERR_FILTER_NOMEM;
-			goto filter_alloc_error;
-		}
-		ret = filter_parser_ctx_append_ast(ctx);
-		if (ret) {
-			fprintf(stderr, "Parse error\n");
-			ret = -LTTNG_ERR_FILTER_INVAL;
-			goto parse_error;
-		}
-		ret = filter_visitor_set_parent(ctx);
-		if (ret) {
-			fprintf(stderr, "Set parent error\n");
-			ret = -LTTNG_ERR_FILTER_INVAL;
-			goto parse_error;
-		}
-		if (print_xml) {
-			ret = filter_visitor_print_xml(ctx, stdout, 0);
-			if (ret) {
-				fflush(stdout);
-				fprintf(stderr, "XML print error\n");
-				ret = -LTTNG_ERR_FILTER_INVAL;
-				goto parse_error;
+			/* Setup JUL filter if needed. */
+			jul_filter = set_jul_filter(filter_expression, ev);
+			if (!jul_filter) {
+				if (!filter_expression) {
+					/* No JUL and no filter, just skip everything below. */
+					goto ask_sessiond;
+				}
+			} else {
+				/*
+				 * With a JUL filter, the original filter has been added to it
+				 * thus replace the filter expression.
+				 */
+				filter_expression = jul_filter;
+				free_filter_expression = 1;
 			}
 		}
 
-		dbg_printf("Generating IR... ");
-		fflush(stdout);
-		ret = filter_visitor_ir_generate(ctx);
+		ret = generate_filter(filter_expression, &lsm, &ctx);
 		if (ret) {
-			fprintf(stderr, "Generate IR error\n");
-			ret = -LTTNG_ERR_FILTER_INVAL;
-			goto parse_error;
+			goto filter_error;
 		}
-		dbg_printf("done\n");
-
-		dbg_printf("Validating IR... ");
-		fflush(stdout);
-		ret = filter_visitor_ir_check_binary_op_nesting(ctx);
-		if (ret) {
-			ret = -LTTNG_ERR_FILTER_INVAL;
-			goto parse_error;
-		}
-		dbg_printf("done\n");
-
-		dbg_printf("Generating bytecode... ");
-		fflush(stdout);
-		ret = filter_visitor_bytecode_generate(ctx);
-		if (ret) {
-			fprintf(stderr, "Generate bytecode error\n");
-			ret = -LTTNG_ERR_FILTER_INVAL;
-			goto parse_error;
-		}
-		dbg_printf("done\n");
-		dbg_printf("Size of bytecode generated: %u bytes.\n",
-			bytecode_get_len(&ctx->bytecode->b));
-
-		lsm.u.enable.bytecode_len = sizeof(ctx->bytecode->b)
-				+ bytecode_get_len(&ctx->bytecode->b);
 	}
 
-	/* Allocate variable length data */
-	if (lsm.u.enable.exclusion_count != 0) {
-		varlen_data = zmalloc(lsm.u.enable.bytecode_len
-				+ LTTNG_SYMBOL_NAME_LEN * exclusion_count);
-		if (!varlen_data) {
-			ret = -LTTNG_ERR_EXCLUSION_NOMEM;
-			goto varlen_alloc_error;
-		}
-		/* Put exclusion names first in the data */
-		while (exclusion_count--) {
-			strncpy(varlen_data + LTTNG_SYMBOL_NAME_LEN * exclusion_count,
-					*(exclusion_list + exclusion_count),
-					LTTNG_SYMBOL_NAME_LEN);
-		}
-		/* Add filter bytecode next */
-		if (lsm.u.enable.bytecode_len != 0) {
-			memcpy(varlen_data + LTTNG_SYMBOL_NAME_LEN * lsm.u.enable.exclusion_count,
-					&ctx->bytecode->b,
-					lsm.u.enable.bytecode_len);
-		}
-	} else {
-		/* no exclusions - use the already allocated filter bytecode */
-		varlen_data = (char *)(&ctx->bytecode->b);
+	varlen_data = zmalloc(lsm.u.enable.bytecode_len
+			+ lsm.u.enable.expression_len
+			+ LTTNG_SYMBOL_NAME_LEN * exclusion_count);
+	if (!varlen_data) {
+		ret = -LTTNG_ERR_EXCLUSION_NOMEM;
+		goto mem_error;
+	}
+
+	/* Put exclusion names first in the data */
+	while (exclusion_count--) {
+		strncpy(varlen_data + LTTNG_SYMBOL_NAME_LEN * exclusion_count,
+			*(exclusion_list + exclusion_count), LTTNG_SYMBOL_NAME_LEN);
+	}
+	/* Add filter expression next */
+	if (lsm.u.enable.expression_len != 0) {
+		memcpy(varlen_data
+			+ LTTNG_SYMBOL_NAME_LEN * lsm.u.enable.exclusion_count,
+			filter_expression,
+			lsm.u.enable.expression_len);
+	}
+	/* Add filter bytecode next */
+	if (ctx && lsm.u.enable.bytecode_len != 0) {
+		memcpy(varlen_data
+			+ LTTNG_SYMBOL_NAME_LEN * lsm.u.enable.exclusion_count
+			+ lsm.u.enable.expression_len,
+			&ctx->bytecode->b,
+			lsm.u.enable.bytecode_len);
 	}
 
 	ret = lttng_ctl_ask_sessiond_varlen(&lsm, varlen_data,
 			(LTTNG_SYMBOL_NAME_LEN * lsm.u.enable.exclusion_count) +
-			lsm.u.enable.bytecode_len, NULL);
+			lsm.u.enable.bytecode_len + lsm.u.enable.expression_len, NULL);
+	free(varlen_data);
 
-	if (lsm.u.enable.exclusion_count != 0) {
-		free(varlen_data);
-	}
-
-varlen_alloc_error:
-	if (filter_expression) {
+mem_error:
+	if (filter_expression && ctx) {
 		filter_bytecode_free(ctx);
 		filter_ir_free(ctx);
 		filter_parser_ctx_free(ctx);
-		if (fclose(fmem) != 0) {
-			perror("fclose");
-		}
 	}
+filter_error:
+	if (free_filter_expression) {
+		/*
+		 * The filter expression has been replaced and must be freed as it is
+		 * not the original filter expression received as a parameter.
+		 */
+		free(filter_expression);
+	}
+error:
+	/*
+	 * Return directly to the caller and don't ask the sessiond since something
+	 * went wrong in the parsing of data above.
+	 */
 	return ret;
 
-parse_error:
-	filter_bytecode_free(ctx);
-	filter_ir_free(ctx);
-	filter_parser_ctx_free(ctx);
-filter_alloc_error:
-	if (fclose(fmem) != 0) {
-		perror("fclose");
-	}
+ask_sessiond:
+	ret = lttng_ctl_ask_sessiond(&lsm, NULL);
 	return ret;
 }
 

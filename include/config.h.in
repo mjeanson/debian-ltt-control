@@ -15,6 +15,12 @@
 /* Search for consumerd 64-bit libraries in this location. */
 #undef CONFIG_CONSUMERD64_LIBDIR
 
+/* LTTng system configuration directory. */
+#undef CONFIG_LTTNG_SYSTEM_CONFIGDIR
+
+/* LTTng system data directory. */
+#undef CONFIG_LTTNG_SYSTEM_DATADIR
+
 /* LTTng system runtime directory */
 #undef CONFIG_LTTNG_SYSTEM_RUNDIR
 

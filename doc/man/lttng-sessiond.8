@@ -81,6 +81,11 @@ No kernel tracer support
 .BR "    --jul-tcp-port"
 JUL application registration TCP port (default: 5345)
 .TP
+.BR "    --kmod-probes=probe1, probe2, ..."
+Specify the kernel modules containing LTTng probes to load by the session daemon.
+Only the component name of the probe needs to be specified, e.g. to load the
+lttng-probe-irq and lttng-probe-sched use: --kmod-probes="irq, sched".
+.TP
 .BR "-c, --client-sock=PATH"
 Specify path for the client unix socket
 .TP
@@ -116,6 +121,24 @@ Specify path for the 64-bit UST consumer daemon binary
 .TP
 .BR "    --consumerd64-libdir=PATH
 Specify path for the 64-bit UST consumer daemon libraries
+.TP
+.BR "-l, --load PATH
+Specify path from which to automatically load session configuration(s).
+
+.SH "LOADING SESSIONS"
+
+.PP
+By default, the session daemon tries to load session configuration(s) located
+in the user default directory \fB~/.lttng/sessions/auto/\fP and in the system
+wide one in \fB/etc/lttng/sessions/auto/\fP. Note that the directory containing
+the session's configuration and lttng-sessiond MUST have the same UID for them
+to be automatically loaded.
+
+Specifiying a path with \-l, \-\-load PATH overrides the default directory and
+UID check. The lttng-sessiond will simply check if it's accessible and try to
+load every session file in it.
+.PP
+
 .SH "ENVIRONMENT VARIABLES"
 
 .PP
@@ -148,6 +171,10 @@ value is 5 seconds.
 Control timeout of socket connection, receive and send. Takes an integer
 parameter: the timeout value, in milliseconds. A value of 0 or -1 uses
 the timeout of the operating system (this is the default).
+.IP "LTTNG_SESSION_CONFIG_XSD_PATH"
+Specify the path that contains the XML session configuration schema (xsd).
+.IP "LTTNG_KMOD_PROBES"
+Specify the kernel modules probes that should be loaded by the session daemon.
 .SH "SEE ALSO"
 
 .PP

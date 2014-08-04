@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2012 - Julien Desfossez <jdesfossez@efficios.com>
  *                      David Goulet <dgoulet@efficios.com>
+ *               2013 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -43,6 +44,7 @@
 #include <common/common.h>
 #include <common/compat/poll.h>
 #include <common/compat/socket.h>
+#include <common/compat/endian.h>
 #include <common/defaults.h>
 #include <common/daemonize.h>
 #include <common/futex.h>
@@ -51,6 +53,7 @@
 #include <common/sessiond-comm/relayd.h>
 #include <common/uri.h>
 #include <common/utils.h>
+#include <common/config/config.h>
 
 #include "cmd.h"
 #include "ctf-trace.h"
@@ -85,6 +88,9 @@ static struct lttng_uri *live_uri;
 const char *progname;
 
 const char *tracing_group_name = DEFAULT_TRACING_GROUP;
+static int tracing_group_name_override;
+
+const char * const config_section_name = "relayd";
 
 /*
  * Quit pipe for all threads. This permits a single cancellation point
@@ -136,6 +142,22 @@ struct lttng_ht *indexes_ht;
 /* Relayd health monitoring */
 struct health_app *health_relayd;
 
+static struct option long_options[] = {
+	{ "control-port", 1, 0, 'C', },
+	{ "data-port", 1, 0, 'D', },
+	{ "live-port", 1, 0, 'L', },
+	{ "daemonize", 0, 0, 'd', },
+	{ "background", 0, 0, 'b', },
+	{ "group", 1, 0, 'g', },
+	{ "help", 0, 0, 'h', },
+	{ "output", 1, 0, 'o', },
+	{ "verbose", 0, 0, 'v', },
+	{ "config", 1, 0, 'f' },
+	{ NULL, 0, 0, 0, },
+};
+
+static const char *config_ignore_options[] = { "help", "config" };
+
 /*
  * usage function on stderr
  */
@@ -152,99 +174,212 @@ void usage(void)
 	fprintf(stderr, "  -o, --output PATH         Output path for traces. Must use an absolute path.\n");
 	fprintf(stderr, "  -v, --verbose             Verbose mode. Activate DBG() macro.\n");
 	fprintf(stderr, "  -g, --group NAME          Specify the tracing group name. (default: tracing)\n");
+	fprintf(stderr, "  -f  --config              Load daemon configuration file\n");
+}
+
+/*
+ * Take an option from the getopt output and set it in the right variable to be
+ * used later.
+ *
+ * Return 0 on success else a negative value.
+ */
+static
+int set_option(int opt, const char *arg, const char *optname)
+{
+	int ret;
+
+	switch (opt) {
+	case 0:
+		fprintf(stderr, "option %s", optname);
+		if (arg) {
+			fprintf(stderr, " with arg %s\n", arg);
+		}
+		break;
+	case 'C':
+		ret = uri_parse(arg, &control_uri);
+		if (ret < 0) {
+			ERR("Invalid control URI specified");
+			goto end;
+		}
+		if (control_uri->port == 0) {
+			control_uri->port = DEFAULT_NETWORK_CONTROL_PORT;
+		}
+		break;
+	case 'D':
+		ret = uri_parse(arg, &data_uri);
+		if (ret < 0) {
+			ERR("Invalid data URI specified");
+			goto end;
+		}
+		if (data_uri->port == 0) {
+			data_uri->port = DEFAULT_NETWORK_DATA_PORT;
+		}
+		break;
+	case 'L':
+		ret = uri_parse(arg, &live_uri);
+		if (ret < 0) {
+			ERR("Invalid live URI specified");
+			goto end;
+		}
+		if (live_uri->port == 0) {
+			live_uri->port = DEFAULT_NETWORK_VIEWER_PORT;
+		}
+		break;
+	case 'd':
+		opt_daemon = 1;
+		break;
+	case 'b':
+		opt_background = 1;
+		break;
+	case 'g':
+		tracing_group_name = strdup(arg);
+		tracing_group_name_override = 1;
+		break;
+	case 'h':
+		usage();
+		exit(EXIT_FAILURE);
+	case 'o':
+		ret = asprintf(&opt_output_path, "%s", arg);
+		if (ret < 0) {
+			ret = -errno;
+			PERROR("asprintf opt_output_path");
+			goto end;
+		}
+		break;
+	case 'v':
+		/* Verbose level can increase using multiple -v */
+		if (arg) {
+			lttng_opt_verbose = config_parse_value(arg);
+		} else {
+			/* Only 3 level of verbosity (-vvv). */
+			if (lttng_opt_verbose < 3) {
+				lttng_opt_verbose += 1;
+			}
+		}
+		break;
+	default:
+		/* Unknown option or other error.
+		 * Error is printed by getopt, just return */
+		ret = -1;
+		goto end;
+	}
+
+	/* All good. */
+	ret = 0;
+
+end:
+	return ret;
+}
+
+/*
+ * config_entry_handler_cb used to handle options read from a config file.
+ * See config_entry_handler_cb comment in common/config/config.h for the
+ * return value conventions.
+ */
+static
+int config_entry_handler(const struct config_entry *entry, void *unused)
+{
+	int ret = 0, i;
+
+	if (!entry || !entry->name || !entry->value) {
+		ret = -EINVAL;
+		goto end;
+	}
+
+	/* Check if the option is to be ignored */
+	for (i = 0; i < sizeof(config_ignore_options) / sizeof(char *); i++) {
+		if (!strcmp(entry->name, config_ignore_options[i])) {
+			goto end;
+		}
+	}
+
+	for (i = 0; i < (sizeof(long_options) / sizeof(struct option)) - 1; i++) {
+		/* Ignore if entry name is not fully matched. */
+		if (strcmp(entry->name, long_options[i].name)) {
+			continue;
+		}
+
+		/*
+		 * If the option takes no argument on the command line, we have to
+		 * check if the value is "true". We support non-zero numeric values,
+		 * true, on and yes.
+		 */
+		if (!long_options[i].has_arg) {
+			ret = config_parse_value(entry->value);
+			if (ret <= 0) {
+				if (ret) {
+					WARN("Invalid configuration value \"%s\" for option %s",
+							entry->value, entry->name);
+				}
+				/* False, skip boolean config option. */
+				goto end;
+			}
+		}
+
+		ret = set_option(long_options[i].val, entry->value, entry->name);
+		goto end;
+	}
+
+	WARN("Unrecognized option \"%s\" in daemon configuration file.",
+			entry->name);
+
+end:
+	return ret;
 }
 
 static
-int parse_args(int argc, char **argv)
+int set_options(int argc, char **argv)
 {
-	int c;
-	int ret = 0;
-	char *default_address;
+	int c, ret = 0, option_index = 0;
+	int orig_optopt = optopt, orig_optind = optind;
+	char *default_address, *optstring;
+	const char *config_path = NULL;
 
-	static struct option long_options[] = {
-		{ "control-port", 1, 0, 'C', },
-		{ "data-port", 1, 0, 'D', },
-		{ "daemonize", 0, 0, 'd', },
-		{ "group", 1, 0, 'g', },
-		{ "help", 0, 0, 'h', },
-		{ "output", 1, 0, 'o', },
-		{ "verbose", 0, 0, 'v', },
-		{ "background", 0, 0, 'b' },
-		{ NULL, 0, 0, 0, },
-	};
+	optstring = utils_generate_optstring(long_options,
+			sizeof(long_options) / sizeof(struct option));
+	if (!optstring) {
+		ret = -ENOMEM;
+		goto exit;
+	}
 
+	/* Check for the --config option */
+
+	while ((c = getopt_long(argc, argv, optstring, long_options,
+					&option_index)) != -1) {
+		if (c == '?') {
+			ret = -EINVAL;
+			goto exit;
+		} else if (c != 'f') {
+			continue;
+		}
+
+		config_path = utils_expand_path(optarg);
+		if (!config_path) {
+			ERR("Failed to resolve path: %s", optarg);
+		}
+	}
+
+	ret = config_get_section_entries(config_path, config_section_name,
+			config_entry_handler, NULL);
+	if (ret) {
+		if (ret > 0) {
+			ERR("Invalid configuration option at line %i", ret);
+			ret = -1;
+		}
+		goto exit;
+	}
+
+	/* Reset getopt's global state */
+	optopt = orig_optopt;
+	optind = orig_optind;
 	while (1) {
-		int option_index = 0;
-		c = getopt_long(argc, argv, "dhv" "C:D:L:o:g:b",
-				long_options, &option_index);
+		c = getopt_long(argc, argv, optstring, long_options, &option_index);
 		if (c == -1) {
 			break;
 		}
 
-		switch (c) {
-		case 0:
-			fprintf(stderr, "option %s", long_options[option_index].name);
-			if (optarg) {
-				fprintf(stderr, " with arg %s\n", optarg);
-			}
-			break;
-		case 'C':
-			ret = uri_parse(optarg, &control_uri);
-			if (ret < 0) {
-				ERR("Invalid control URI specified");
-				goto exit;
-			}
-			if (control_uri->port == 0) {
-				control_uri->port = DEFAULT_NETWORK_CONTROL_PORT;
-			}
-			break;
-		case 'D':
-			ret = uri_parse(optarg, &data_uri);
-			if (ret < 0) {
-				ERR("Invalid data URI specified");
-				goto exit;
-			}
-			if (data_uri->port == 0) {
-				data_uri->port = DEFAULT_NETWORK_DATA_PORT;
-			}
-			break;
-		case 'L':
-			ret = uri_parse(optarg, &live_uri);
-			if (ret < 0) {
-				ERR("Invalid live URI specified");
-				goto exit;
-			}
-			if (live_uri->port == 0) {
-				live_uri->port = DEFAULT_NETWORK_VIEWER_PORT;
-			}
-			break;
-		case 'd':
-			opt_daemon = 1;
-			break;
-		case 'b':
-			opt_background = 1;
-			break;
-		case 'g':
-			tracing_group_name = optarg;
-			break;
-		case 'h':
-			usage();
-			exit(EXIT_FAILURE);
-		case 'o':
-			ret = asprintf(&opt_output_path, "%s", optarg);
-			if (ret < 0) {
-				PERROR("asprintf opt_output_path");
-				goto exit;
-			}
-			break;
-		case 'v':
-			/* Verbose level can increase using multiple -v */
-			lttng_opt_verbose += 1;
-			break;
-		default:
-			/* Unknown option or other error.
-			 * Error is printed by getopt, just return */
-			ret = -1;
+		ret = set_option(c, optarg, long_options[option_index].name);
+		if (ret < 0) {
 			goto exit;
 		}
 	}
@@ -300,6 +435,7 @@ int parse_args(int argc, char **argv)
 	}
 
 exit:
+	free(optstring);
 	return ret;
 }
 
@@ -320,6 +456,10 @@ void cleanup(void)
 	uri_free(control_uri);
 	uri_free(data_uri);
 	/* Live URI is freed in the live thread. */
+
+	if (tracing_group_name_override) {
+		free((void *) tracing_group_name);
+	}
 }
 
 /*
@@ -1065,6 +1205,7 @@ int relay_add_stream(struct lttcomm_relayd_hdr *recv_hdr,
 	stream->session_id = session->id;
 	stream->index_fd = -1;
 	stream->read_index_fd = -1;
+	stream->ctf_stream_id = -1ULL;
 	lttng_ht_node_init_u64(&stream->node, stream->stream_handle);
 	pthread_mutex_init(&stream->lock, NULL);
 
@@ -1823,6 +1964,9 @@ int relay_recv_index(struct lttcomm_relayd_hdr *recv_hdr,
 	}
 
 	copy_index_control_data(index, &index_info);
+	if (stream->ctf_stream_id == -1ULL) {
+		stream->ctf_stream_id = be64toh(index_info.stream_id);
+	}
 
 	if (index_created) {
 		/*
@@ -2552,7 +2696,7 @@ int main(int argc, char **argv)
 
 	/* Parse arguments */
 	progname = argv[0];
-	if ((ret = parse_args(argc, argv)) < 0) {
+	if ((ret = set_options(argc, argv)) < 0) {
 		goto exit;
 	}
 
@@ -2605,8 +2749,7 @@ int main(int argc, char **argv)
 
 	/* Check if daemon is UID = 0 */
 	if (relayd_uid == 0) {
-		if (control_uri->port < 1024 || data_uri->port < 1024 ||
-				live_uri->port < 1024) {
+		if (control_uri->port < 1024 || data_uri->port < 1024 || live_uri->port < 1024) {
 			ERR("Need to be root to use ports < 1024");
 			ret = -1;
 			goto exit;

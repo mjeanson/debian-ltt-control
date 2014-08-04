@@ -84,9 +84,11 @@ subdir = src/lib/lttng-ctl
 DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 	$(srcdir)/lttng-ctl.pc.in $(top_srcdir)/config/depcomp
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/config/ax_pkg_swig.m4 \
+am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
+	$(top_srcdir)/config/ax_pkg_swig.m4 \
 	$(top_srcdir)/config/config_feature.m4 \
 	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
+	$(top_srcdir)/config/libxml.m4 \
 	$(top_srcdir)/config/ltoptions.m4 \
 	$(top_srcdir)/config/ltsugar.m4 \
 	$(top_srcdir)/config/ltversion.m4 \
@@ -130,9 +132,10 @@ liblttng_ctl_la_DEPENDENCIES =  \
 	$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \
 	$(top_builddir)/src/common/libcommon.la \
 	$(top_builddir)/src/common/hashtable/libhashtable.la \
-	$(top_builddir)/src/lib/lttng-ctl/filter/libfilter.la
+	$(top_builddir)/src/lib/lttng-ctl/filter/libfilter.la \
+	$(top_builddir)/src/common/config/libconfig.la
 am_liblttng_ctl_la_OBJECTS = lttng-ctl.lo snapshot.lo \
-	lttng-ctl-health.lo
+	lttng-ctl-health.lo save.lo load.lo
 liblttng_ctl_la_OBJECTS = $(am_liblttng_ctl_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
@@ -253,6 +256,8 @@ BABELTRACE_BIN = @BABELTRACE_BIN@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
+CONFDIR = @CONFDIR@
+CONFIG_LTTNG_SYSTEM_DATADIR = @CONFIG_LTTNG_SYSTEM_DATADIR@
 CONSUMERD32_BIN = @CONSUMERD32_BIN@
 CONSUMERD32_LIBDIR = @CONSUMERD32_LIBDIR@
 CONSUMERD64_BIN = @CONSUMERD64_BIN@
@@ -329,6 +334,9 @@ STRIP = @STRIP@
 SWIG = @SWIG@
 SWIG_LIB = @SWIG_LIB@
 VERSION = @VERSION@
+XML2_CONFIG = @XML2_CONFIG@
+XML_CPPFLAGS = @XML_CPPFLAGS@
+XML_LIBS = @XML_LIBS@
 YACC = @YACC@
 YFLAGS = @YFLAGS@
 abs_builddir = @abs_builddir@
@@ -398,13 +406,14 @@ AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src -I$(builddir)
 SUBDIRS = filter
 lib_LTLIBRARIES = liblttng-ctl.la
 liblttng_ctl_la_SOURCES = lttng-ctl.c snapshot.c lttng-ctl-helper.h \
-		lttng-ctl-health.c
+		lttng-ctl-health.c save.c load.c
 
 liblttng_ctl_la_LIBADD = \
 		$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \
 		$(top_builddir)/src/common/libcommon.la \
 		$(top_builddir)/src/common/hashtable/libhashtable.la \
-		$(top_builddir)/src/lib/lttng-ctl/filter/libfilter.la
+		$(top_builddir)/src/lib/lttng-ctl/filter/libfilter.la \
+		$(top_builddir)/src/common/config/libconfig.la
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = lttng-ctl.pc
@@ -489,8 +498,10 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/load.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/lttng-ctl-health.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/lttng-ctl.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/save.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/snapshot.Plo@am__quote@
 
 .c.o:

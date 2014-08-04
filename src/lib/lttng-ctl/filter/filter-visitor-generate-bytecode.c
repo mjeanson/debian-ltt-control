@@ -222,7 +222,7 @@ int visit_node_load(struct filter_parser_ctx *ctx, struct ir_op *node)
 		if (!insn)
 			return -ENOMEM;
 		insn->op = FILTER_OP_LOAD_S64;
-		*(int64_t *) insn->data = node->u.load.u.num;
+		memcpy(insn->data, &node->u.load.u.num, sizeof(int64_t));
 		ret = bytecode_push(&ctx->bytecode, insn, 1, insn_len);
 		free(insn);
 		return ret;
@@ -237,7 +237,7 @@ int visit_node_load(struct filter_parser_ctx *ctx, struct ir_op *node)
 		if (!insn)
 			return -ENOMEM;
 		insn->op = FILTER_OP_LOAD_DOUBLE;
-		*(double *) insn->data = node->u.load.u.flt;
+		memcpy(insn->data, &node->u.load.u.flt, sizeof(double));
 		ret = bytecode_push(&ctx->bytecode, insn, 1, insn_len);
 		free(insn);
 		return ret;
@@ -520,10 +520,19 @@ int recursive_visit_gen_bytecode(struct filter_parser_ctx *ctx,
 LTTNG_HIDDEN
 void filter_bytecode_free(struct filter_parser_ctx *ctx)
 {
-	free(ctx->bytecode);
-	ctx->bytecode = NULL;
-	free(ctx->bytecode_reloc);
-	ctx->bytecode_reloc = NULL;
+	if (!ctx) {
+		return;
+	}
+
+	if (ctx->bytecode) {
+		free(ctx->bytecode);
+		ctx->bytecode = NULL;
+	}
+
+	if (ctx->bytecode_reloc) {
+		free(ctx->bytecode_reloc);
+		ctx->bytecode_reloc = NULL;
+	}
 }
 
 LTTNG_HIDDEN

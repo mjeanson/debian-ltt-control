@@ -70,7 +70,6 @@ struct ltt_session {
 	 */
 	pthread_mutex_t lock;
 	struct cds_list_head list;
-	int enabled;	/* enabled/started flag */
 	uint64_t id;		/* session unique identifier */
 	/* UID/GID of the user owning the session */
 	uid_t uid;
@@ -88,8 +87,13 @@ struct ltt_session {
 	 */
 	struct consumer_output *consumer;
 
-	/* Did a start command occured before the kern/ust session creation? */
-	unsigned int started;
+	/* Did at least ONE start command has been triggered?. */
+	unsigned int has_been_started:1;
+	/*
+	 * Is the session active? Start trace command sets this to 1 and the stop
+	 * command reset it to 0.
+	 */
+	unsigned int active:1;
 
 	/* Snapshot representation in a session. */
 	struct snapshot snapshot;
@@ -104,7 +108,7 @@ struct ltt_session {
 	/*
 	 * Timer set when the session is created for live reading.
 	 */
-	int live_timer;
+	unsigned int live_timer;
 };
 
 /* Prototypes */
@@ -116,7 +120,7 @@ void session_lock_list(void);
 void session_unlock(struct ltt_session *session);
 void session_unlock_list(void);
 
-struct ltt_session *session_find_by_name(char *name);
+struct ltt_session *session_find_by_name(const char *name);
 struct ltt_session_list *session_get_list(void);
 
 int session_access_ok(struct ltt_session *session, uid_t uid, gid_t gid);
