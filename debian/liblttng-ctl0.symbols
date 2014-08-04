@@ -3,11 +3,105 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  cds_lfht_mm_chunk@Base 2.3.0
  cds_lfht_mm_mmap@Base 2.3.0
  cds_lfht_mm_order@Base 2.3.0
+ config_buffer_type_global@Base 2.5.0
+ config_buffer_type_per_pid@Base 2.5.0
+ config_buffer_type_per_uid@Base 2.5.0
+ config_domain_type_jul@Base 2.5.0
+ config_domain_type_kernel@Base 2.5.0
+ config_domain_type_ust@Base 2.5.0
+ config_element_address@Base 2.5.0
+ config_element_attributes@Base 2.5.0
+ config_element_buffer_type@Base 2.5.0
+ config_element_channel@Base 2.5.0
+ config_element_channels@Base 2.5.0
+ config_element_config@Base 2.5.0
+ config_element_consumer_output@Base 2.5.0
+ config_element_context@Base 2.5.0
+ config_element_contexts@Base 2.5.0
+ config_element_control_uri@Base 2.5.0
+ config_element_data_uri@Base 2.5.0
+ config_element_destination@Base 2.5.0
+ config_element_domain@Base 2.5.0
+ config_element_domains@Base 2.5.0
+ config_element_enabled@Base 2.5.0
+ config_element_event@Base 2.5.0
+ config_element_events@Base 2.5.0
+ config_element_exclusion@Base 2.5.0
+ config_element_exclusions@Base 2.5.0
+ config_element_filter@Base 2.5.0
+ config_element_function_attributes@Base 2.5.0
+ config_element_live_timer_interval@Base 2.5.0
+ config_element_loglevel@Base 2.5.0
+ config_element_loglevel_type@Base 2.5.0
+ config_element_max_size@Base 2.5.0
+ config_element_name@Base 2.5.0
+ config_element_net_output@Base 2.5.0
+ config_element_num_subbuf@Base 2.5.0
+ config_element_offset@Base 2.5.0
+ config_element_output@Base 2.5.0
+ config_element_output_type@Base 2.5.0
+ config_element_overwrite_mode@Base 2.5.0
+ config_element_path@Base 2.5.0
+ config_element_perf@Base 2.5.0
+ config_element_probe_attributes@Base 2.5.0
+ config_element_read_timer_interval@Base 2.5.0
+ config_element_session@Base 2.5.0
+ config_element_sessions@Base 2.5.0
+ config_element_snapshot_mode@Base 2.5.0
+ config_element_snapshot_outputs@Base 2.5.0
+ config_element_started@Base 2.5.0
+ config_element_subbuf_size@Base 2.5.0
+ config_element_switch_timer_interval@Base 2.5.0
+ config_element_symbol_name@Base 2.5.0
+ config_element_tracefile_count@Base 2.5.0
+ config_element_tracefile_size@Base 2.5.0
+ config_element_type@Base 2.5.0
+ config_event_context_hostname@Base 2.5.0
+ config_event_context_ip@Base 2.5.0
+ config_event_context_nice@Base 2.5.0
+ config_event_context_perf_thread_counter@Base 2.5.0
+ config_event_context_pid@Base 2.5.0
+ config_event_context_ppid@Base 2.5.0
+ config_event_context_prio@Base 2.5.0
+ config_event_context_procname@Base 2.5.0
+ config_event_context_pthread_id@Base 2.5.0
+ config_event_context_tid@Base 2.5.0
+ config_event_context_vpid@Base 2.5.0
+ config_event_context_vppid@Base 2.5.0
+ config_event_context_vtid@Base 2.5.0
+ config_event_type_all@Base 2.5.0
+ config_event_type_function@Base 2.5.0
+ config_event_type_function_entry@Base 2.5.0
+ config_event_type_kprobe@Base 2.5.0
+ config_event_type_kretprobe@Base 2.5.0
+ config_event_type_noop@Base 2.5.0
+ config_event_type_probe@Base 2.5.0
+ config_event_type_syscall@Base 2.5.0
+ config_event_type_tracepoint@Base 2.5.0
+ config_loglevel_type_all@Base 2.5.0
+ config_loglevel_type_range@Base 2.5.0
+ config_loglevel_type_single@Base 2.5.0
+ config_output_type_mmap@Base 2.5.0
+ config_output_type_splice@Base 2.5.0
+ config_overwrite_mode_discard@Base 2.5.0
+ config_overwrite_mode_overwrite@Base 2.5.0
+ config_str_false@Base 2.5.0
+ config_str_no@Base 2.5.0
+ config_str_off@Base 2.5.0
+ config_str_on@Base 2.5.0
+ config_str_true@Base 2.5.0
+ config_str_yes@Base 2.5.0
+ config_xml_encoding@Base 2.5.0
+ config_xml_encoding_bytes_per_char@Base 2.5.0
+ config_xml_false@Base 2.5.0
+ config_xml_indent_string@Base 2.5.0
+ config_xml_true@Base 2.5.0
  default_channel_subbuf_size@Base 2.3.0
  default_kernel_channel_subbuf_size@Base 2.3.0
  default_metadata_subbuf_size@Base 2.3.0
  default_ust_pid_channel_subbuf_size@Base 2.3.0
  default_ust_uid_channel_subbuf_size@Base 2.3.0
+ error_log_time@Base 2.5.0
  lttcomm_inet_tcp_timeout@Base 2.3.0
  lttng__cds_lfht_new@Base 2.3.0
  lttng_add_context@Base 2.3.0
@@ -91,6 +185,15 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_list_sessions@Base 2.3.0
  lttng_list_tracepoint_fields@Base 2.3.0
  lttng_list_tracepoints@Base 2.3.0
+ lttng_load_session@Base 2.5.0
+ lttng_load_session_attr_create@Base 2.5.0
+ lttng_load_session_attr_destroy@Base 2.5.0
+ lttng_load_session_attr_get_input_url@Base 2.5.0
+ lttng_load_session_attr_get_overwrite@Base 2.5.0
+ lttng_load_session_attr_get_session_name@Base 2.5.0
+ lttng_load_session_attr_set_input_url@Base 2.5.0
+ lttng_load_session_attr_set_overwrite@Base 2.5.0
+ lttng_load_session_attr_set_session_name@Base 2.5.0
  lttng_opt_quiet@Base 2.3.0
  lttng_opt_verbose@Base 2.3.0
  lttng_pipe_close@Base 2.3.0
@@ -102,6 +205,15 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_pipe_write_close@Base 2.3.0
  lttng_read@Base 2.4.0~rc4
  lttng_register_consumer@Base 2.3.0
+ lttng_save_session@Base 2.5.0
+ lttng_save_session_attr_create@Base 2.5.0
+ lttng_save_session_attr_destroy@Base 2.5.0
+ lttng_save_session_attr_get_output_url@Base 2.5.0
+ lttng_save_session_attr_get_overwrite@Base 2.5.0
+ lttng_save_session_attr_get_session_name@Base 2.5.0
+ lttng_save_session_attr_set_output_url@Base 2.5.0
+ lttng_save_session_attr_set_overwrite@Base 2.5.0
+ lttng_save_session_attr_set_session_name@Base 2.5.0
  lttng_session_daemon_alive@Base 2.3.0
  lttng_set_consumer_url@Base 2.3.0
  lttng_set_tracing_group@Base 2.3.0
