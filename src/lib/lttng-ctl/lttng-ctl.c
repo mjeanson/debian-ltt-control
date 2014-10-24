@@ -703,7 +703,7 @@ static char *set_jul_filter(const char *filter, struct lttng_event *ev)
 	/* Don't add filter for the '*' event. */
 	if (ev->name[0] != '*') {
 		if (filter) {
-			err = asprintf(&jul_filter, "%s && logger_name == \"%s\"", filter,
+			err = asprintf(&jul_filter, "(%s) && (logger_name == \"%s\")", filter,
 					ev->name);
 		} else {
 			err = asprintf(&jul_filter, "logger_name == \"%s\"", ev->name);
@@ -727,7 +727,7 @@ static char *set_jul_filter(const char *filter, struct lttng_event *ev)
 		if (filter || jul_filter) {
 			char *new_filter;
 
-			err = asprintf(&new_filter, "%s && int_loglevel %s %d",
+			err = asprintf(&new_filter, "(%s) && (int_loglevel %s %d)",
 					jul_filter ? jul_filter : filter, op,
 					ev->loglevel);
 			if (jul_filter) {
@@ -1056,7 +1056,7 @@ int lttng_disable_event(struct lttng_handle *handle, const char *name,
 
 	lttng_ctl_copy_lttng_domain(&lsm.domain, &handle->domain);
 
-	if (name != NULL) {
+	if (name != NULL && *name != '*') {
 		lttng_ctl_copy_string(lsm.u.disable.name, name,
 				sizeof(lsm.u.disable.name));
 		lsm.cmd_type = LTTNG_DISABLE_EVENT;
