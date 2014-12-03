@@ -1,3 +1,9 @@
+ltt-control (2.5.2-1) unstable; urgency=medium
+
+  * [8304e3f] New upstream version 2.5.2
+
+ -- Jon Bernard <jbernard@debian.org>  Wed, 03 Dec 2014 01:32:33 +0000
+
 ltt-control (2.5.1-1) unstable; urgency=medium
 
   * [8385f65] New upstream version 2.5.1
