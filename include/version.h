@@ -20,7 +20,7 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#define GIT_VERSION "heads/stable-2.5-0-g56eb774"
+#define GIT_VERSION "heads/stable-2.5-0-g69049c5"
 
 /*
  * Define the macro containing the FULL version

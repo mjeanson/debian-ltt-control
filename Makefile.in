@@ -84,8 +84,7 @@ DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 	$(top_srcdir)/configure $(am__configure_deps) $(dist_doc_DATA) \
 	$(dist_noinst_DATA) ChangeLog INSTALL README TODO \
 	config/compile config/config.guess config/config.sub \
-	config/depcomp config/install-sh config/missing \
-	config/py-compile config/ylwrap config/ltmain.sh \
+	config/install-sh config/missing config/ltmain.sh \
 	$(top_srcdir)/config/compile $(top_srcdir)/config/config.guess \
 	$(top_srcdir)/config/config.sub \
 	$(top_srcdir)/config/install-sh $(top_srcdir)/config/ltmain.sh \
@@ -401,7 +400,8 @@ SUBDIRS = include \
 		  doc
 
 dist_doc_DATA = LICENSE \
-                ChangeLog
+                ChangeLog \
+		README
 
 dist_noinst_DATA = CodingStyle
 EXTRA_DIST = extras/lttng-bash_completion gpl-2.0.txt lgpl-2.1.txt
