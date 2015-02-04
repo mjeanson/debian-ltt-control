@@ -1157,7 +1157,8 @@ end:
 }
 
 /*
- * Send a close metdata command to consumer using the given channel key.
+ * Send a close metadata command to consumer using the given channel key.
+ * Called with registry lock held.
  *
  * Return 0 on success else a negative value.
  */
@@ -1223,7 +1224,8 @@ end:
 }
 
 /*
- * Send metadata string to consumer. Socket lock MUST be acquired.
+ * Send metadata string to consumer.
+ * RCU read-side lock must be held to guarantee existence of socket.
  *
  * Return 0 on success else a negative value.
  */
@@ -1237,6 +1239,8 @@ int consumer_push_metadata(struct consumer_socket *socket,
 	assert(socket);
 
 	DBG2("Consumer push metadata to consumer socket %d", *socket->fd_ptr);
+
+	pthread_mutex_lock(socket->lock);
 
 	memset(&msg, 0, sizeof(msg));
 	msg.cmd_type = LTTNG_CONSUMER_PUSH_METADATA;
@@ -1265,6 +1269,7 @@ int consumer_push_metadata(struct consumer_socket *socket,
 	}
 
 end:
+	pthread_mutex_unlock(socket->lock);
 	health_code_update();
 	return ret;
 }
@@ -1276,7 +1281,7 @@ end:
  */
 int consumer_snapshot_channel(struct consumer_socket *socket, uint64_t key,
 		struct snapshot_output *output, int metadata, uid_t uid, gid_t gid,
-		const char *session_path, int wait, int max_stream_size)
+		const char *session_path, int wait, uint64_t nb_packets_per_stream)
 {
 	int ret;
 	struct lttcomm_consumer_msg msg;
@@ -1290,7 +1295,7 @@ int consumer_snapshot_channel(struct consumer_socket *socket, uint64_t key,
 	memset(&msg, 0, sizeof(msg));
 	msg.cmd_type = LTTNG_CONSUMER_SNAPSHOT_CHANNEL;
 	msg.u.snapshot_channel.key = key;
-	msg.u.snapshot_channel.max_stream_size = max_stream_size;
+	msg.u.snapshot_channel.nb_packets_per_stream = nb_packets_per_stream;
 	msg.u.snapshot_channel.metadata = metadata;
 
 	if (output->consumer->type == CONSUMER_DST_NET) {

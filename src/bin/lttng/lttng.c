@@ -55,6 +55,7 @@ static struct option long_options[] = {
 	{"group",            1, NULL, 'g'},
 	{"verbose",          0, NULL, 'v'},
 	{"quiet",            0, NULL, 'q'},
+	{"mi",               1, NULL, 'm'},
 	{"no-sessiond",      0, NULL, 'n'},
 	{"sessiond-path",    1, NULL, OPT_SESSION_PATH},
 	{"relayd-path",      1, NULL, OPT_RELAYD_PATH},
@@ -82,14 +83,13 @@ static struct cmd_struct commands[] =  {
 	{ "snapshot", cmd_snapshot},
 	{ "save", cmd_save},
 	{ "load", cmd_load},
-	{ "enable-consumer", cmd_enable_consumer}, /* OBSOLETE */
-	{ "disable-consumer", cmd_disable_consumer}, /* OBSOLETE */
 	{ NULL, NULL}	/* Array closure */
 };
 
 static void usage(FILE *ofp)
 {
-	fprintf(ofp, "LTTng Trace Control " FULL_VERSION" - " VERSION_NAME"\n\n");
+	fprintf(ofp, "LTTng Trace Control " VERSION " - " VERSION_NAME "%s\n\n",
+		GIT_VERSION[0] == '\0' ? "" : " - " GIT_VERSION);
 	fprintf(ofp, "usage: lttng [OPTIONS] <COMMAND> [<ARGS>]\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Options:\n");
@@ -99,6 +99,8 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "      --list-commands        Simple listing of lttng commands\n");
 	fprintf(ofp, "  -v, --verbose              Increase verbosity\n");
 	fprintf(ofp, "  -q, --quiet                Quiet mode\n");
+	fprintf(ofp, "  -m, --mi TYPE              Machine Interface mode.\n");
+	fprintf(ofp, "                                 Type: xml\n");
 	fprintf(ofp, "  -g, --group NAME           Unix tracing group name. (default: tracing)\n");
 	fprintf(ofp, "  -n, --no-sessiond          Don't spawn a session daemon\n");
 	fprintf(ofp, "      --sessiond-path PATH   Session daemon full path\n");
@@ -131,8 +133,28 @@ static void usage(FILE *ofp)
 
 static void version(FILE *ofp)
 {
-	fprintf(ofp, "%s (LTTng Trace Control) " FULL_VERSION" - " VERSION_NAME"\n",
-			progname);
+	fprintf(ofp, "%s (LTTng Trace Control) " VERSION" - " VERSION_NAME "%s\n",
+			progname,
+			GIT_VERSION[0] == '\0' ? "" : " - " GIT_VERSION);
+}
+
+/*
+ * Find the MI output type enum from a string. This function is for the support
+ * of machine interface output.
+ */
+static int mi_output_type(const char *output_type)
+{
+	int ret = 0;
+
+	if (!strncasecmp("xml", output_type, 3)) {
+		ret = LTTNG_MI_XML;
+	} else {
+		/* Invalid output format */
+		ERR("MI output format not supported");
+		ret = -LTTNG_ERR_MI_OUTPUT_TYPE;
+	}
+
+	return ret;
 }
 
 /*
@@ -420,13 +442,14 @@ static int check_args_no_sessiond(int argc, char **argv)
 static int parse_args(int argc, char **argv)
 {
 	int opt, ret;
+	char *user;
 
 	if (argc < 2) {
 		usage(stderr);
 		clean_exit(EXIT_FAILURE);
 	}
 
-	while ((opt = getopt_long(argc, argv, "+Vhnvqg:", long_options, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "+Vhnvqg:m:", long_options, NULL)) != -1) {
 		switch (opt) {
 		case 'V':
 			version(stdout);
@@ -445,6 +468,13 @@ static int parse_args(int argc, char **argv)
 		case 'q':
 			lttng_opt_quiet = 1;
 			break;
+		case 'm':
+			lttng_opt_mi = mi_output_type(optarg);
+			if (lttng_opt_mi < 0) {
+				ret = lttng_opt_mi;
+				goto error;
+			}
+			break;
 		case 'g':
 			lttng_set_tracing_group(optarg);
 			break;
@@ -453,9 +483,17 @@ static int parse_args(int argc, char **argv)
 			break;
 		case OPT_SESSION_PATH:
 			opt_sessiond_path = strdup(optarg);
+			if (!opt_sessiond_path) {
+				ret = -1;
+				goto error;
+			}
 			break;
 		case OPT_RELAYD_PATH:
 			opt_relayd_path = strdup(optarg);
+			if (!opt_relayd_path) {
+				ret = -1;
+				goto error;
+			}
 			break;
 		case OPT_DUMP_OPTIONS:
 			list_options(stdout);
@@ -490,6 +528,14 @@ static int parse_args(int argc, char **argv)
 		ret = 1;
 		goto error;
 	}
+
+	/* For Mathieu Desnoyers a.k.a. Dr. Tracing */
+	user = getenv("USER");
+	if (user != NULL && ((strncmp(progname, "drtrace", 7) == 0 ||
+					strncmp("compudj", user, 7) == 0))) {
+		MSG("%c[%d;%dmWelcome back Dr Tracing!%c[%dm\n", 27,1,33,27,0);
+	}
+	/* Thanks Mathieu */
 
 	/* 
 	 * Handle leftovers which is a first level command with the trailing
@@ -537,17 +583,8 @@ error:
 int main(int argc, char *argv[])
 {
 	int ret;
-	char *user;
 
 	progname = argv[0] ? argv[0] : "lttng";
-
-	/* For Mathieu Desnoyers a.k.a. Dr. Tracing */
-	user = getenv("USER");
-	if (user != NULL && ((strncmp(progname, "drtrace", 7) == 0 ||
-				strncmp("compudj", user, 7) == 0))) {
-		MSG("%c[%d;%dmWelcome back Dr Tracing!%c[%dm\n", 27,1,33,27,0);
-	}
-	/* Thanks Mathieu */
 
 	ret = set_signal_handler();
 	if (ret < 0) {

@@ -19,6 +19,9 @@
 #ifndef _LTT_KERNEL_IOCTL_H
 #define _LTT_KERNEL_IOCTL_H
 
+#define LTTNG_MODULES_ABI_MAJOR_VERSION		1
+#define LTTNG_MODULES_ABI_MINOR_VERSION		0
+
 /* Get a snapshot of the current ring buffer producer and consumer positions */
 #define RING_BUFFER_SNAPSHOT                _IO(0xF6, 0x00)
 /* Get the consumer position (iteration start) */
@@ -99,10 +102,13 @@
 #define LTTNG_KERNEL_SESSION			_IO(0xF6, 0x45)
 #define LTTNG_KERNEL_TRACER_VERSION		\
 	_IOR(0xF6, 0x46, struct lttng_kernel_tracer_version)
-#define LTTNG_KERNEL_TRACEPOINT_LIST		_IO(0xF6, 0x47)
+#define LTTNG_KERNEL_TRACEPOINT_LIST	_IO(0xF6, 0x47)
 #define LTTNG_KERNEL_WAIT_QUIESCENT		_IO(0xF6, 0x48)
 #define LTTNG_KERNEL_CALIBRATE			\
 	_IOWR(0xF6, 0x49, struct lttng_kernel_calibrate)
+#define LTTNG_KERNEL_SYSCALL_LIST		_IO(0xF6, 0x4A)
+#define LTTNG_KERNEL_TRACER_ABI_VERSION		\
+	_IOR(0xF6, 0x4B, struct lttng_kernel_tracer_abi_version)
 
 /* Session FD ioctl */
 #define LTTNG_KERNEL_METADATA			\
@@ -116,6 +122,8 @@
 #define LTTNG_KERNEL_STREAM			_IO(0xF6, 0x62)
 #define LTTNG_KERNEL_EVENT			\
 	_IOW(0xF6, 0x63, struct lttng_kernel_event)
+#define LTTNG_KERNEL_SYSCALL_MASK		\
+	_IOWR(0xF6, 0x64, struct lttng_kernel_syscall_mask)
 
 /* Event and Channel FD ioctl */
 #define LTTNG_KERNEL_CONTEXT			\

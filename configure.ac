@@ -1,4 +1,4 @@
-AC_INIT([lttng-tools],[2.5.2],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
+AC_INIT([lttng-tools],[2.6.0],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
 AC_CONFIG_AUX_DIR([config])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
@@ -19,8 +19,8 @@ AC_DEFINE_UNQUOTED([VERSION_MAJOR], $major_version, [LTTng-Tools major version n
 AC_DEFINE_UNQUOTED([VERSION_MINOR], $minor_version, [LTTng-Tools minor version number])
 AC_DEFINE_UNQUOTED([VERSION_PATCHLEVEL], $patchlevel_version, [LTTng-Tools patchlevel version number])
 
-version_name="Fumisterie"
-version_description="The Fumisterie is a beer whose style is at the confluence of English and German ales. On the palate, it is full-bodied, malty and slightly caramelized. The organic hemp seeds incorporated during the brewing gives it a unique and original taste. The hop flavour comes through delicately in the after taste."
+version_name="Gaia"
+version_description="From Benelux brewery in Montreal, the Gaia is a witbier with a cloudy light amber ale color. Aroma of coriander with floral hay notes is enchanting. Taste is also dominated by the very floral coriander note and some medium sweet malt notes."
 
 AC_DEFINE_UNQUOTED([VERSION_NAME], ["$version_name"], "")
 AC_DEFINE_UNQUOTED([VERSION_DESCRIPTION], ["$version_description"], "")
@@ -171,17 +171,17 @@ AM_CONDITIONAL([LTTNG_BUILD_WITH_LIBUUID], [test "x$have_libuuid" = "xyes"])
 AM_CONDITIONAL([LTTNG_BUILD_WITH_LIBC_UUID], [test "x$have_libc_uuid" = "xyes"])
 
 # URCU library version needed or newer
-liburcu_version=">= 0.7.2"
+liburcu_version=">= 0.8.0"
 
 # Check liburcu needed function calls
 AC_CHECK_DECL([cds_list_add], [],
 	[AC_MSG_ERROR([liburcu $liburcu_version or newer is needed])], [[#include <urcu/list.h>]]
 )
-AC_CHECK_DECL([cds_wfq_init], [],
-	[AC_MSG_ERROR([liburcu $liburcu_version or newer is needed])], [[#include <urcu/wfqueue.h>]]
+AC_CHECK_DECL([cds_wfcq_init], [],
+	[AC_MSG_ERROR([liburcu $liburcu_version or newer is needed])], [[#include <urcu/wfcqueue.h>]]
 )
-AC_CHECK_DECL([cds_wfq_dequeue_blocking], [],
-    [AC_MSG_ERROR([liburcu $liburcu_version or newer is needed])], [[#include <urcu/wfqueue.h>]]
+AC_CHECK_DECL([cds_wfcq_dequeue_blocking], [],
+    [AC_MSG_ERROR([liburcu $liburcu_version or newer is needed])], [[#include <urcu/wfcqueue.h>]]
 )
 AC_CHECK_DECL([futex_async], [],
 	[AC_MSG_ERROR([liburcu $liburcu_version or newer is needed])], [[#include <urcu/futex.h>]]
@@ -199,6 +199,32 @@ AC_CHECK_DECL([caa_likely], [],
 AC_CHECK_DECL([cmm_smp_mb__before_uatomic_or], [],
         [AC_MSG_ERROR([liburcu $liburcu_version or newer is needed])], [[#include <urcu.h>]]
 )
+
+# Check kmod library
+AC_ARG_WITH(kmod-prefix,
+  AS_HELP_STRING([--with-kmod-prefix=PATH],
+		[Specify the installation prefix of the kmod library.
+		Headers must be in PATH/include; libraries in PATH/lib.]),
+		[
+			CPPFLAGS="$CPPFLAGS -I${withval}/include"
+			LDFLAGS="$LDFLAGS -L${withval}/lib64 -L${withval}/lib"
+		])
+
+AC_ARG_ENABLE(kmod,
+	AS_HELP_STRING([--disable-kmod],[build without kmod support]),
+	kmod_support=zz$enableval, kmod_support=yes)
+
+AS_IF([test "x$kmod_support" = "xyes"], [
+	AC_CHECK_LIB([kmod], [kmod_module_probe_insert_module],
+		[
+			AC_DEFINE([HAVE_KMOD], [1], [has kmod support])
+			LIBS="$LIBS -lkmod"
+			kmod_found=yes
+		],
+		kmod_found=no
+	)
+])
+AM_CONDITIONAL([HAVE_KMOD], [test "x$kmod_found" = xyes])
 
 AC_ARG_WITH(lttng-ust-prefix,
   AS_HELP_STRING([--with-lttng-ust-prefix=PATH],
@@ -259,6 +285,15 @@ AC_CHECK_LIB([c], [open_memstream],
 ]
 )
 
+AC_ARG_ENABLE([git-version],
+              [AC_HELP_STRING([--disable-git-version],
+                              [Do not use the git version for the build])],
+              [have_git_version=$enableval], [have_git_version=yes]
+)
+
+AM_CONDITIONAL([LTTNG_TOOLS_BUILD_GIT_SOURCE],
+	[test "x${have_git_version}" = "xyes"])
+
 # For Python
 # SWIG version needed or newer:
 swig_version=2.0.0
@@ -308,7 +343,7 @@ AX_CONFIG_FEATURE(
 AM_CONDITIONAL([COMPAT_EPOLL], [ test "$enable_epoll" = "yes" ])
 
 # Set compile flags to java include files if given. This is only used to
-# compile JUL tests.
+# compile java agent tests.
 AC_ARG_WITH([java-jdk],
 	[AS_HELP_STRING([--with-java-jdk=DIR],[use the Java JDK in DIR. Ex : $JAVA_HOME.])],
 	[JAVA_JDK=$withval],
@@ -329,20 +364,44 @@ AS_IF([test $JAVA_JDK],[
 	)
 ])
 
-# Check for the UST JUL jar file in the system. Hardcoded path is added here
+# Check for the UST agent jar file in the system. Hardcoded path is added here
 # since we have *no* idea where this could be installed. Note that this is only
-# used for JUL testing.
-AC_MSG_CHECKING(Java JUL UST jar file)
-java_jul_jar_path="/usr/local/lib/lttng/java/liblttng-ust-jul.jar"
-if test -f $java_jul_jar_path; then
-	build_java_jul=yes
+# used for agent testing.
+AC_MSG_CHECKING(Java UST agent jar file)
+java_agent_jar_path="${prefix}/share/java/liblttng-ust-agent.jar"
+if test -f $java_agent_jar_path; then
+	build_java_agent=yes
 	AC_MSG_RESULT(found)
 else
-	build_java_jul=no
+	build_java_agent=no
 	AC_MSG_RESULT(not found)
 fi
-AM_CONDITIONAL([BUILD_JAVA_JUL], [test "x$build_java_jul" = "xyes"])
-AC_SUBST([java_jul_jar_path])
+AM_CONDITIONAL([BUILD_JAVA_AGENT], [test "x$build_java_agent" = "xyes"])
+AC_SUBST([java_agent_jar_path])
+
+# Check for log4j support on the system to know if we can build or not the
+# log4j tests.
+if test "x$build_java_agent" = "xyes"; then
+	AC_MSG_CHECKING(Java agent support for log4j)
+	AX_JAVA_OPTIONS
+	AX_PROG_JAR
+	AX_PROG_JAVA
+	AX_PROG_JAVAC
+
+	# By default, use a commonly used classpath on the system to ease things up
+	# for the Java testing in this directory.
+	LOG4J_CLASSPATH="$java_agent_jar_path:$CLASSPATH:.:/usr/share/java/*"
+	JAVAFLAGS="-cp $LOG4J_CLASSPATH"
+	JAVACFLAGS="$JAVAFLAGS"
+	AX_CHECK_CLASS(org.apache.log4j.Logger)
+
+	if test "x$ac_cv_class_org_apache_log4j_Logger" = "xno"; then
+		build_java_log4j_agent=no
+	else
+		build_java_log4j_agent=yes
+	fi
+fi
+AM_CONDITIONAL([BUILD_JAVA_LOG4J_AGENT], [test "x$build_java_log4j_agent" = "xyes"])
 
 AC_SYS_LARGEFILE
 AC_PROG_CC
@@ -420,6 +479,7 @@ AC_CONFIG_FILES([
 	tests/regression/tools/live/Makefile
 	tests/regression/tools/exclusion/Makefile
 	tests/regression/tools/save-load/Makefile
+	tests/regression/tools/mi/Makefile
 	tests/regression/ust/Makefile
 	tests/regression/ust/nprocesses/Makefile
 	tests/regression/ust/high-throughput/Makefile
@@ -436,6 +496,7 @@ AC_CONFIG_FILES([
 	tests/regression/ust/fork/Makefile
 	tests/regression/ust/libc-wrapper/Makefile
 	tests/regression/ust/java-jul/Makefile
+	tests/regression/ust/java-log4j/Makefile
 	tests/stress/Makefile
 	tests/unit/Makefile
 	tests/unit/ini_config/Makefile
@@ -472,6 +533,14 @@ done
 ]
 AS_ECHO_N("Target architecture: ")
 AS_ECHO($target_arch)
+
+# kmod enabled/disabled
+AS_ECHO_N("libkmod support: ")
+AS_IF([test "x$kmod_found" = "xyes"],[
+	AS_ECHO("Enabled")
+],[
+	AS_ECHO("Disabled")
+])
 
 # LTTng-UST enabled/disabled
 AS_ECHO_N("Lttng-UST support: ")

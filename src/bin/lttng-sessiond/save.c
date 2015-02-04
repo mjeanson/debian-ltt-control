@@ -31,6 +31,7 @@
 
 #include "save.h"
 #include "session.h"
+#include "syscall.h"
 #include "trace-ust.h"
 
 static
@@ -259,8 +260,10 @@ const char *get_ust_context_type_string(
 		context_type_string = config_event_context_pthread_id;
 		break;
 	case LTTNG_UST_CONTEXT_PERF_THREAD_COUNTER:
-		context_type_string = config_event_context_perf_thread_counter;
-		break;
+		/*
+		 * Error, should not be stored in the XML, perf contexts
+		 * are stored as a node of type event_perf_context_type.
+		 */
 	default:
 		context_type_string = NULL;
 		break;
@@ -370,6 +373,7 @@ int save_kernel_event(struct config_writer *writer,
 		}
 
 		switch (event->event->instrumentation) {
+		case LTTNG_KERNEL_SYSCALL:
 		case LTTNG_KERNEL_FUNCTION:
 			ret = config_writer_open_element(writer,
 				config_element_function_attributes);
@@ -484,8 +488,53 @@ end:
 }
 
 static
+int save_kernel_syscall(struct config_writer *writer,
+		struct ltt_kernel_channel *kchan)
+{
+	int ret, i;
+	ssize_t count;
+	struct lttng_event *events = NULL;
+
+	assert(writer);
+	assert(kchan);
+
+	count = syscall_list_channel(kchan, &events, 0);
+	if (!count) {
+		/* No syscalls, just gracefully return. */
+		ret = 0;
+		goto end;
+	}
+
+	for (i = 0; i < count; i++) {
+		struct ltt_kernel_event *kevent;
+
+		/* Create a temporary kevent in order to save it. */
+		kevent = trace_kernel_create_event(&events[i]);
+		if (!kevent) {
+			ret = -ENOMEM;
+			goto end;
+		}
+		/* Init list in order so the destroy call can del the node. */
+		CDS_INIT_LIST_HEAD(&kevent->list);
+
+		ret = save_kernel_event(writer, kevent);
+		trace_kernel_destroy_event(kevent);
+		if (ret) {
+			goto end;
+		}
+	}
+
+	/* Everything went well */
+	ret = 0;
+
+end:
+	free(events);
+	return ret;
+}
+
+static
 int save_kernel_events(struct config_writer *writer,
-	struct ltt_kernel_event_list *event_list)
+	struct ltt_kernel_channel *kchan)
 {
 	int ret;
 	struct ltt_kernel_event *event;
@@ -496,11 +545,17 @@ int save_kernel_events(struct config_writer *writer,
 		goto end;
 	}
 
-	cds_list_for_each_entry(event, &event_list->head, list) {
+	cds_list_for_each_entry(event, &kchan->events_list.head, list) {
 		ret = save_kernel_event(writer, event);
 		if (ret) {
 			goto end;
 		}
+	}
+
+	/* Save syscalls if any. */
+	ret = save_kernel_syscall(writer, kchan);
+	if (ret) {
+		goto end;
 	}
 
 	/* /events */
@@ -746,6 +801,11 @@ int save_kernel_contexts(struct config_writer *writer,
 	int ret;
 	struct ltt_kernel_context *ctx;
 
+	if (cds_list_empty(&kchan->ctx_list)) {
+		ret = 0;
+		goto end;
+	}
+
 	ret = config_writer_open_element(writer, config_element_contexts);
 	if (ret) {
 		ret = LTTNG_ERR_SAVE_IO_FAIL;
@@ -788,12 +848,6 @@ int save_ust_context(struct config_writer *writer,
 	cds_list_for_each_entry(ctx, ctx_list, list) {
 		const char *context_type_string;
 
-		context_type_string = get_ust_context_type_string(ctx->ctx.ctx);
-		if (!context_type_string) {
-			ERR("Unsupported UST context type.")
-			ret = LTTNG_ERR_INVALID;
-			goto end;
-		}
 
 		ret = config_writer_open_element(writer,
 			config_element_context);
@@ -802,11 +856,61 @@ int save_ust_context(struct config_writer *writer,
 			goto end;
 		}
 
-		ret = config_writer_write_element_string(writer,
-			config_element_type, context_type_string);
-		if (ret) {
-			ret = LTTNG_ERR_SAVE_IO_FAIL;
-			goto end;
+		if (ctx->ctx.ctx == LTTNG_UST_CONTEXT_PERF_THREAD_COUNTER) {
+			/* Perf contexts are saved as event_perf_context_type */
+			ret = config_writer_open_element(writer,
+				config_element_perf);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
+
+			ret = config_writer_write_element_unsigned_int(writer,
+				config_element_type,
+				ctx->ctx.u.perf_counter.type);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
+
+			ret = config_writer_write_element_unsigned_int(writer,
+				config_element_config,
+				ctx->ctx.u.perf_counter.config);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
+
+			ret = config_writer_write_element_string(writer,
+				config_element_name,
+				ctx->ctx.u.perf_counter.name);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
+
+			/* /perf */
+			ret = config_writer_close_element(writer);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
+		} else {
+			/* Save context as event_context_type_type */
+			context_type_string = get_ust_context_type_string(
+				ctx->ctx.ctx);
+			if (!context_type_string) {
+				ERR("Unsupported UST context type.")
+					ret = LTTNG_ERR_INVALID;
+				goto end;
+			}
+
+			ret = config_writer_write_element_string(writer,
+				config_element_type, context_type_string);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
 		}
 
 		/* /context */
@@ -861,7 +965,7 @@ int save_kernel_channel(struct config_writer *writer,
 		goto end;
 	}
 
-	ret = save_kernel_events(writer, &kchan->events_list);
+	ret = save_kernel_events(writer, kchan);
 	if (ret) {
 		goto end;
 	}
@@ -1011,7 +1115,7 @@ end:
 
 static
 int save_ust_session(struct config_writer *writer,
-	struct ltt_session *session, int save_jul)
+	struct ltt_session *session, int save_agent)
 {
 	int ret;
 	struct ltt_ust_channel *ust_chan;
@@ -1023,7 +1127,7 @@ int save_ust_session(struct config_writer *writer,
 	assert(session);
 
 	ret = config_writer_write_element_string(writer, config_element_type,
-			save_jul ? config_domain_type_jul : config_domain_type_ust);
+			save_agent ? config_domain_type_jul : config_domain_type_ust);
 	if (ret) {
 		ret = LTTNG_ERR_SAVE_IO_FAIL;
 		goto end;
@@ -1053,11 +1157,12 @@ int save_ust_session(struct config_writer *writer,
 	rcu_read_lock();
 	cds_lfht_for_each_entry(session->ust_session->domain_global.channels->ht,
 			&iter.iter, node, node) {
-		int jul_channel;
+		int agent_channel;
 
 		ust_chan = caa_container_of(node, struct ltt_ust_channel, node);
-		jul_channel = !strcmp(DEFAULT_JUL_CHANNEL_NAME, ust_chan->name);
-		if (!(save_jul ^ jul_channel)) {
+		agent_channel = !strcmp(DEFAULT_JUL_CHANNEL_NAME, ust_chan->name) ||
+			!strcmp(DEFAULT_LOG4J_CHANNEL_NAME, ust_chan->name);
+		if (!(save_agent ^ agent_channel)) {
 			ret = save_ust_channel(writer, ust_chan, session->ust_session);
 			if (ret) {
 				rcu_read_unlock();
@@ -1118,6 +1223,8 @@ int save_domains(struct config_writer *writer, struct ltt_session *session)
 	}
 
 	if (session->ust_session) {
+		unsigned long agent_count;
+
 		ret = config_writer_open_element(writer,
 			config_element_domain);
 		if (ret) {
@@ -1136,28 +1243,35 @@ int save_domains(struct config_writer *writer, struct ltt_session *session)
 			ret = LTTNG_ERR_SAVE_IO_FAIL;
 			goto end;
 		}
+
+		rcu_read_lock();
+		agent_count =
+			lttng_ht_get_count(session->ust_session->agents);
+		rcu_read_unlock();
+
+		if (agent_count > 0) {
+			ret = config_writer_open_element(writer,
+				config_element_domain);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
+
+			ret = save_ust_session(writer, session, 1);
+			if (ret) {
+				goto end;
+			}
+
+			/* /domain */
+			ret = config_writer_close_element(writer);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
+		}
 	}
 
-	if (session->ust_session &&
-		session->ust_session->domain_jul.being_used) {
-		ret = config_writer_open_element(writer,
-			config_element_domain);
-		if (ret) {
-			ret = LTTNG_ERR_SAVE_IO_FAIL;
-			goto end;
-		}
-
-		ret = save_ust_session(writer, session, 1);
-		if (ret) {
-			goto end;
-		}
-
-		/* /domain */
-		ret = config_writer_close_element(writer);
-		if (ret) {
-			ret = LTTNG_ERR_SAVE_IO_FAIL;
-			goto end;
-		}
+	if (session->ust_session) {
 	}
 
 	/* /domains */
@@ -1514,7 +1628,7 @@ int save_session(struct ltt_session *session,
 	}
 	file_opened = 1;
 
-	writer = config_writer_create(fd);
+	writer = config_writer_create(fd, 1);
 	if (!writer) {
 		ret = LTTNG_ERR_NOMEM;
 		goto end;

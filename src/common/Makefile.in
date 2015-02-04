@@ -88,7 +88,15 @@ DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 	$(top_srcdir)/config/depcomp $(noinst_HEADERS)
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
+	$(top_srcdir)/config/ax_check_class.m4 \
+	$(top_srcdir)/config/ax_java_options.m4 \
 	$(top_srcdir)/config/ax_pkg_swig.m4 \
+	$(top_srcdir)/config/ax_prog_jar.m4 \
+	$(top_srcdir)/config/ax_prog_java.m4 \
+	$(top_srcdir)/config/ax_prog_java_works.m4 \
+	$(top_srcdir)/config/ax_prog_javac.m4 \
+	$(top_srcdir)/config/ax_prog_javac_works.m4 \
+	$(top_srcdir)/config/ax_try_compile_java.m4 \
 	$(top_srcdir)/config/config_feature.m4 \
 	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
 	$(top_srcdir)/config/libxml.m4 \
@@ -103,9 +111,10 @@ CONFIG_HEADER = $(top_builddir)/include/config.h
 CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 LTLIBRARIES = $(noinst_LTLIBRARIES)
-libcommon_la_DEPENDENCIES =
+libcommon_la_DEPENDENCIES =  \
+	$(top_builddir)/src/common/config/libconfig.la
 am_libcommon_la_OBJECTS = error.lo utils.lo runas.lo futex.lo uri.lo \
-	defaults.lo pipe.lo readwrite.lo daemonize.lo
+	defaults.lo pipe.lo readwrite.lo mi-lttng.lo daemonize.lo
 libcommon_la_OBJECTS = $(am_libcommon_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
@@ -262,6 +271,12 @@ INSTALL_DATA = @INSTALL_DATA@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
 INSTALL_SCRIPT = @INSTALL_SCRIPT@
 INSTALL_STRIP_PROGRAM = @INSTALL_STRIP_PROGRAM@
+JAR = @JAR@
+JAVA = @JAVA@
+JAVAC = @JAVAC@
+JAVACFLAGS = @JAVACFLAGS@
+JAVAFLAGS = @JAVAFLAGS@
+JAVAPREFIX = @JAVAPREFIX@
 JAVA_JDK = @JAVA_JDK@
 LD = @LD@
 LDFLAGS = @LDFLAGS@
@@ -312,6 +327,7 @@ SHELL = @SHELL@
 STRIP = @STRIP@
 SWIG = @SWIG@
 SWIG_LIB = @SWIG_LIB@
+UUDECODE = @UUDECODE@
 VERSION = @VERSION@
 XML2_CONFIG = @XML2_CONFIG@
 XML_CPPFLAGS = @XML_CPPFLAGS@
@@ -351,7 +367,7 @@ htmldir = @htmldir@
 includedir = @includedir@
 infodir = @infodir@
 install_sh = @install_sh@
-java_jul_jar_path = @java_jul_jar_path@
+java_agent_jar_path = @java_agent_jar_path@
 libdir = @libdir@
 libexecdir = @libexecdir@
 localedir = @localedir@
@@ -389,19 +405,25 @@ AM_CFLAGS = -fno-strict-aliasing
 noinst_HEADERS = lttng-kernel.h defaults.h macros.h error.h futex.h \
 				 uri.h utils.h lttng-kernel-old.h \
 				 consumer-metadata-cache.h consumer-timer.h \
-				 consumer-testpoint.h
+				 consumer-testpoint.h align.h bitfield.h bug.h
 
 
 # Common library
 
 # Consumer library
 noinst_LTLIBRARIES = libcommon.la libconsumer.la
+EXTRA_DIST = mi_lttng.xsd
 libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
                        common.h futex.c futex.h uri.c uri.h defaults.c \
                        pipe.c pipe.h readwrite.c readwrite.h \
+                       mi-lttng.h mi-lttng.c \
                        daemonize.c daemonize.h
 
-libcommon_la_LIBADD = -luuid -lrt
+libcommon_la_LIBADD = \
+		-luuid \
+		-lrt \
+		$(top_builddir)/src/common/config/libconfig.la
+
 libconsumer_la_SOURCES = consumer.c consumer.h consumer-metadata-cache.c \
                          consumer-timer.c consumer-stream.c consumer-stream.h
 
@@ -477,6 +499,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/defaults.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/error.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/futex.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/mi-lttng.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pipe.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/readwrite.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/runas.Plo@am__quote@

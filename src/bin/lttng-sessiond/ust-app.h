@@ -22,7 +22,7 @@
 
 #include <common/compat/uuid.h>
 
-#include "jul.h"
+#include "agent.h"
 #include "trace-ust.h"
 #include "ust-registry.h"
 
@@ -266,13 +266,14 @@ struct ust_app {
 	 * Hash table containing ust_app_channel indexed by channel objd.
 	 */
 	struct lttng_ht *ust_objd;
+
 	/*
-	 * If this application is of the JUL domain and this is non negative then a
-	 * lookup MUST be done to acquire a read side reference to the
-	 * corresponding JUL app object. If the lookup fails, this should be set to
-	 * a negative value indicating that the JUL application is gone.
+	 * If this application is of the agent domain and this is non negative then
+	 * a lookup MUST be done to acquire a read side reference to the
+	 * corresponding agent app object. If the lookup fails, this should be set
+	 * to a negative value indicating that the agent application is gone.
 	 */
-	int jul_app_sock;
+	int agent_app_sock;
 };
 
 #ifdef HAVE_LIBLTTNG_UST_CTL
@@ -325,8 +326,10 @@ ssize_t ust_app_push_metadata(struct ust_registry_session *registry,
 		struct consumer_socket *socket, int send_zero_data);
 void ust_app_destroy(struct ust_app *app);
 int ust_app_snapshot_record(struct ltt_ust_session *usess,
-		struct snapshot_output *output, int wait, uint64_t max_stream_size);
-unsigned int ust_app_get_nb_stream(struct ltt_ust_session *usess);
+		struct snapshot_output *output, int wait,
+		uint64_t nb_packets_per_stream);
+uint64_t ust_app_get_size_one_more_packet_per_stream(
+		struct ltt_ust_session *usess, uint64_t cur_nr_packets);
 struct ust_app *ust_app_find_by_sock(int sock);
 
 static inline
@@ -534,6 +537,11 @@ static inline
 struct ust_app *ust_app_find_by_pid(pid_t pid)
 {
 	return NULL;
+}
+static inline
+uint64_t ust_app_get_size_one_more_packet_per_stream(
+		struct ltt_ust_session *usess, uint64_t cur_nr_packets) {
+	return 0;
 }
 
 #endif /* HAVE_LIBLTTNG_UST_CTL */

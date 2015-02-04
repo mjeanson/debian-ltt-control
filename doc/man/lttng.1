@@ -27,8 +27,8 @@ kernel and/or instrumented applications (lttng-ust(3)). Aggregating and reading
 those traces is done using the babeltrace(1) text viewer.
 
 We introduce the notion of \fBtracing domains\fP which is essentially a type of
-tracer (kernel, user space or JUL for now). In the future, we could see more
-tracer like for instance an hypervisor. For some commands, you'll need to
+tracer (kernel, user space, JUL or LOG4J for now). In the future, we could see
+more tracer like for instance an hypervisor. For some commands, you'll need to
 specify on which domain the command operates (\-u, \-k or \-j). For instance,
 the kernel domain must be specified when enabling a kernel event.
 
@@ -77,6 +77,26 @@ Simple listing of lttng options.
 .TP
 .BR "\-\-list\-commands"
 Simple listing of lttng commands.
+.TP
+.BR "\-m, \-\-mi TYPE
+Machine interface
+
+TYPE supported: XML
+
+Machine interface (MI) mode converts the traditional pretty printing to a
+machine output syntax. MI mode provides a format change-resistant way to access
+information generated via the lttng command line.
+
+When using MI mode, the data is printed on \fBstdout\fP. Error and warning are
+printed on \fBstderr\fP with the pretty print default format.
+
+If any errors occur during the execution of a command, the return value of the
+command will be different than zero. In this case, lttng does NOT guarantee the
+syntax and data validity of the generated MI output.
+
+For XML output type, a schema definition (XSD) file used for validation can be
+found under src/common/mi_lttng.xsd
+
 .SH "COMMANDS"
 
 .PP
@@ -519,6 +539,9 @@ Apply for the user-space tracer
 .BR "\-j, \-\-jul"
 Apply for Java application using Java Util Logging interface (JUL)
 .TP
+.BR "\-l, \-\-log4j"
+Apply for Java application using LOG4J
+.TP
 .BR "\-\-tracepoint"
 Tracepoint event (default). Userspace tracer supports wildcards at the end
 of string. Don't forget to quote to deal with bash expansion.
@@ -532,6 +555,8 @@ e.g.:
 Tracepoint loglevel range from 0 to loglevel. Listed in the help (\-h).
 For the JUL domain, the loglevel ranges are detailed with the \-\-help
 option thus starting from SEVERE to FINEST.
+For the LOG4J domain, loglevels range from FATAL to TRACE which are also
+detailed in the help.
 .TP
 .BR "\-\-loglevel-only NAME"
 Tracepoint loglevel (only this loglevel).
@@ -680,6 +705,9 @@ Apply for the user-space tracer
 .TP
 .BR "\-j, \-\-jul"
 Apply for Java application using Java Util Logging interface (JUL)
+.TP
+.BR "\-l, \-\-log4j"
+Apply for Java application using LOG4J
 .RE
 .PP
 
@@ -698,6 +726,8 @@ With \-k alone, it will list all available kernel events (except the system
 calls events).
 With \-j alone, the available JUL event from registered application will be
 list. The event corresponds to the Logger name in the Java JUL application.
+With \-l alone, the available LOG4J event from registered application will be
+list. The event corresponds to the Logger name in the Java LOG4J application.
 With \-u alone, it will list all available user-space events from registered
 applications. Here is an example of 'lttng list \-u':
 
@@ -728,6 +758,9 @@ Select user-space domain.
 .BR "\-j, \-\-jul"
 Apply for Java application using JUL
 .TP
+.TP
+.BR "\-l, \-\-log4j"
+Apply for Java application using LOG4J
 .BR "\-f, \-\-fields"
 List event fields
 
@@ -842,15 +875,15 @@ Simple listing of options
 .TP
 \fBadd-output\fP [-m <SIZE>] [-s <NAME>] [-n <NAME>] <URL> | -C <URL> -D <URL>
 
-Setup and add an snapshot output for a session. Output are the destination
+Setup and add a snapshot output for a session. Output is the destination
 where the snapshot will be sent. Only one output is permitted. To change it,
 you'll need to delete it and add back the new one.
 
 .TP
 \fBdel-output\fP ID | NAME [-s <NAME>]
 
-Delete an output for a session using the ID. You can either specify the
-output's ID that can be found with list-output or the name.
+Delete an output for a session using the output's ID. You can either specify the
+output by name or use its ID as returned by the list-output command.
 
 .TP
 \fBlist-output\fP [-s <NAME>]
@@ -888,10 +921,6 @@ Name of the snapshot's output.
 Maximum size in bytes of the snapshot. The maximum size does not include the
 metadata file. Human readable format is accepted: {+k,+M,+G}. For instance,
 \-\-max-size 5M
-
-The minimum size of a snapshot is computed by multiplying the total amount of
-streams in the session by the largest subbuffer size. This is to ensure
-fairness between channels when extracting data.
 .TP
 .BR "\-C, \-\-ctrl-url URL"
 Set control path URL. (Must use -D also)
@@ -989,33 +1018,32 @@ arguments
 .RE
 .PP
 
-.SH "JUL DOMAIN"
-This section explains the JUL domain (\-j, \-\-jul) where JUL stands for Java
-Util Logging. You can use that feature by using the \fBliblttng-ust-jul.so\fP
-from the lttng-ust(3) project.
+.SH "JUL/LOG4J DOMAIN"
+
+This section explains the JUL and LOG4J domain where JUL stands for Java Util
+Logging. You can use these by using the \fBliblttng-ust-<domain>-jni.so\fP from
+the lttng-ust(3) project.
 
 The LTTng Java Agent uses JNI to link the UST tracer to the Java application
 that uses the agent. Thus, it behaves similarly to the UST domain (\-u). When
-enabling events with the JUL domain, you enable a Logger name that will then be
-mapped to a default UST tracepoint called \fBlttng_jul:jul_event\fP in the
-\fBlttng_jul_channel\fP. Using the lttng-ctl API, any JUL events must use the
-tracepoint event type (same as \-\-tracepoint).
+enabling events, you enable a Logger name that will then be mapped to a default
+UST tracepoint called \fBlttng_jul:<domain>_event\fP in the
+\fBlttng_<domain>_channel\fP. Using the lttng-ctl API, any JUL/LOG4J events
+must use the tracepoint event type (same as \-\-tracepoint).
 
-Because of the default immutable channel (\fBlttng_jul_channel\fP), the
-\fBenable-channel\fP command CAN NOT be used with the JUL domain thus not
-having any \-j option.
+Because of the default immutable channel, the \fBenable-channel\fP command CAN
+NOT be used with the JUL and LOG4J domain thus not having any options.
 
-For JUL event, loglevels are supported with the JUL ABI values. Use \fBlttng
-enable-event \-h\fP to list them. Wildcards are NOT supported except the "*"
-meaning all events (same as \-a).
+Also, loglevels are supported. Use \fBlttng enable-event \-h\fP to list them.
+Wildcards are NOT supported except the "*" meaning all events (same as \-a).
 
 Exactly like the UST domain, if the Java application has the same UID as you,
 you can trace it. Same goes for the tracing group accessing root applications.
 
-Finally, you can list every Logger name that are available from JUL registered
-applications to the session daemon by using \fBlttng list \-j\fP.
+Finally, you can list every Logger name that are available from registered
+applications to the session daemon by using \fBlttng list \-j\fP or \fB\-l\fP.
 
-Here is an example on how to use this domain.
+Here is an example on how to use the JUL domain.
 
 .nf
 $ lttng list -j

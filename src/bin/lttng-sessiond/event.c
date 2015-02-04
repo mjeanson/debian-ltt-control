@@ -58,21 +58,6 @@ static void add_unique_ust_event(struct lttng_ht *ht,
 }
 
 /*
- * Setup a lttng_event used to enable *all* syscall tracing.
- */
-static void init_syscalls_kernel_event(struct lttng_event *event)
-{
-	assert(event);
-
-	event->name[0] = '\0';
-	/*
-	 * We use LTTNG_EVENT* here since the trace kernel creation will make the
-	 * right changes for the kernel.
-	 */
-	event->type = LTTNG_EVENT_SYSCALL;
-}
-
-/*
  * Disable kernel tracepoint event for a channel from the kernel session.
  */
 int event_kernel_disable_tracepoint(struct ltt_kernel_channel *kchan,
@@ -105,6 +90,57 @@ error:
 }
 
 /*
+ * Enable kernel system call for a channel from the kernel session.
+ */
+int event_kernel_enable_syscall(struct ltt_kernel_channel *kchan,
+		char *syscall_name)
+{
+	int ret;
+
+	assert(kchan);
+
+	ret = kernel_enable_syscall(syscall_name, kchan);
+	if (ret < 0) {
+		ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+		goto error;
+	}
+
+	DBG("Kernel event %s enable for channel %s.",
+			syscall_name, kchan->channel->name);
+
+	ret = LTTNG_OK;
+
+error:
+	return ret;
+}
+
+/*
+ * Disable kernel system call for a channel from the kernel session.
+ */
+int event_kernel_disable_syscall(struct ltt_kernel_channel *kchan,
+		char *syscall_name)
+{
+	int ret;
+
+	assert(kchan);
+
+	ret = kernel_disable_syscall(syscall_name, kchan);
+	if (ret < 0) {
+		ret = LTTNG_ERR_KERN_DISABLE_FAIL;
+		goto error;
+	}
+
+	DBG("Kernel syscall %s disable for channel %s.",
+			syscall_name[0] == '\0' ? "<all>" : syscall_name,
+			kchan->channel->name);
+
+	ret = LTTNG_OK;
+
+error:
+	return ret;
+}
+
+/*
  * Disable kernel tracepoint events for a channel from the kernel session.
  */
 int event_kernel_disable_all_tracepoints(struct ltt_kernel_channel *kchan)
@@ -127,15 +163,6 @@ int event_kernel_disable_all_tracepoints(struct ltt_kernel_channel *kchan)
 }
 
 /*
- * Disable kernel syscall events for a channel from the kernel session.
- */
-int event_kernel_disable_all_syscalls(struct ltt_kernel_channel *kchan)
-{
-	ERR("Cannot disable syscall tracing for existing session. Please destroy session instead.");
-	return LTTNG_OK;	/* Return OK so disable all succeeds */
-}
-
-/*
  * Disable all kernel event for a channel from the kernel session.
  */
 int event_kernel_disable_all(struct ltt_kernel_channel *kchan)
@@ -147,12 +174,13 @@ int event_kernel_disable_all(struct ltt_kernel_channel *kchan)
 	ret = event_kernel_disable_all_tracepoints(kchan);
 	if (ret != LTTNG_OK)
 		return ret;
-	ret = event_kernel_disable_all_syscalls(kchan);
+	ret = event_kernel_disable_syscall(kchan, "");
 	return ret;
 }
 
 /*
  * Enable kernel tracepoint event for a channel from the kernel session.
+ * We own filter_expression and filter.
  */
 int event_kernel_enable_tracepoint(struct ltt_kernel_channel *kchan,
 		struct lttng_event *event)
@@ -246,36 +274,6 @@ end:
 }
 
 /*
- * Enable all kernel sycalls events of a channel of the kernel session.
- */
-int event_kernel_enable_all_syscalls(struct ltt_kernel_channel *kchan,
-		int kernel_tracer_fd)
-{
-	int ret;
-	struct lttng_event event;
-
-	assert(kchan);
-
-	init_syscalls_kernel_event(&event);
-
-	DBG("Enabling all syscall tracing");
-
-	ret = kernel_create_event(&event, kchan);
-	if (ret < 0) {
-		if (ret == -EEXIST) {
-			ret = LTTNG_ERR_KERN_EVENT_EXIST;
-		} else {
-			ret = LTTNG_ERR_KERN_ENABLE_FAIL;
-		}
-		goto end;
-	}
-
-	ret = LTTNG_OK;
-end:
-	return ret;
-}
-
-/*
  * Enable all kernel events of a channel of the kernel session.
  */
 int event_kernel_enable_all(struct ltt_kernel_channel *kchan,
@@ -299,7 +297,7 @@ int event_kernel_enable_all(struct ltt_kernel_channel *kchan,
 	 * tracepoints did not fail. Future work will allow us to send back
 	 * multiple errors to the client in one API call.
 	 */
-	(void) event_kernel_enable_all_syscalls(kchan, kernel_tracer_fd);
+	(void) event_kernel_enable_syscall(kchan, "");
 
 end:
 	return tp_ret;
@@ -410,6 +408,7 @@ error:
 
 /*
  * Enable UST tracepoint event for a channel from a UST session.
+ * We own filter_expression, filter, and exclusion.
  */
 int event_ust_enable_tracepoint(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct lttng_event *event,
@@ -431,6 +430,10 @@ int event_ust_enable_tracepoint(struct ltt_ust_session *usess,
 	if (uevent == NULL) {
 		uevent = trace_ust_create_event(event, filter_expression,
 			filter, exclusion);
+		/* We have passed ownership */
+		filter_expression = NULL;
+		filter = NULL;
+		exclusion = NULL;
 		if (uevent == NULL) {
 			ret = LTTNG_ERR_UST_ENABLE_FAIL;
 			goto error;
@@ -478,6 +481,9 @@ int event_ust_enable_tracepoint(struct ltt_ust_session *usess,
 
 end:
 	rcu_read_unlock();
+	free(filter_expression);
+	free(filter);
+	free(exclusion);
 	return ret;
 
 error:
@@ -493,6 +499,9 @@ error:
 		trace_ust_destroy_event(uevent);
 	}
 	rcu_read_unlock();
+	free(filter_expression);
+	free(filter);
+	free(exclusion);
 	return ret;
 }
 
@@ -617,32 +626,33 @@ error:
 }
 
 /*
- * Enable all JUL event for a given UST session.
+ * Enable all agent event for a given UST session.
  *
  * Return LTTNG_OK on success or else a LTTNG_ERR* code.
  */
-int event_jul_enable_all(struct ltt_ust_session *usess,
-		struct lttng_event *event, struct lttng_filter_bytecode *filter)
+int event_agent_enable_all(struct ltt_ust_session *usess,
+		struct agent *agt, struct lttng_event *event,
+		struct lttng_filter_bytecode *filter)
 {
 	int ret;
-	struct jul_event *jevent;
+	struct agent_event *aevent;
 	struct lttng_ht_iter iter;
 
 	assert(usess);
 
-	DBG("Event JUL enabling ALL events for session %" PRIu64, usess->id);
+	DBG("Event agent enabling ALL events for session %" PRIu64, usess->id);
 
-	/* Enable event on JUL application through TCP socket. */
-	ret = event_jul_enable(usess, event, filter);
+	/* Enable event on agent application through TCP socket. */
+	ret = event_agent_enable(usess, agt, event, filter);
 	if (ret != LTTNG_OK) {
 		goto error;
 	}
 
 	/* Flag every event that they are now enabled. */
 	rcu_read_lock();
-	cds_lfht_for_each_entry(usess->domain_jul.events->ht, &iter.iter, jevent,
+	cds_lfht_for_each_entry(agt->events->ht, &iter.iter, aevent,
 			node.node) {
-		jevent->enabled = 1;
+		aevent->enabled = 1;
 	}
 	rcu_read_unlock();
 
@@ -653,48 +663,50 @@ error:
 }
 
 /*
- * Enable a single JUL event for a given UST session.
+ * Enable a single agent event for a given UST session.
  *
  * Return LTTNG_OK on success or else a LTTNG_ERR* code.
  */
-int event_jul_enable(struct ltt_ust_session *usess, struct lttng_event *event,
+int event_agent_enable(struct ltt_ust_session *usess,
+		struct agent *agt, struct lttng_event *event,
 		struct lttng_filter_bytecode *filter)
 {
 	int ret, created = 0;
-	struct jul_event *jevent;
+	struct agent_event *aevent;
 
 	assert(usess);
 	assert(event);
+	assert(agt);
 
-	DBG("Event JUL enabling %s for session %" PRIu64 " with loglevel type %d "
+	DBG("Event agent enabling %s for session %" PRIu64 " with loglevel type %d "
 			"and loglevel %d", event->name, usess->id, event->loglevel_type,
 			event->loglevel);
 
-	jevent = jul_find_event(event->name, event->loglevel, &usess->domain_jul);
-	if (!jevent) {
-		jevent = jul_create_event(event->name, filter);
-		if (!jevent) {
+	aevent = agent_find_event(event->name, event->loglevel, agt);
+	if (!aevent) {
+		aevent = agent_create_event(event->name, filter);
+		if (!aevent) {
 			ret = LTTNG_ERR_NOMEM;
 			goto error;
 		}
-		jevent->loglevel = event->loglevel;
-		jevent->loglevel_type = event->loglevel_type;
+		aevent->loglevel = event->loglevel;
+		aevent->loglevel_type = event->loglevel_type;
 		created = 1;
 	}
 
 	/* Already enabled? */
-	if (jevent->enabled) {
+	if (aevent->enabled) {
 		goto end;
 	}
 
-	ret = jul_enable_event(jevent);
+	ret = agent_enable_event(aevent, agt->domain);
 	if (ret != LTTNG_OK) {
 		goto error;
 	}
 
 	/* If the event was created prior to the enable, add it to the domain. */
 	if (created) {
-		jul_add_event(jevent, &usess->domain_jul);
+		agent_add_event(aevent, agt);
 	}
 
 end:
@@ -702,38 +714,77 @@ end:
 
 error:
 	if (created) {
-		jul_destroy_event(jevent);
+		agent_destroy_event(aevent);
 	}
 	return ret;
 }
 
 /*
- * Disable a single JUL event for a given UST session.
+ * Return the agent default event name to use by testing if the process is root
+ * or not. Return NULL on error.
+ */
+const char *event_get_default_agent_ust_name(enum lttng_domain_type domain)
+{
+	const char *default_event_name = NULL;
+
+	if (domain == LTTNG_DOMAIN_JUL) {
+		if (is_root) {
+			default_event_name = DEFAULT_SYS_JUL_EVENT_NAME;
+		} else {
+			default_event_name = DEFAULT_USER_JUL_EVENT_NAME;
+		}
+	} else if (domain == LTTNG_DOMAIN_LOG4J) {
+		if (is_root) {
+			default_event_name = DEFAULT_SYS_LOG4J_EVENT_NAME;
+		} else {
+			default_event_name = DEFAULT_USER_LOG4J_EVENT_NAME;
+		}
+	} else {
+		assert(0);
+	}
+
+	return default_event_name;
+}
+
+
+/*
+ * Disable a single agent event for a given UST session.
  *
  * Return LTTNG_OK on success or else a LTTNG_ERR* code.
  */
-int event_jul_disable(struct ltt_ust_session *usess, char *event_name)
+int event_agent_disable(struct ltt_ust_session *usess, struct agent *agt,
+		char *event_name)
 {
 	int ret;
-	struct jul_event *jevent;
+	struct agent_event *aevent;
 	struct ltt_ust_event *uevent = NULL;
 	struct ltt_ust_channel *uchan = NULL;
-	char *ust_event_name;
+	const char *ust_event_name, *ust_channel_name;
 
+	assert(agt);
 	assert(usess);
 	assert(event_name);
 
-	DBG("Event JUL disabling %s for session %" PRIu64, event_name, usess->id);
+	DBG("Event agent disabling %s for session %" PRIu64, event_name, usess->id);
 
-	jevent = jul_find_event_by_name(event_name, &usess->domain_jul);
-	if (!jevent) {
+	aevent = agent_find_event_by_name(event_name, agt);
+	if (!aevent) {
 		ret = LTTNG_ERR_UST_EVENT_NOT_FOUND;
 		goto error;
 	}
 
 	/* Already disabled? */
-	if (!jevent->enabled) {
+	if (!aevent->enabled) {
 		goto end;
+	}
+
+	if (agt->domain == LTTNG_DOMAIN_JUL) {
+		ust_channel_name = DEFAULT_JUL_CHANNEL_NAME;
+	} else if (agt->domain == LTTNG_DOMAIN_LOG4J) {
+		ust_channel_name = DEFAULT_LOG4J_CHANNEL_NAME;
+	} else {
+		ret = LTTNG_ERR_INVALID;
+		goto error;
 	}
 
 	/*
@@ -741,26 +792,26 @@ int event_jul_disable(struct ltt_ust_session *usess, char *event_name)
 	 * the event and finally disable it.
 	 */
 	uchan = trace_ust_find_channel_by_name(usess->domain_global.channels,
-			DEFAULT_JUL_CHANNEL_NAME);
+			(char *) ust_channel_name);
 	if (!uchan) {
 		ret = LTTNG_ERR_UST_CHAN_NOT_FOUND;
 		goto error;
 	}
 
-	if (is_root) {
-		ust_event_name = DEFAULT_SYS_JUL_EVENT_NAME;
-	} else {
-		ust_event_name = DEFAULT_USER_JUL_EVENT_NAME;
+	ust_event_name = event_get_default_agent_ust_name(agt->domain);
+	if (!ust_event_name) {
+		ret = LTTNG_ERR_FATAL;
+		goto error;
 	}
 
 	/*
-	 * The loglevel is hardcoded with 0 here since the JUL ust event is set
+	 * The loglevel is hardcoded with 0 here since the agent ust event is set
 	 * with the loglevel type to ALL thus the loglevel stays 0. The event's
-	 * filter is the one handling the loglevel for JUL.
+	 * filter is the one handling the loglevel for agent.
 	 */
-	uevent = trace_ust_find_event(uchan->events, ust_event_name,
-			jevent->filter, 0, NULL);
-	/* If the JUL event exists, it must be available on the UST side. */
+	uevent = trace_ust_find_event(uchan->events, (char *) ust_event_name,
+			aevent->filter, 0, NULL);
+	/* If the agent event exists, it must be available on the UST side. */
 	assert(uevent);
 
 	ret = ust_app_disable_event_glb(usess, uchan, uevent);
@@ -768,9 +819,14 @@ int event_jul_disable(struct ltt_ust_session *usess, char *event_name)
 		ret = LTTNG_ERR_UST_DISABLE_FAIL;
 		goto error;
 	}
+
+	/*
+	 * Flag event that it's disabled so the shadow copy on the ust app side
+	 * will disable it if an application shows up.
+	 */
 	uevent->enabled = 0;
 
-	ret = jul_disable_event(jevent);
+	ret = agent_disable_event(aevent, agt->domain);
 	if (ret != LTTNG_OK) {
 		goto error;
 	}
@@ -782,45 +838,42 @@ error:
 	return ret;
 }
 /*
- * Disable all JUL event for a given UST session.
+ * Disable all agent event for a given UST session.
  *
  * Return LTTNG_OK on success or else a LTTNG_ERR* code.
  */
-int event_jul_disable_all(struct ltt_ust_session *usess)
+int event_agent_disable_all(struct ltt_ust_session *usess,
+		struct agent *agt)
 {
-	int ret, do_disable = 0;
-	struct jul_event *jevent;
+	int ret;
+	struct agent_event *aevent;
 	struct lttng_ht_iter iter;
 
+	assert(agt);
 	assert(usess);
 
-	/* Enable event on JUL application through TCP socket. */
-	ret = event_jul_disable(usess, "*");
-	if (ret != LTTNG_OK) {
-		if (ret == LTTNG_ERR_UST_EVENT_NOT_FOUND) {
-			/*
-			 * This means that no enable all was done before but still a user
-			 * could want to disable everything even though the * wild card
-			 * event does not exists.
-			 */
-			do_disable = 1;
-		} else {
-			goto error;
-		}
+	/*
+	 * Disable event on agent application. Continue to disable all other events
+	 * if the * event is not found.
+	 */
+	ret = event_agent_disable(usess, agt, "*");
+	if (ret != LTTNG_OK && ret != LTTNG_ERR_UST_EVENT_NOT_FOUND) {
+		goto error;
 	}
 
 	/* Flag every event that they are now enabled. */
 	rcu_read_lock();
-	cds_lfht_for_each_entry(usess->domain_jul.events->ht, &iter.iter, jevent,
+	cds_lfht_for_each_entry(agt->events->ht, &iter.iter, aevent,
 			node.node) {
-		if (jevent->enabled && do_disable) {
-			ret = event_jul_disable(usess, jevent->name);
-			if (ret != LTTNG_OK) {
-				rcu_read_unlock();
-				goto error;
-			}
+		if (!aevent->enabled) {
+			continue;
 		}
-		jevent->enabled = 0;
+
+		ret = event_agent_disable(usess, agt, aevent->name);
+		if (ret != LTTNG_OK) {
+			rcu_read_unlock();
+			goto error;
+		}
 	}
 	rcu_read_unlock();
 

@@ -160,6 +160,10 @@ int setup_health_path(void)
 
 	if (is_root) {
 		rundir = strdup(DEFAULT_LTTNG_RUNDIR);
+		if (!rundir) {
+			ret = -ENOMEM;
+			goto end;
+		}
 	} else {
 		/*
 		 * Create rundir from home path. This will create something like
@@ -324,6 +328,11 @@ restart:
 			/* Fetch once the poll data */
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
+
+			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
 
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = check_health_quit_pipe(pollfd, revents);

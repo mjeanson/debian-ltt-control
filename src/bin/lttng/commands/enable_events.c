@@ -27,8 +27,12 @@
 #include <inttypes.h>
 #include <ctype.h>
 
-#include "../command.h"
 #include <src/common/sessiond-comm/sessiond-comm.h>
+
+/* Mi dependancy */
+#include <common/mi-lttng.h>
+
+#include "../command.h"
 
 #if (LTTNG_SYMBOL_NAME_LEN == 256)
 #define LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API	"255"
@@ -42,6 +46,7 @@ static int opt_kernel;
 static char *opt_session_name;
 static int opt_userspace;
 static int opt_jul;
+static int opt_log4j;
 static int opt_enable_all;
 static char *opt_probe;
 static char *opt_function;
@@ -71,6 +76,7 @@ enum {
 };
 
 static struct lttng_handle *handle;
+static struct mi_writer *writer;
 
 static struct poptOption long_options[] = {
 	/* longName, shortName, argInfo, argPtr, value, descrip, argDesc */
@@ -81,6 +87,7 @@ static struct poptOption long_options[] = {
 	{"kernel",         'k', POPT_ARG_VAL, &opt_kernel, 1, 0, 0},
 	{"userspace",      'u', POPT_ARG_NONE, 0, OPT_USERSPACE, 0, 0},
 	{"jul",            'j', POPT_ARG_VAL, &opt_jul, 1, 0, 0},
+	{"log4j",          'l', POPT_ARG_VAL, &opt_log4j, 1, 0, 0},
 	{"tracepoint",     0,   POPT_ARG_NONE, 0, OPT_TRACEPOINT, 0, 0},
 	{"probe",          0,   POPT_ARG_STRING, &opt_probe, OPT_PROBE, 0, 0},
 	{"function",       0,   POPT_ARG_STRING, &opt_function, OPT_FUNCTION, 0, 0},
@@ -116,6 +123,7 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "  -k, --kernel             Apply for the kernel tracer\n");
 	fprintf(ofp, "  -u, --userspace          Apply to the user-space tracer\n");
 	fprintf(ofp, "  -j, --jul                Apply for Java application using JUL\n");
+	fprintf(ofp, "  -l, --log4j              Apply for Java application using LOG4j\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Event options:\n");
 	fprintf(ofp, "    --tracepoint           Tracepoint event (default)\n");
@@ -140,7 +148,7 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "\n");
 	fprintf(ofp, "    --loglevel name\n");
 	fprintf(ofp, "                           Tracepoint loglevel range from 0 to loglevel.\n");
-	fprintf(ofp, "                           For JUL domain, see the table below for the range values.\n");
+	fprintf(ofp, "                           For JUL/LOG4j domain, see the table below for the range values.\n");
 	fprintf(ofp, "    --loglevel-only name\n");
 	fprintf(ofp, "                           Tracepoint loglevel (only this loglevel)\n");
 	fprintf(ofp, "\n");
@@ -176,6 +184,17 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "                               JUL_FINER          = %d\n", LTTNG_LOGLEVEL_JUL_FINER);
 	fprintf(ofp, "                               JUL_FINEST         = %d\n", LTTNG_LOGLEVEL_JUL_FINEST);
 	fprintf(ofp, "                               JUL_ALL            = INT32_MIN\n");
+	fprintf(ofp, "                               (shortcuts such as \"severe\" are allowed)\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "                           Available LOG4j domain loglevels:\n");
+	fprintf(ofp, "                               LOG4J_OFF            = INT32_MAX\n");
+	fprintf(ofp, "                               LOG4J_FATAL          = %d\n", LTTNG_LOGLEVEL_LOG4J_FATAL);
+	fprintf(ofp, "                               LOG4J_ERROR          = %d\n", LTTNG_LOGLEVEL_LOG4J_ERROR);
+	fprintf(ofp, "                               LOG4J_WARN           = %d\n", LTTNG_LOGLEVEL_LOG4J_WARN);
+	fprintf(ofp, "                               LOG4J_INFO           = %d\n", LTTNG_LOGLEVEL_LOG4J_INFO);
+	fprintf(ofp, "                               LOG4J_DEBUG          = %d\n", LTTNG_LOGLEVEL_LOG4J_DEBUG);
+	fprintf(ofp, "                               LOG4J_TRACE          = %d\n", LTTNG_LOGLEVEL_LOG4J_TRACE);
+	fprintf(ofp, "                               LOG4J_ALL            = INT32_MIN\n");
 	fprintf(ofp, "                               (shortcuts such as \"severe\" are allowed)\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "  -f, --filter \'expression\'\n");
@@ -295,6 +314,45 @@ end:
 }
 
 /*
+ * Maps LOG4j loglevel from string to value
+ */
+static int loglevel_log4j_str_to_value(const char *inputstr)
+{
+	int i = 0;
+	char str[LTTNG_SYMBOL_NAME_LEN];
+
+	/*
+	 * Loop up to LTTNG_SYMBOL_NAME_LEN minus one because the NULL bytes is
+	 * added at the end of the loop so a the upper bound we avoid the overflow.
+	 */
+	while (i < (LTTNG_SYMBOL_NAME_LEN - 1) && inputstr[i] != '\0') {
+		str[i] = toupper(inputstr[i]);
+		i++;
+	}
+	str[i] = '\0';
+
+	if (!strcmp(str, "LOG4J_OFF") || !strcmp(str, "OFF")) {
+		return LTTNG_LOGLEVEL_LOG4J_OFF;
+	} else if (!strcmp(str, "LOG4J_FATAL") || !strcmp(str, "FATAL")) {
+		return LTTNG_LOGLEVEL_LOG4J_FATAL;
+	} else if (!strcmp(str, "LOG4J_ERROR") || !strcmp(str, "ERROR")) {
+		return LTTNG_LOGLEVEL_LOG4J_ERROR;
+	} else if (!strcmp(str, "LOG4J_WARN") || !strcmp(str, "WARN")) {
+		return LTTNG_LOGLEVEL_LOG4J_WARN;
+	} else if (!strcmp(str, "LOG4J_INFO") || !strcmp(str, "INFO")) {
+		return LTTNG_LOGLEVEL_LOG4J_INFO;
+	} else if (!strcmp(str, "LOG4J_DEBUG") || !strcmp(str, "DEBUG")) {
+		return LTTNG_LOGLEVEL_LOG4J_DEBUG;
+	} else if (!strcmp(str, "LOG4J_TRACE") || !strcmp(str, "TRACE")) {
+		return LTTNG_LOGLEVEL_LOG4J_TRACE;
+	} else if (!strcmp(str, "LOG4J_ALL") || !strcmp(str, "ALL")) {
+		return LTTNG_LOGLEVEL_LOG4J_ALL;
+	} else {
+		return -1;
+	}
+}
+
+/*
  * Maps JUL loglevel from string to value
  */
 static int loglevel_jul_str_to_value(const char *inputstr)
@@ -401,6 +459,40 @@ const char *print_raw_channel_name(const char *name)
 }
 
 /*
+ * Mi print exlcusion list
+ */
+static
+int mi_print_exclusion(int count, char **names)
+{
+	int i, ret;
+
+	assert(writer);
+
+	if (count == 0) {
+		ret = 0;
+		goto end;
+	}
+	ret = mi_lttng_writer_open_element(writer, config_element_exclusions);
+	if (ret) {
+		goto end;
+	}
+
+	for (i = 0; i < count; i++) {
+		ret = mi_lttng_writer_write_element_string(writer,
+				config_element_exclusion, names[i]);
+		if (ret) {
+			goto end;
+		}
+	}
+
+	/* Close exclusions element */
+	ret = mi_lttng_writer_close_element(writer);
+
+end:
+	return ret;
+}
+
+/*
  * Return allocated string for pretty-printing exclusion names.
  */
 static
@@ -422,7 +514,10 @@ char *print_exclusions(int count, char **names)
 
 	/* add length of preamble + one for NUL - one for last (missing) comma */
 	length += strlen(preamble);
-	ret = malloc(length);
+	ret = zmalloc(length);
+	if (!ret) {
+		return NULL;
+	}
 	strncpy(ret, preamble, length);
 	for (i = 0; i < count; i++) {
 		strcat(ret, names[i]);
@@ -430,6 +525,7 @@ char *print_exclusions(int count, char **names)
 			strcat(ret, ",");
 		}
 	}
+
 	return ret;
 }
 
@@ -480,11 +576,25 @@ int check_exclusion_subsets(const char *event_name,
 				goto error;
 			}
 			if (e == '*') {
-				/* Excluder is a proper subset of event */
-				exclusion_count++;
-				exclusion_list = realloc(exclusion_list, sizeof(char **) * exclusion_count);
-				exclusion_list[exclusion_count - 1] = strndup(next_excluder, excluder_length);
+				char *string;
+				char **new_exclusion_list;
 
+				/* Excluder is a proper subset of event */
+				string = strndup(next_excluder, excluder_length);
+				if (!string) {
+					PERROR("strndup error");
+					goto error;
+				}
+				new_exclusion_list = realloc(exclusion_list,
+					sizeof(char **) * (exclusion_count + 1));
+				if (!new_exclusion_list) {
+					PERROR("realloc");
+					free(string);
+					goto error;
+				}
+				exclusion_list = new_exclusion_list;
+				exclusion_count++;
+				exclusion_list[exclusion_count - 1] = string;
 				break;
 			}
 			if (x != e) {
@@ -523,10 +633,12 @@ end:
 }
 /*
  * Enabling event using the lttng API.
+ * Note: in case of error only the last error code will be return.
  */
 static int enable_events(char *session_name)
 {
-	int ret = CMD_SUCCESS, warn = 0;
+	int ret = CMD_SUCCESS, command_ret = CMD_SUCCESS;
+	int error_holder = CMD_SUCCESS, warn = 0, error = 0, success = 1;
 	char *event_name, *channel_name = NULL;
 	struct lttng_event ev;
 	struct lttng_domain dom;
@@ -559,6 +671,10 @@ static int enable_events(char *session_name)
 		dom.type = LTTNG_DOMAIN_JUL;
 		/* Default. */
 		dom.buf_type = LTTNG_BUFFER_PER_UID;
+	} else if (opt_log4j) {
+		dom.type = LTTNG_DOMAIN_LOG4J;
+		/* Default. */
+		dom.buf_type = LTTNG_BUFFER_PER_UID;
 	} else {
 		print_missing_domain();
 		ret = CMD_ERROR;
@@ -579,6 +695,16 @@ static int enable_events(char *session_name)
 		goto error;
 	}
 
+	/* Prepare Mi */
+	if (lttng_opt_mi) {
+		/* Open a events element */
+		ret = mi_lttng_writer_open_element(writer, config_element_events);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto error;
+		}
+	}
+
 	if (opt_enable_all) {
 		/* Default setup for enable all */
 		if (opt_kernel) {
@@ -591,11 +717,13 @@ static int enable_events(char *session_name)
 			strcpy(ev.name, "*");
 			ev.loglevel_type = opt_loglevel_type;
 			if (opt_loglevel) {
-				assert(opt_userspace || opt_jul);
+				assert(opt_userspace || opt_jul || opt_log4j);
 				if (opt_userspace) {
 					ev.loglevel = loglevel_str_to_value(opt_loglevel);
 				} else if (opt_jul) {
 					ev.loglevel = loglevel_jul_str_to_value(opt_loglevel);
+				} else if (opt_log4j) {
+					ev.loglevel = loglevel_log4j_str_to_value(opt_loglevel);
 				}
 				if (ev.loglevel == -1) {
 					ERR("Unknown loglevel %s", opt_loglevel);
@@ -603,10 +731,10 @@ static int enable_events(char *session_name)
 					goto error;
 				}
 			} else {
-				assert(opt_userspace || opt_jul);
+				assert(opt_userspace || opt_jul || opt_log4j);
 				if (opt_userspace) {
 					ev.loglevel = -1;
-				} else if (opt_jul) {
+				} else if (opt_jul || opt_log4j) {
 					ev.loglevel = LTTNG_LOGLEVEL_JUL_ALL;
 				}
 			}
@@ -618,6 +746,7 @@ static int enable_events(char *session_name)
 			if (ret == CMD_ERROR) {
 				goto error;
 			}
+			ev.exclusion = 1;
 		}
 		if (!opt_filter) {
 			ret = lttng_enable_event_with_exclusions(handle,
@@ -629,7 +758,18 @@ static int enable_events(char *session_name)
 				case LTTNG_ERR_KERN_EVENT_EXIST:
 					WARN("Kernel events already enabled (channel %s, session %s)",
 							print_channel_name(channel_name), session_name);
+					warn = 1;
 					break;
+				case LTTNG_ERR_TRACE_ALREADY_STARTED:
+				{
+					const char *msg = "The command tried to enable an event in a new domain for a session that has already been started once.";
+					ERR("Events: %s (channel %s, session %s)",
+							msg,
+							print_channel_name(channel_name),
+							session_name);
+					error = 1;
+					break;
+				}
 				default:
 					ERR("Events: %s (channel %s, session %s)",
 							lttng_strerror(ret),
@@ -637,6 +777,7 @@ static int enable_events(char *session_name)
 								? print_raw_channel_name(channel_name)
 								: print_channel_name(channel_name),
 							session_name);
+					error = 1;
 					break;
 				}
 				goto end;
@@ -646,6 +787,12 @@ static int enable_events(char *session_name)
 			case LTTNG_EVENT_TRACEPOINT:
 				if (opt_loglevel && dom.type != LTTNG_DOMAIN_KERNEL) {
 					char *exclusion_string = print_exclusions(exclusion_count, exclusion_list);
+
+					if (!exclusion_string) {
+						PERROR("Cannot allocate exclusion_string");
+						error = 1;
+						goto end;
+					}
 					MSG("All %s tracepoints%s are enabled in channel %s for loglevel %s",
 							get_domain_str(dom.type),
 							exclusion_string,
@@ -654,6 +801,12 @@ static int enable_events(char *session_name)
 					free(exclusion_string);
 				} else {
 					char *exclusion_string = print_exclusions(exclusion_count, exclusion_list);
+
+					if (!exclusion_string) {
+						PERROR("Cannot allocate exclusion_string");
+						error = 1;
+						goto end;
+					}
 					MSG("All %s tracepoints%s are enabled in channel %s",
 							get_domain_str(dom.type),
 							exclusion_string,
@@ -663,13 +816,20 @@ static int enable_events(char *session_name)
 				break;
 			case LTTNG_EVENT_SYSCALL:
 				if (opt_kernel) {
-					MSG("All kernel system calls are enabled in channel %s",
+					MSG("All %s system calls are enabled in channel %s",
+							get_domain_str(dom.type),
 							print_channel_name(channel_name));
 				}
 				break;
 			case LTTNG_EVENT_ALL:
 				if (opt_loglevel && dom.type != LTTNG_DOMAIN_KERNEL) {
 					char *exclusion_string = print_exclusions(exclusion_count, exclusion_list);
+
+					if (!exclusion_string) {
+						PERROR("Cannot allocate exclusion_string");
+						error = 1;
+						goto end;
+					}
 					MSG("All %s events%s are enabled in channel %s for loglevel %s",
 							get_domain_str(dom.type),
 							exclusion_string,
@@ -678,6 +838,12 @@ static int enable_events(char *session_name)
 					free(exclusion_string);
 				} else {
 					char *exclusion_string = print_exclusions(exclusion_count, exclusion_list);
+
+					if (!exclusion_string) {
+						PERROR("Cannot allocate exclusion_string");
+						error = 1;
+						goto end;
+					}
 					MSG("All %s events%s are enabled in channel %s",
 							get_domain_str(dom.type),
 							exclusion_string,
@@ -693,30 +859,91 @@ static int enable_events(char *session_name)
 				goto error;
 			}
 		}
+
 		if (opt_filter) {
-			ret = lttng_enable_event_with_exclusions(handle, &ev, channel_name,
+			command_ret = lttng_enable_event_with_exclusions(handle, &ev, channel_name,
 						opt_filter, exclusion_count, exclusion_list);
-			if (ret < 0) {
-				switch (-ret) {
+			if (command_ret < 0) {
+				switch (-command_ret) {
 				case LTTNG_ERR_FILTER_EXIST:
 					WARN("Filter on all events is already enabled"
 							" (channel %s, session %s)",
 						print_channel_name(channel_name), session_name);
+					warn = 1;
 					break;
+				case LTTNG_ERR_TRACE_ALREADY_STARTED:
+				{
+					const char *msg = "The command tried to enable an event in a new domain for a session that has already been started once.";
+					ERR("All events: %s (channel %s, session %s, filter \'%s\')",
+							msg,
+							print_channel_name(channel_name),
+							session_name, opt_filter);
+					error = 1;
+					break;
+				}
 				default:
 					ERR("All events: %s (channel %s, session %s, filter \'%s\')",
-							lttng_strerror(ret),
-							ret == -LTTNG_ERR_NEED_CHANNEL_NAME
+							lttng_strerror(command_ret),
+							command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
 								? print_raw_channel_name(channel_name)
 								: print_channel_name(channel_name),
 							session_name, opt_filter);
+					error = 1;
 					break;
 				}
-				goto error;
+				error_holder = command_ret;
 			} else {
+				ev.filter = 1;
 				MSG("Filter '%s' successfully set", opt_filter);
 			}
 		}
+
+		if (lttng_opt_mi) {
+			/* The wildcard * is used for kernel and ust domain to
+			 * represent ALL. We copy * in event name to force the wildcard use
+			 * for kernel domain
+			 *
+			 * Note: this is strictly for semantic and printing while in
+			 * machine interface mode.
+			 */
+			strcpy(ev.name, "*");
+
+			/* If we reach here the events are enabled */
+			if (!error && !warn) {
+				ev.enabled = 1;
+			} else {
+				ev.enabled = 0;
+				success = 0;
+			}
+			ret = mi_lttng_event(writer, &ev, 1, handle->domain.type);
+			if (ret) {
+				ret = CMD_ERROR;
+				goto error;
+			}
+
+			/* print exclusion */
+			ret = mi_print_exclusion(exclusion_count, exclusion_list);
+			if (ret) {
+				ret = CMD_ERROR;
+				goto error;
+			}
+
+			/* Success ? */
+			ret = mi_lttng_writer_write_element_bool(writer,
+					mi_lttng_element_command_success, success);
+			if (ret) {
+				ret = CMD_ERROR;
+				goto error;
+			}
+
+			/* Close event element */
+			ret = mi_lttng_writer_close_element(writer);
+			if (ret) {
+				ret = CMD_ERROR;
+				goto error;
+			}
+		}
+
 		goto end;
 	}
 
@@ -762,8 +989,8 @@ static int enable_events(char *session_name)
 				ev.attr.ftrace.symbol_name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
 				break;
 			case LTTNG_EVENT_SYSCALL:
-				MSG("per-syscall selection not supported yet. Use \"-a\" "
-						"for all syscalls.");
+				ev.type = LTTNG_EVENT_SYSCALL;
+				break;
 			default:
 				ret = CMD_UNDEFINED;
 				goto error;
@@ -803,6 +1030,7 @@ static int enable_events(char *session_name)
 			}
 
 			if (opt_exclude) {
+				ev.exclusion = 1;
 				if (opt_event_type != LTTNG_EVENT_ALL && opt_event_type != LTTNG_EVENT_TRACEPOINT) {
 					ERR("Exclusion option can only be used with tracepoint events");
 					ret = CMD_ERROR;
@@ -835,24 +1063,32 @@ static int enable_events(char *session_name)
 			} else {
 				ev.loglevel = -1;
 			}
-		} else if (opt_jul) {
+		} else if (opt_jul || opt_log4j) {
 			if (opt_event_type != LTTNG_EVENT_ALL &&
 					opt_event_type != LTTNG_EVENT_TRACEPOINT) {
-				ERR("Event type not supported for JUL domain.");
+				ERR("Event type not supported for domain.");
 				ret = CMD_UNSUPPORTED;
 				goto error;
 			}
 
 			ev.loglevel_type = opt_loglevel_type;
 			if (opt_loglevel) {
-				ev.loglevel = loglevel_jul_str_to_value(opt_loglevel);
+				if (opt_jul) {
+					ev.loglevel = loglevel_jul_str_to_value(opt_loglevel);
+				} else if (opt_log4j) {
+					ev.loglevel = loglevel_log4j_str_to_value(opt_loglevel);
+				}
 				if (ev.loglevel == -1) {
 					ERR("Unknown loglevel %s", opt_loglevel);
 					ret = -LTTNG_ERR_INVALID;
 					goto error;
 				}
 			} else {
-				ev.loglevel = LTTNG_LOGLEVEL_JUL_ALL;
+				if (opt_jul) {
+					ev.loglevel = LTTNG_LOGLEVEL_JUL_ALL;
+				} else if (opt_log4j) {
+					ev.loglevel = LTTNG_LOGLEVEL_LOG4J_ALL;
+				}
 			}
 			ev.type = LTTNG_EVENT_TRACEPOINT;
 			strncpy(ev.name, event_name, LTTNG_SYMBOL_NAME_LEN);
@@ -866,35 +1102,61 @@ static int enable_events(char *session_name)
 		if (!opt_filter) {
 			char *exclusion_string;
 
-			ret = lttng_enable_event_with_exclusions(handle,
+			command_ret = lttng_enable_event_with_exclusions(handle,
 					&ev, channel_name,
 					NULL, exclusion_count, exclusion_list);
 			exclusion_string = print_exclusions(exclusion_count, exclusion_list);
-			if (ret < 0) {
+			if (!exclusion_string) {
+				PERROR("Cannot allocate exclusion_string");
+				error = 1;
+				goto end;
+			}
+			if (command_ret < 0) {
 				/* Turn ret to positive value to handle the positive error code */
-				switch (-ret) {
+				switch (-command_ret) {
 				case LTTNG_ERR_KERN_EVENT_EXIST:
 					WARN("Kernel event %s%s already enabled (channel %s, session %s)",
 							event_name,
 							exclusion_string,
 							print_channel_name(channel_name), session_name);
+					warn = 1;
 					break;
+				case LTTNG_ERR_TRACE_ALREADY_STARTED:
+				{
+					const char *msg = "The command tried to enable an event in a new domain for a session that has already been started once.";
+					ERR("Event %s%s: %s (channel %s, session %s)", event_name,
+							exclusion_string,
+							msg,
+							print_channel_name(channel_name),
+							session_name);
+					error = 1;
+					break;
+				}
 				default:
 					ERR("Event %s%s: %s (channel %s, session %s)", event_name,
 							exclusion_string,
-							lttng_strerror(ret),
-							ret == -LTTNG_ERR_NEED_CHANNEL_NAME
+							lttng_strerror(command_ret),
+							command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
 								? print_raw_channel_name(channel_name)
 								: print_channel_name(channel_name),
 							session_name);
+					error = 1;
 					break;
 				}
-				warn = 1;
+				error_holder = command_ret;
 			} else {
-				MSG("%s event %s%s created in channel %s",
-						get_domain_str(dom.type), event_name,
-						exclusion_string,
-						print_channel_name(channel_name));
+				/* So we don't print the default channel name for agent domain. */
+				if (dom.type == LTTNG_DOMAIN_JUL ||
+						dom.type == LTTNG_DOMAIN_LOG4J) {
+					MSG("%s event %s%s enabled.",
+							get_domain_str(dom.type), event_name,
+							exclusion_string);
+				} else {
+					MSG("%s event %s%s created in channel %s",
+							get_domain_str(dom.type), event_name,
+							exclusion_string,
+							print_channel_name(channel_name));
+				}
 			}
 			free(exclusion_string);
 		}
@@ -902,31 +1164,51 @@ static int enable_events(char *session_name)
 		if (opt_filter) {
 			char *exclusion_string;
 
-			ret = lttng_enable_event_with_exclusions(handle, &ev, channel_name,
+			/* Filter present */
+			ev.filter = 1;
+
+			command_ret = lttng_enable_event_with_exclusions(handle, &ev, channel_name,
 					opt_filter, exclusion_count, exclusion_list);
 			exclusion_string = print_exclusions(exclusion_count, exclusion_list);
-
-			if (ret < 0) {
-				switch (-ret) {
+			if (!exclusion_string) {
+				PERROR("Cannot allocate exclusion_string");
+				error = 1;
+				goto end;
+			}
+			if (command_ret < 0) {
+				switch (-command_ret) {
 				case LTTNG_ERR_FILTER_EXIST:
 					WARN("Filter on event %s%s is already enabled"
 							" (channel %s, session %s)",
 						event_name,
 						exclusion_string,
 						print_channel_name(channel_name), session_name);
+					warn = 1;
 					break;
+				case LTTNG_ERR_TRACE_ALREADY_STARTED:
+				{
+					const char *msg = "The command tried to enable an event in a new domain for a session that has already been started once.";
+					ERR("Event %s%s: %s (channel %s, session %s, filter \'%s\')", ev.name,
+							exclusion_string,
+							msg,
+							print_channel_name(channel_name),
+							session_name, opt_filter);
+					error = 1;
+					break;
+				}
 				default:
 					ERR("Event %s%s: %s (channel %s, session %s, filter \'%s\')", ev.name,
 							exclusion_string,
-							lttng_strerror(ret),
-							ret == -LTTNG_ERR_NEED_CHANNEL_NAME
+							lttng_strerror(command_ret),
+							command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
 								? print_raw_channel_name(channel_name)
 								: print_channel_name(channel_name),
 							session_name, opt_filter);
+					error = 1;
 					break;
 				}
-				free(exclusion_string);
-				goto error;
+				error_holder = command_ret;
+
 			} else {
 				MSG("Event %s%s: Filter '%s' successfully set",
 						event_name, exclusion_string,
@@ -935,14 +1217,65 @@ static int enable_events(char *session_name)
 			free(exclusion_string);
 		}
 
+		if (lttng_opt_mi) {
+			if (command_ret) {
+				success = 0;
+				ev.enabled = 0;
+			} else {
+				ev.enabled = 1;
+			}
+
+			ret = mi_lttng_event(writer, &ev, 1, handle->domain.type);
+			if (ret) {
+				ret = CMD_ERROR;
+				goto error;
+			}
+
+			/* print exclusion */
+			ret = mi_print_exclusion(exclusion_count, exclusion_list);
+			if (ret) {
+				ret = CMD_ERROR;
+				goto error;
+			}
+
+			/* Success ? */
+			ret = mi_lttng_writer_write_element_bool(writer,
+					mi_lttng_element_command_success, success);
+			if (ret) {
+				ret = CMD_ERROR;
+				goto end;
+			}
+
+			/* Close event element */
+			ret = mi_lttng_writer_close_element(writer);
+			if (ret) {
+				ret = CMD_ERROR;
+				goto end;
+			}
+		}
+
 		/* Next event */
 		event_name = strtok(NULL, ",");
+		/* Reset warn, error and success */
+		success = 1;
 	}
 
 end:
+	/* Close Mi */
+	if (lttng_opt_mi) {
+		/* Close events element */
+		ret = mi_lttng_writer_close_element(writer);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto error;
+		}
+	}
 error:
 	if (warn) {
 		ret = CMD_WARNING;
+	}
+	if (error) {
+		ret = CMD_ERROR;
 	}
 	lttng_destroy_handle(handle);
 
@@ -953,6 +1286,11 @@ error:
 		free(exclusion_list);
 	}
 
+	/* Overwrite ret with error_holder if there was an actual error with
+	 * enabling an event.
+	 */
+	ret = error_holder ? error_holder : ret;
+
 	return ret;
 }
 
@@ -961,7 +1299,7 @@ error:
  */
 int cmd_enable_events(int argc, const char **argv)
 {
-	int opt, ret = CMD_SUCCESS;
+	int opt, ret = CMD_SUCCESS, command_ret = CMD_SUCCESS, success = 1;
 	static poptContext pc;
 	char *session_name = NULL;
 	int event_type = -1;
@@ -1028,6 +1366,31 @@ int cmd_enable_events(int argc, const char **argv)
 		}
 	}
 
+	/* Mi check */
+	if (lttng_opt_mi) {
+		writer = mi_lttng_writer_create(fileno(stdout), lttng_opt_mi);
+		if (!writer) {
+			ret = -LTTNG_ERR_NOMEM;
+			goto end;
+		}
+
+		/* Open command element */
+		ret = mi_lttng_writer_command_open(writer,
+				mi_lttng_element_command_enable_event);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
+
+		/* Open output element */
+		ret = mi_lttng_writer_open_element(writer,
+				mi_lttng_element_command_output);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
+	}
+
 	opt_event_list = (char*) poptGetArg(pc);
 	if (opt_event_list == NULL && opt_enable_all == 0) {
 		ERR("Missing event name(s).\n");
@@ -1039,19 +1402,58 @@ int cmd_enable_events(int argc, const char **argv)
 	if (!opt_session_name) {
 		session_name = get_session_name();
 		if (session_name == NULL) {
-			ret = CMD_ERROR;
-			goto end;
+			command_ret = CMD_ERROR;
+			success = 0;
+			goto mi_closing;
 		}
 	} else {
 		session_name = opt_session_name;
 	}
 
-	ret = enable_events(session_name);
+	command_ret = enable_events(session_name);
+	if (command_ret) {
+		success = 0;
+		goto mi_closing;
+	}
+
+mi_closing:
+	/* Mi closing */
+	if (lttng_opt_mi) {
+		/* Close  output element */
+		ret = mi_lttng_writer_close_element(writer);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
+
+		ret = mi_lttng_writer_write_element_bool(writer,
+				mi_lttng_element_command_success, success);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
+
+		/* Command element close */
+		ret = mi_lttng_writer_command_close(writer);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
+	}
 
 end:
+	/* Mi clean-up */
+	if (writer && mi_lttng_writer_destroy(writer)) {
+		/* Preserve original error code */
+		ret = ret ? ret : LTTNG_ERR_MI_IO_FAIL;
+	}
+
 	if (opt_session_name == NULL) {
 		free(session_name);
 	}
+
+	/* Overwrite ret if an error occurred in enable_events */
+	ret = command_ret ? command_ret : ret;
 
 	poptFreeContext(pc);
 	return ret;

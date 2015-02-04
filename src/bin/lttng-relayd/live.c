@@ -515,6 +515,11 @@ restart:
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
+			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
+
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = check_thread_quit_pipe(pollfd, revents);
 			if (ret) {
@@ -558,11 +563,12 @@ restart:
 				new_conn->sock = newsock;
 
 				/* Enqueue request for the dispatcher thread. */
-				cds_wfq_enqueue(&viewer_conn_queue.queue, &new_conn->qnode);
+				cds_wfcq_enqueue(&viewer_conn_queue.head, &viewer_conn_queue.tail,
+						 &new_conn->qnode);
 
 				/*
 				 * Wake the dispatch queue futex. Implicit memory barrier with
-				 * the exchange in cds_wfq_enqueue.
+				 * the exchange in cds_wfcq_enqueue.
 				 */
 				futex_nto1_wake(&viewer_conn_queue.futex);
 			}
@@ -601,7 +607,7 @@ void *thread_dispatcher(void *data)
 {
 	int err = -1;
 	ssize_t ret;
-	struct cds_wfq_node *node;
+	struct cds_wfcq_node *node;
 	struct relay_connection *conn = NULL;
 
 	DBG("[thread] Live viewer relay dispatcher started");
@@ -624,7 +630,8 @@ void *thread_dispatcher(void *data)
 			health_code_update();
 
 			/* Dequeue commands */
-			node = cds_wfq_dequeue_blocking(&viewer_conn_queue.queue);
+			node = cds_wfcq_dequeue_blocking(&viewer_conn_queue.head,
+							 &viewer_conn_queue.tail);
 			if (node == NULL) {
 				DBG("Woken up but nothing in the live-viewer "
 						"relay command queue");
@@ -728,7 +735,12 @@ int viewer_connect(struct relay_connection *conn)
 	reply.major = htobe32(reply.major);
 	reply.minor = htobe32(reply.minor);
 	if (conn->type == RELAY_VIEWER_COMMAND) {
-		reply.viewer_session_id = htobe64(++last_relay_viewer_session_id);
+		/*
+		 * Increment outside of htobe64 macro, because can be used more than once
+		 * within the macro, and thus the operation may be undefined.
+		 */
+		last_relay_viewer_session_id++;
+		reply.viewer_session_id = htobe64(last_relay_viewer_session_id);
 	}
 
 	health_code_update();
@@ -1320,7 +1332,7 @@ int viewer_get_next_index(struct relay_connection *conn)
 	ret = check_index_status(vstream, rstream, ctf_trace, &viewer_index);
 	pthread_mutex_unlock(&rstream->viewer_stream_rotation_lock);
 	if (ret < 0) {
-		goto end;
+		goto end_unlock;
 	} else if (ret == 1) {
 		/*
 		 * This means the viewer index data structure has been populated by the
@@ -1948,6 +1960,11 @@ restart:
 
 			health_code_update();
 
+			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
+
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = check_thread_quit_pipe(pollfd, revents);
 			if (ret) {
@@ -2113,7 +2130,7 @@ int live_start_threads(struct lttng_uri *uri,
 	}
 
 	/* Init relay command queue. */
-	cds_wfq_init(&viewer_conn_queue.queue);
+	cds_wfcq_init(&viewer_conn_queue.head, &viewer_conn_queue.tail);
 
 	/* Set up max poll set size */
 	lttng_poll_set_max_size();

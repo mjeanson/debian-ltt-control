@@ -97,6 +97,10 @@ struct lttng_kernel_function {
 	char symbol_name[LTTNG_KERNEL_SYM_NAME_LEN];
 } LTTNG_PACKED;
 
+struct lttng_kernel_syscall {
+	char enable;
+} __attribute__((packed));
+
 #define LTTNG_KERNEL_EVENT_PADDING1    16
 #define LTTNG_KERNEL_EVENT_PADDING2    LTTNG_KERNEL_SYM_NAME_LEN + 32
 struct lttng_kernel_event {
@@ -109,6 +113,7 @@ struct lttng_kernel_event {
 		struct lttng_kernel_kretprobe kretprobe;
 		struct lttng_kernel_kprobe kprobe;
 		struct lttng_kernel_function ftrace;
+		struct lttng_kernel_syscall syscall;
 		char padding[LTTNG_KERNEL_EVENT_PADDING2];
 	} u;
 } LTTNG_PACKED;
@@ -119,12 +124,22 @@ struct lttng_kernel_tracer_version {
 	uint32_t patchlevel;
 } LTTNG_PACKED;
 
+struct lttng_kernel_tracer_abi_version {
+	uint32_t major;
+	uint32_t minor;
+} LTTNG_PACKED;
+
 enum lttng_kernel_calibrate_type {
 	LTTNG_KERNEL_CALIBRATE_KRETPROBE,
 };
 
 struct lttng_kernel_calibrate {
 	enum lttng_kernel_calibrate_type type;	/* type (input) */
+} LTTNG_PACKED;
+
+struct lttng_kernel_syscall_mask {
+	uint32_t len;	/* in bits */
+	char mask[];
 } LTTNG_PACKED;
 
 /*

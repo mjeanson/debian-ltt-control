@@ -48,6 +48,9 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
+/* has kmod support */
+#undef HAVE_KMOD
+
 /* has LTTng-UST control support */
 #undef HAVE_LIBLTTNG_UST_CTL
 
@@ -129,8 +132,7 @@
 /* Has open_memstream support. */
 #undef LTTNG_HAVE_OPEN_MEMSTREAM
 
-/* Define to the sub-directory in which libtool stores uninstalled libraries.
-   */
+/* Define to the sub-directory where libtool stores uninstalled libraries. */
 #undef LT_OBJDIR
 
 /* Name of package */

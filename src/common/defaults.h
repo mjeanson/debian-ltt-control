@@ -88,11 +88,14 @@
 #define DEFAULT_LTTNG_RUNDIR                    CONFIG_LTTNG_SYSTEM_RUNDIR
 #define DEFAULT_LTTNG_HOME_RUNDIR               "%s/.lttng"
 #define DEFAULT_LTTNG_SESSIOND_PIDFILE          "lttng-sessiond.pid"
-#define DEFAULT_LTTNG_SESSIOND_JULPORT_FILE     "jul.port"
+#define DEFAULT_LTTNG_SESSIOND_AGENTPORT_FILE   "agent.port"
 #define DEFAULT_LTTNG_SESSIOND_LOCKFILE         "lttng-sessiond.lck"
 
 /* Default probes list */
 #define DEFAULT_LTTNG_KMOD_PROBES		"LTTNG_KMOD_PROBES"
+
+/* Default extra probes list */
+#define DEFAULT_LTTNG_EXTRA_KMOD_PROBES		"LTTNG_EXTRA_KMOD_PROBES"
 
 /* Default unix socket path */
 #define DEFAULT_GLOBAL_CLIENT_UNIX_SOCK         DEFAULT_LTTNG_RUNDIR "/client-lttng-sessiond"
@@ -165,6 +168,13 @@
 /* Default JUL tracepoint name. This is a wildcard for the JUL domain. */
 #define DEFAULT_SYS_JUL_EVENT_NAME      "lttng_jul:sys*"
 #define DEFAULT_USER_JUL_EVENT_NAME     "lttng_jul:user*"
+
+/* Default log4j domain channel name. */
+#define DEFAULT_LOG4J_CHANNEL_NAME        "lttng_log4j_channel"
+/* Default log4j tracepoint name. This is a wildcard for the log4j domain. */
+#define DEFAULT_SYS_LOG4J_EVENT_NAME      "lttng_log4j:sys*"
+#define DEFAULT_USER_LOG4J_EVENT_NAME     "lttng_log4j:user*"
+
 /* JUL default channel name. */
 #define DEFAULT_CHANNEL_OVERWRITE       0
 #define DEFAULT_CHANNEL_TRACEFILE_SIZE  0
@@ -233,15 +243,15 @@
 #define DEFAULT_NETWORK_CONTROL_BIND_ADDRESS    "0.0.0.0"
 #define DEFAULT_NETWORK_DATA_BIND_ADDRESS       "0.0.0.0"
 #define DEFAULT_NETWORK_VIEWER_BIND_ADDRESS     "localhost"
-#define DEFAULT_JUL_BIND_ADDRESS                "localhost"
+#define DEFAULT_AGENT_BIND_ADDRESS              "localhost"
 
 /* Default network ports for trace streaming support. */
 #define DEFAULT_NETWORK_CONTROL_PORT        5342
 #define DEFAULT_NETWORK_DATA_PORT           5343
 #define DEFAULT_NETWORK_VIEWER_PORT         5344
 
-/* JUL registration TCP port. */
-#define DEFAULT_JUL_TCP_PORT                5345
+/* Agent registration TCP port. */
+#define DEFAULT_AGENT_TCP_PORT              5345
 
 /*
  * If a thread stalls for this amount of time, it will be considered bogus (bad

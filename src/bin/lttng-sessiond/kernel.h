@@ -41,6 +41,10 @@ int kernel_disable_channel(struct ltt_kernel_channel *chan);
 int kernel_disable_event(struct ltt_kernel_event *event);
 int kernel_enable_event(struct ltt_kernel_event *event);
 int kernel_enable_channel(struct ltt_kernel_channel *chan);
+int kernel_enable_syscall(const char *syscall_name,
+		struct ltt_kernel_channel *channel);
+int kernel_disable_syscall(const char *syscall_name,
+		struct ltt_kernel_channel *channel);
 int kernel_open_metadata(struct ltt_kernel_session *session);
 int kernel_open_metadata_stream(struct ltt_kernel_session *session);
 int kernel_open_channel_stream(struct ltt_kernel_channel *channel);
@@ -55,7 +59,9 @@ int kernel_validate_version(int tracer_fd);
 void kernel_destroy_session(struct ltt_kernel_session *ksess);
 void kernel_destroy_channel(struct ltt_kernel_channel *kchan);
 int kernel_snapshot_record(struct ltt_kernel_session *ksess,
-		struct snapshot_output *output, int wait, uint64_t max_stream_size);
+		struct snapshot_output *output, int wait,
+		uint64_t nb_packets_per_stream);
+int kernel_syscall_mask(int chan_fd, char **syscall_mask, uint32_t *nr_bits);
 
 int init_kernel_workarounds(void);
 

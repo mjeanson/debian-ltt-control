@@ -67,9 +67,10 @@
 #include "health-sessiond.h"
 #include "testpoint.h"
 #include "ust-thread.h"
-#include "jul-thread.h"
+#include "agent-thread.h"
 #include "save.h"
 #include "load-session-thread.h"
+#include "syscall.h"
 
 #define CONSUMERD_FILE	"lttng-consumerd"
 
@@ -153,10 +154,11 @@ static const struct option long_options[] = {
 	{ "verbose-consumer", 0, 0, 'Z' },
 	{ "no-kernel", 0, 0, 'N' },
 	{ "pidfile", 1, 0, 'p' },
-	{ "jul-tcp-port", 1, 0, 'J' },
+	{ "agent-tcp-port", 1, 0, 'J' },
 	{ "config", 1, 0, 'f' },
 	{ "load", 1, 0, 'l' },
 	{ "kmod-probes", 1, 0, 'P' },
+	{ "extra-kmod-probes", 1, 0, 'e' },
 	{ NULL, 0, 0, 0 }
 };
 
@@ -204,7 +206,7 @@ static pthread_t kernel_thread;
 static pthread_t dispatch_thread;
 static pthread_t health_thread;
 static pthread_t ht_cleanup_thread;
-static pthread_t jul_reg_thread;
+static pthread_t agent_reg_thread;
 static pthread_t load_session_thread;
 
 /*
@@ -289,8 +291,8 @@ long page_size;
 /* Application health monitoring */
 struct health_app *health_sessiond;
 
-/* JUL TCP port for registration. Used by the JUL thread. */
-unsigned int jul_tcp_port = DEFAULT_JUL_TCP_PORT;
+/* Agent TCP port for registration. Used by the agent thread. */
+unsigned int agent_tcp_port = DEFAULT_AGENT_TCP_PORT;
 
 /* Am I root or not. */
 int is_root;			/* Set to 1 if the daemon is running as root */
@@ -571,7 +573,7 @@ static void cleanup(void)
 	(void) unlink(path);
 
 	snprintf(path, PATH_MAX, "%s/%s", rundir,
-			DEFAULT_LTTNG_SESSIOND_JULPORT_FILE);
+			DEFAULT_LTTNG_SESSIOND_AGENTPORT_FILE);
 	DBG("Removing %s", path);
 	(void) unlink(path);
 
@@ -641,6 +643,7 @@ static void cleanup(void)
 		}
 		DBG("Unloading kernel modules");
 		modprobe_remove_lttng_all();
+		free(syscall_table);
 	}
 
 	close_consumer_sockets();
@@ -999,12 +1002,14 @@ static void *thread_manage_kernel(void *data)
 			update_poll_flag = 0;
 		}
 
-		DBG("Thread kernel polling on %d fds", LTTNG_POLL_GETNB(&events));
+		DBG("Thread kernel polling");
 
 		/* Poll infinite value of time */
 	restart:
 		health_poll_entry();
 		ret = lttng_poll_wait(&events, -1);
+		DBG("Thread kernel return from poll on %d fds",
+				LTTNG_POLL_GETNB(&events));
 		health_poll_exit();
 		if (ret < 0) {
 			/*
@@ -1029,6 +1034,11 @@ static void *thread_manage_kernel(void *data)
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
 			health_code_update();
+
+			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
 
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = sessiond_check_thread_quit_pipe(pollfd, revents);
@@ -1175,6 +1185,11 @@ restart:
 
 		health_code_update();
 
+		if (!revents) {
+			/* No activity for this FD (poll implementation). */
+			continue;
+		}
+
 		/* Thread quit pipe has been closed. Killing thread. */
 		ret = sessiond_check_thread_quit_pipe(pollfd, revents);
 		if (ret) {
@@ -1301,6 +1316,11 @@ restart_poll:
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
 			health_code_update();
+
+			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
 
 			/*
 			 * Thread quit pipe has been triggered, flag that we should stop
@@ -1452,12 +1472,14 @@ static void *thread_manage_apps(void *data)
 	health_code_update();
 
 	while (1) {
-		DBG("Apps thread polling on %d fds", LTTNG_POLL_GETNB(&events));
+		DBG("Apps thread polling");
 
 		/* Inifinite blocking call, waiting for transmission */
 	restart:
 		health_poll_entry();
 		ret = lttng_poll_wait(&events, -1);
+		DBG("Apps thread return from poll on %d fds",
+				LTTNG_POLL_GETNB(&events));
 		health_poll_exit();
 		if (ret < 0) {
 			/*
@@ -1477,6 +1499,11 @@ static void *thread_manage_apps(void *data)
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
 			health_code_update();
+
+			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
 
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = sessiond_check_thread_quit_pipe(pollfd, revents);
@@ -1656,6 +1683,11 @@ static void sanitize_wait_queue(struct ust_reg_wait_queue *wait_queue)
 		uint32_t revents = LTTNG_POLL_GETEV(&events, i);
 		int pollfd = LTTNG_POLL_GETFD(&events, i);
 
+		if (!revents) {
+			/* No activity for this FD (poll implementation). */
+			continue;
+		}
+
 		cds_list_for_each_entry_safe(wait_node, tmp_wait_node,
 				&wait_queue->head, head) {
 			if (pollfd == wait_node->app->sock &&
@@ -1691,7 +1723,7 @@ error_create:
 static void *thread_dispatch_ust_registration(void *data)
 {
 	int ret, err = -1;
-	struct cds_wfq_node *node;
+	struct cds_wfcq_node *node;
 	struct ust_command *ust_cmd = NULL;
 	struct ust_reg_wait_node *wait_node = NULL, *tmp_wait_node;
 	struct ust_reg_wait_queue wait_queue = {
@@ -1729,7 +1761,7 @@ static void *thread_dispatch_ust_registration(void *data)
 
 			health_code_update();
 			/* Dequeue command for registration */
-			node = cds_wfq_dequeue_blocking(&ust_cmd_queue.queue);
+			node = cds_wfcq_dequeue_blocking(&ust_cmd_queue.head, &ust_cmd_queue.tail);
 			if (node == NULL) {
 				DBG("Woken up but nothing in the UST command queue");
 				/* Continue thread execution */
@@ -1995,6 +2027,11 @@ static void *thread_registration_apps(void *data)
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
+			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
+
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = sessiond_check_thread_quit_pipe(pollfd, revents);
 			if (ret) {
@@ -2083,11 +2120,11 @@ static void *thread_registration_apps(void *data)
 					 * Lock free enqueue the registration request. The red pill
 					 * has been taken! This apps will be part of the *system*.
 					 */
-					cds_wfq_enqueue(&ust_cmd_queue.queue, &ust_cmd->node);
+					cds_wfcq_enqueue(&ust_cmd_queue.head, &ust_cmd_queue.tail, &ust_cmd->node);
 
 					/*
 					 * Wake the registration queue futex. Implicit memory
-					 * barrier with the exchange in cds_wfq_enqueue.
+					 * barrier with the exchange in cds_wfcq_enqueue.
 					 */
 					futex_nto1_wake(&ust_cmd_queue.futex);
 				}
@@ -2599,6 +2636,7 @@ static int copy_session_consumer(int domain, struct ltt_session *session)
 		dir_name = DEFAULT_KERNEL_TRACE_DIR;
 		break;
 	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_UST:
 		DBG3("Copying tracing session consumer output in UST session");
 		if (session->ust_session->consumer) {
@@ -2643,6 +2681,7 @@ static int create_ust_session(struct ltt_session *session,
 
 	switch (domain->type) {
 	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_UST:
 		break;
 	default:
@@ -2829,6 +2868,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 	case LTTNG_LIST_DOMAINS:
 	case LTTNG_LIST_CHANNELS:
 	case LTTNG_LIST_EVENTS:
+	case LTTNG_LIST_SYSCALLS:
 		break;
 	default:
 		/* Setup lttng message with no payload */
@@ -2847,6 +2887,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 	case LTTNG_CALIBRATE:
 	case LTTNG_LIST_SESSIONS:
 	case LTTNG_LIST_TRACEPOINTS:
+	case LTTNG_LIST_SYSCALLS:
 	case LTTNG_LIST_TRACEPOINT_FIELDS:
 	case LTTNG_SAVE_SESSION:
 		need_tracing_session = 0;
@@ -2879,7 +2920,6 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 	switch (cmd_ctx->lsm->cmd_type) {
 	case LTTNG_DISABLE_CHANNEL:
 	case LTTNG_DISABLE_EVENT:
-	case LTTNG_DISABLE_ALL_EVENT:
 		switch (cmd_ctx->lsm->domain.type) {
 		case LTTNG_DOMAIN_KERNEL:
 			if (!cmd_ctx->session->kernel_session) {
@@ -2888,6 +2928,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 			}
 			break;
 		case LTTNG_DOMAIN_JUL:
+		case LTTNG_DOMAIN_LOG4J:
 		case LTTNG_DOMAIN_UST:
 			if (!cmd_ctx->session->ust_session) {
 				ret = LTTNG_ERR_NO_CHANNEL;
@@ -2969,6 +3010,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 
 		break;
 	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_UST:
 	{
 		if (!ust_app_supported()) {
@@ -3062,6 +3104,7 @@ skip_domain:
 			cmd_ctx->lsm->cmd_type == LTTNG_STOP_TRACE) {
 		switch (cmd_ctx->lsm->domain.type) {
 		case LTTNG_DOMAIN_JUL:
+		case LTTNG_DOMAIN_LOG4J:
 		case LTTNG_DOMAIN_UST:
 			if (uatomic_read(&ust_consumerd_state) != CONSUMER_STARTED) {
 				ret = LTTNG_ERR_NO_USTCONSUMERD;
@@ -3122,17 +3165,11 @@ skip_domain:
 	}
 	case LTTNG_DISABLE_EVENT:
 	{
+		/* FIXME: passing packed structure to non-packed pointer */
+		/* TODO: handle filter */
 		ret = cmd_disable_event(cmd_ctx->session, cmd_ctx->lsm->domain.type,
 				cmd_ctx->lsm->u.disable.channel_name,
-				cmd_ctx->lsm->u.disable.name);
-		break;
-	}
-	case LTTNG_DISABLE_ALL_EVENT:
-	{
-		DBG("Disabling all events");
-
-		ret = cmd_disable_event_all(cmd_ctx->session, cmd_ctx->lsm->domain.type,
-				cmd_ctx->lsm->u.disable.channel_name);
+				&cmd_ctx->lsm->u.disable.event);
 		break;
 	}
 	case LTTNG_ENABLE_CHANNEL:
@@ -3209,12 +3246,14 @@ skip_domain:
 
 			if (bytecode_len > LTTNG_FILTER_MAX_LEN) {
 				ret = LTTNG_ERR_FILTER_INVAL;
+				free(filter_expression);
 				free(exclusion);
 				goto error;
 			}
 
 			bytecode = zmalloc(bytecode_len);
 			if (!bytecode) {
+				free(filter_expression);
 				free(exclusion);
 				ret = LTTNG_ERR_FILTER_NOMEM;
 				goto error;
@@ -3226,6 +3265,7 @@ skip_domain:
 			if (ret <= 0) {
 				DBG("Nothing recv() from client car len data... continuing");
 				*sock_error = 1;
+				free(filter_expression);
 				free(bytecode);
 				free(exclusion);
 				ret = LTTNG_ERR_FILTER_INVAL;
@@ -3233,6 +3273,7 @@ skip_domain:
 			}
 
 			if ((bytecode->len + sizeof(*bytecode)) != bytecode_len) {
+				free(filter_expression);
 				free(bytecode);
 				free(exclusion);
 				ret = LTTNG_ERR_FILTER_INVAL;
@@ -3244,16 +3285,6 @@ skip_domain:
 				cmd_ctx->lsm->u.enable.channel_name,
 				&cmd_ctx->lsm->u.enable.event,
 				filter_expression, bytecode, exclusion,
-				kernel_poll_pipe[1]);
-		break;
-	}
-	case LTTNG_ENABLE_ALL_EVENT:
-	{
-		DBG("Enabling all events");
-
-		ret = cmd_enable_event_all(cmd_ctx->session, &cmd_ctx->lsm->domain,
-				cmd_ctx->lsm->u.enable.channel_name,
-				cmd_ctx->lsm->u.enable.event.type, NULL, NULL,
 				kernel_poll_pipe[1]);
 		break;
 	}
@@ -3325,6 +3356,37 @@ skip_domain:
 		ret = LTTNG_OK;
 		break;
 	}
+	case LTTNG_LIST_SYSCALLS:
+	{
+		struct lttng_event *events;
+		ssize_t nb_events;
+
+		nb_events = cmd_list_syscalls(&events);
+		if (nb_events < 0) {
+			/* Return value is a negative lttng_error_code. */
+			ret = -nb_events;
+			goto error;
+		}
+
+		/*
+		 * Setup lttng message with payload size set to the event list size in
+		 * bytes and then copy list into the llm payload.
+		 */
+		ret = setup_lttng_msg(cmd_ctx, sizeof(struct lttng_event) * nb_events);
+		if (ret < 0) {
+			free(events);
+			goto setup_error;
+		}
+
+		/* Copy event list into message payload */
+		memcpy(cmd_ctx->llm->payload, events,
+				sizeof(struct lttng_event) * nb_events);
+
+		free(events);
+
+		ret = LTTNG_OK;
+		break;
+	}
 	case LTTNG_SET_CONSUMER_URI:
 	{
 		size_t nb_uri, len;
@@ -3355,31 +3417,12 @@ skip_domain:
 			goto error;
 		}
 
-		ret = cmd_set_consumer_uri(cmd_ctx->lsm->domain.type, cmd_ctx->session,
-				nb_uri, uris);
+		ret = cmd_set_consumer_uri(cmd_ctx->session, nb_uri, uris);
+		free(uris);
 		if (ret != LTTNG_OK) {
-			free(uris);
 			goto error;
 		}
 
-		/*
-		 * XXX: 0 means that this URI should be applied on the session. Should
-		 * be a DOMAIN enuam.
-		 */
-		if (cmd_ctx->lsm->domain.type == 0) {
-			/* Add the URI for the UST session if a consumer is present. */
-			if (cmd_ctx->session->ust_session &&
-					cmd_ctx->session->ust_session->consumer) {
-				ret = cmd_set_consumer_uri(LTTNG_DOMAIN_UST, cmd_ctx->session,
-						nb_uri, uris);
-			} else if (cmd_ctx->session->kernel_session &&
-					cmd_ctx->session->kernel_session->consumer) {
-				ret = cmd_set_consumer_uri(LTTNG_DOMAIN_KERNEL,
-						cmd_ctx->session, nb_uri, uris);
-			}
-		}
-
-		free(uris);
 
 		break;
 	}
@@ -3472,7 +3515,7 @@ skip_domain:
 	case LTTNG_LIST_CHANNELS:
 	{
 		int nb_chan;
-		struct lttng_channel *channels;
+		struct lttng_channel *channels = NULL;
 
 		nb_chan = cmd_list_channels(cmd_ctx->lsm->domain.type,
 				cmd_ctx->session, &channels);
@@ -3846,6 +3889,11 @@ restart:
 			revents = LTTNG_POLL_GETEV(&events, i);
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
+			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
+
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = sessiond_check_thread_quit_pipe(pollfd, revents);
 			if (ret) {
@@ -4017,6 +4065,11 @@ static void *thread_manage_clients(void *data)
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
 			health_code_update();
+
+			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
 
 			/* Thread quit pipe has been closed. Killing thread. */
 			ret = sessiond_check_thread_quit_pipe(pollfd, revents);
@@ -4211,10 +4264,11 @@ static void usage(void)
 	fprintf(stderr, "  -p, --pidfile FILE                 Write a pid to FILE name overriding the default value.\n");
 	fprintf(stderr, "      --verbose-consumer             Verbose mode for consumer. Activate DBG() macro.\n");
 	fprintf(stderr, "      --no-kernel                    Disable kernel tracer\n");
-	fprintf(stderr, "      --jul-tcp-port                 JUL application registration TCP port\n");
-	fprintf(stderr, "  -f  --config                       Load daemon configuration file\n");
+	fprintf(stderr, "      --agent-tcp-port               Agent registration TCP port\n");
+	fprintf(stderr, "  -f  --config PATH                  Load daemon configuration file\n");
 	fprintf(stderr, "  -l  --load PATH                    Load session configuration\n");
 	fprintf(stderr, "      --kmod-probes                  Specify kernel module probes to load\n");
+	fprintf(stderr, "      --extra-kmod-probes            Specify extra kernel module probes to load\n");
 }
 
 /*
@@ -4226,6 +4280,17 @@ static void usage(void)
 static int set_option(int opt, const char *arg, const char *optname)
 {
 	int ret = 0;
+
+	if (arg && arg[0] == '\0') {
+		/*
+		 * This only happens if the value is read from daemon config
+		 * file. This means the option requires an argument and the
+		 * configuration file contains a line such as:
+		 * my_option =
+		 */
+		ret = -EINVAL;
+		goto end;
+	}
 
 	switch (opt) {
 	case 0:
@@ -4367,22 +4432,22 @@ static int set_option(int opt, const char *arg, const char *optname)
 			ret = -ENOMEM;
 		}
 		break;
-	case 'J': /* JUL TCP port. */
+	case 'J': /* Agent TCP port. */
 	{
 		unsigned long v;
 
 		errno = 0;
 		v = strtoul(arg, NULL, 0);
 		if (errno != 0 || !isdigit(arg[0])) {
-			ERR("Wrong value in --jul-tcp-port parameter: %s", arg);
+			ERR("Wrong value in --agent-tcp-port parameter: %s", arg);
 			return -1;
 		}
 		if (v == 0 || v >= 65535) {
-			ERR("Port overflow in --jul-tcp-port parameter: %s", arg);
+			ERR("Port overflow in --agent-tcp-port parameter: %s", arg);
 			return -1;
 		}
-		jul_tcp_port = (uint32_t) v;
-		DBG3("JUL TCP port set to non default: %u", jul_tcp_port);
+		agent_tcp_port = (uint32_t) v;
+		DBG3("Agent TCP port set to non default: %u", agent_tcp_port);
 		break;
 	}
 	case 'l':
@@ -4401,6 +4466,14 @@ static int set_option(int opt, const char *arg, const char *optname)
 			ret = -ENOMEM;
 		}
 		break;
+	case 'e':
+		free(kmod_extra_probes_list);
+		kmod_extra_probes_list = strdup(arg);
+		if (!kmod_extra_probes_list) {
+			perror("strdup");
+			ret = -ENOMEM;
+		}
+		break;
 	case 'f':
 		/* This is handled in set_options() thus silent break. */
 		break;
@@ -4408,6 +4481,23 @@ static int set_option(int opt, const char *arg, const char *optname)
 		/* Unknown option or other error.
 		 * Error is printed by getopt, just return */
 		ret = -1;
+	}
+
+end:
+	if (ret == -EINVAL) {
+		const char *opt_name = "unknown";
+		int i;
+
+		for (i = 0; i < sizeof(long_options) / sizeof(struct option);
+			i++) {
+			if (opt == long_options[i].val) {
+				opt_name = long_options[i].name;
+				break;
+			}
+		}
+
+		WARN("Invalid argument provided for option \"%s\", using default value.",
+			opt_name);
 	}
 
 	return ret;
@@ -4922,9 +5012,9 @@ error:
 }
 
 /*
- * Write JUL TCP port using the rundir.
+ * Write agent TCP port using the rundir.
  */
-static void write_julport(void)
+static void write_agent_port(void)
 {
 	int ret;
 	char path[PATH_MAX];
@@ -4932,18 +5022,18 @@ static void write_julport(void)
 	assert(rundir);
 
 	ret = snprintf(path, sizeof(path), "%s/"
-			DEFAULT_LTTNG_SESSIOND_JULPORT_FILE, rundir);
+			DEFAULT_LTTNG_SESSIOND_AGENTPORT_FILE, rundir);
 	if (ret < 0) {
-		PERROR("snprintf julport path");
+		PERROR("snprintf agent port path");
 		goto error;
 	}
 
 	/*
-	 * Create TCP JUL port file in rundir. Return value is of no importance.
+	 * Create TCP agent port file in rundir. Return value is of no importance.
 	 * The execution will continue even though we are not able to write the
 	 * file.
 	 */
-	(void) utils_create_pid_file(jul_tcp_port, path);
+	(void) utils_create_pid_file(agent_tcp_port, path);
 
 error:
 	return;
@@ -5040,6 +5130,10 @@ int main(int argc, char **argv)
 
 	if (is_root) {
 		rundir = strdup(DEFAULT_LTTNG_RUNDIR);
+		if (!rundir) {
+			ret = -ENOMEM;
+			goto error;
+		}
 
 		/* Create global run dir with root access */
 		ret = create_lttng_rundir(rundir);
@@ -5180,8 +5274,8 @@ int main(int argc, char **argv)
 	 */
 	ust_app_ht_alloc();
 
-	/* Initialize JUL domain subsystem. */
-	if ((ret = jul_init()) < 0) {
+	/* Initialize agent domain subsystem. */
+	if ((ret = agent_setup()) < 0) {
 		/* ENOMEM at this point. */
 		goto error;
 	}
@@ -5203,6 +5297,13 @@ int main(int argc, char **argv)
 		/* Setup kernel tracer */
 		if (!opt_no_kernel) {
 			init_kernel_tracer();
+			if (kernel_tracer_fd >= 0) {
+				ret = syscall_init_table();
+				if (ret < 0) {
+					ERR("Unable to populate syscall table. Syscall tracing"
+							" won't work for this session daemon.");
+				}
+			}
 		}
 
 		/* Set ulimit for open files */
@@ -5263,7 +5364,7 @@ int main(int argc, char **argv)
 	buffer_reg_init_pid_registry();
 
 	/* Init UST command queue. */
-	cds_wfq_init(&ust_cmd_queue.queue);
+	cds_wfcq_init(&ust_cmd_queue.head, &ust_cmd_queue.tail);
 
 	/*
 	 * Get session list pointer. This pointer MUST NOT be free(). This list is
@@ -5285,7 +5386,7 @@ int main(int argc, char **argv)
 	}
 
 	write_pidfile();
-	write_julport();
+	write_agent_port();
 
 	/* Initialize communication library */
 	lttcomm_init();
@@ -5363,12 +5464,12 @@ int main(int argc, char **argv)
 		goto exit_apps_notify;
 	}
 
-	/* Create JUL registration thread. */
-	ret = pthread_create(&jul_reg_thread, NULL,
-			jul_thread_manage_registration, (void *) NULL);
+	/* Create agent registration thread. */
+	ret = pthread_create(&agent_reg_thread, NULL,
+			agent_thread_manage_registration, (void *) NULL);
 	if (ret != 0) {
-		PERROR("pthread_create JUL");
-		goto exit_jul_reg;
+		PERROR("pthread_create agent");
+		goto exit_agent_reg;
 	}
 
 	/* Don't start this thread if kernel tracing is not requested nor root */
@@ -5394,13 +5495,13 @@ int main(int argc, char **argv)
 	}
 
 exit_kernel:
-	ret = pthread_join(jul_reg_thread, &status);
+	ret = pthread_join(agent_reg_thread, &status);
 	if (ret != 0) {
-		PERROR("pthread_join JUL");
+		PERROR("pthread_join agent");
 		goto error;	/* join error, exit without cleanup */
 	}
 
-exit_jul_reg:
+exit_agent_reg:
 	ret = pthread_join(apps_notify_thread, &status);
 	if (ret != 0) {
 		PERROR("pthread_join apps notify");

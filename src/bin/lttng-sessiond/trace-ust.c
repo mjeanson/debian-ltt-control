@@ -200,13 +200,44 @@ error:
 }
 
 /*
+ * Lookup an agent in the session agents hash table by domain type and return
+ * the object if found else NULL.
+ *
+ * RCU read side lock must be acquired before calling and only released
+ * once the agent is no longer in scope or being used.
+ */
+struct agent *trace_ust_find_agent(struct ltt_ust_session *session,
+		enum lttng_domain_type domain_type)
+{
+	struct agent *agt = NULL;
+	struct lttng_ht_node_u64 *node;
+	struct lttng_ht_iter iter;
+	uint64_t key;
+
+	assert(session);
+
+	DBG3("Trace ust agent lookup for domain %d", domain_type);
+
+	key = domain_type;
+
+	lttng_ht_lookup(session->agents, &key, &iter);
+	node = lttng_ht_iter_get_node_u64(&iter);
+	if (!node) {
+		goto end;
+	}
+	agt = caa_container_of(node, struct agent, node);
+
+end:
+	return agt;
+}
+
+/*
  * Allocate and initialize a ust session data structure.
  *
  * Return pointer to structure or NULL.
  */
 struct ltt_ust_session *trace_ust_create_session(uint64_t session_id)
 {
-	int ret;
 	struct ltt_ust_session *lus;
 
 	/* Allocate a new ltt ust session */
@@ -242,10 +273,8 @@ struct ltt_ust_session *trace_ust_create_session(uint64_t session_id)
 
 	/* Alloc UST global domain channels' HT */
 	lus->domain_global.channels = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
-	ret = jul_init_domain(&lus->domain_jul);
-	if (ret < 0) {
-		goto error_consumer;
-	}
+	/* Alloc agent hash table. */
+	lus->agents = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
 
 	lus->consumer = consumer_create_output(CONSUMER_DST_LOCAL);
 	if (lus->consumer == NULL) {
@@ -266,7 +295,7 @@ struct ltt_ust_session *trace_ust_create_session(uint64_t session_id)
 
 error_consumer:
 	ht_cleanup_push(lus->domain_global.channels);
-	jul_destroy_domain(&lus->domain_jul);
+	ht_cleanup_push(lus->agents);
 	free(lus);
 error:
 	return NULL;
@@ -336,6 +365,7 @@ error:
 
 /*
  * Allocate and initialize a ust event. Set name and event type.
+ * We own filter_expression, filter, and exclusion.
  *
  * Return pointer to structure or NULL.
  */
@@ -393,6 +423,11 @@ struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
 		ERR("Unknown ust loglevel type (%d)", ev->loglevel_type);
 		goto error_free_event;
 	}
+	/*
+	 * Fix for enabler race. Enable is now done explicitly by
+	 * sessiond after setting filter.
+	 */
+	lue->attr.disabled = 1;
 
 	/* Same layout. */
 	lue->filter_expression = filter_expression;
@@ -411,6 +446,9 @@ struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
 error_free_event:
 	free(lue);
 error:
+	free(filter_expression);
+	free(filter);
+	free(exclusion);
 	return NULL;
 }
 
@@ -436,7 +474,12 @@ int trace_ust_context_type_event_to_ust(enum lttng_event_context_type type)
 		utype = LTTNG_UST_CONTEXT_IP;
 		break;
 	case LTTNG_EVENT_CONTEXT_PERF_THREAD_COUNTER:
-		utype = LTTNG_UST_CONTEXT_PERF_THREAD_COUNTER;
+		if (!ustctl_has_perf_counters()) {
+			utype = -1;
+			WARN("Perf counters not implemented in UST");
+		} else {
+			utype = LTTNG_UST_CONTEXT_PERF_THREAD_COUNTER;
+		}
 		break;
 	default:
 		ERR("Invalid UST context");
@@ -712,7 +755,9 @@ static void destroy_domain_global(struct ltt_ust_domain_global *dom)
  */
 void trace_ust_destroy_session(struct ltt_ust_session *session)
 {
+	struct agent *agt;
 	struct buffer_reg_uid *reg, *sreg;
+	struct lttng_ht_iter iter;
 
 	assert(session);
 
@@ -720,7 +765,13 @@ void trace_ust_destroy_session(struct ltt_ust_session *session)
 
 	/* Cleaning up UST domain */
 	destroy_domain_global(&session->domain_global);
-	jul_destroy_domain(&session->domain_jul);
+
+	rcu_read_lock();
+	cds_lfht_for_each_entry(session->agents->ht, &iter.iter, agt, node.node) {
+		lttng_ht_del(session->agents, &iter);
+		agent_destroy(agt);
+	}
+	rcu_read_unlock();
 
 	/* Cleanup UID buffer registry object(s). */
 	cds_list_for_each_entry_safe(reg, sreg, &session->buffer_reg_uid_list,

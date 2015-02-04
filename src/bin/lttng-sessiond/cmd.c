@@ -17,6 +17,7 @@
 
 #define _GNU_SOURCE
 #include <assert.h>
+#include <string.h>
 #include <inttypes.h>
 #include <urcu/list.h>
 #include <urcu/uatomic.h>
@@ -35,6 +36,7 @@
 #include "kernel-consumer.h"
 #include "lttng-sessiond.h"
 #include "utils.h"
+#include "syscall.h"
 
 #include "cmd.h"
 
@@ -46,6 +48,21 @@
  */
 static pthread_mutex_t relayd_net_seq_idx_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t relayd_net_seq_idx;
+
+/*
+ * Both functions below are special case for the Kernel domain when
+ * enabling/disabling all events.
+ */
+static
+int enable_kevent_all(struct ltt_session *session,
+		struct lttng_domain *domain, char *channel_name,
+		struct lttng_event *event,
+		char *filter_expression,
+		struct lttng_filter_bytecode *filter, int wpipe);
+static
+int disable_kevent_all(struct ltt_session *session, int domain,
+		char *channel_name,
+		struct lttng_event *event);
 
 /*
  * Create a session path used by list_lttng_sessions for the case that the
@@ -185,25 +202,27 @@ static void list_lttng_channels(int domain, struct ltt_session *session,
 }
 
 /*
- * Create a list of JUL domain events.
+ * Create a list of agent domain events.
  *
  * Return number of events in list on success or else a negative value.
  */
-static int list_lttng_jul_events(struct jul_domain *dom,
+static int list_lttng_agent_events(struct agent *agt,
 		struct lttng_event **events)
 {
 	int i = 0, ret = 0;
 	unsigned int nb_event = 0;
-	struct jul_event *event;
+	struct agent_event *event;
 	struct lttng_event *tmp_events;
 	struct lttng_ht_iter iter;
 
-	assert(dom);
+	assert(agt);
 	assert(events);
 
-	DBG3("Listing JUL events");
+	DBG3("Listing agent events");
 
-	nb_event = lttng_ht_get_count(dom->events);
+	rcu_read_lock();
+	nb_event = lttng_ht_get_count(agt->events);
+	rcu_read_unlock();
 	if (nb_event == 0) {
 		ret = nb_event;
 		goto error;
@@ -211,13 +230,13 @@ static int list_lttng_jul_events(struct jul_domain *dom,
 
 	tmp_events = zmalloc(nb_event * sizeof(*tmp_events));
 	if (!tmp_events) {
-		PERROR("zmalloc JUL events session");
+		PERROR("zmalloc agent events session");
 		ret = -LTTNG_ERR_FATAL;
 		goto error;
 	}
 
 	rcu_read_lock();
-	cds_lfht_for_each_entry(dom->events->ht, &iter.iter, event, node.node) {
+	cds_lfht_for_each_entry(agt->events->ht, &iter.iter, event, node.node) {
 		strncpy(tmp_events[i].name, event->name, sizeof(tmp_events[i].name));
 		tmp_events[i].name[sizeof(tmp_events[i].name) - 1] = '\0';
 		tmp_events[i].enabled = event->enabled;
@@ -345,7 +364,8 @@ static int list_lttng_kernel_events(char *channel_name,
 	DBG("Listing events for channel %s", kchan->channel->name);
 
 	if (nb_event == 0) {
-		goto end;
+		*events = NULL;
+		goto syscall;
 	}
 
 	*events = zmalloc(nb_event * sizeof(struct lttng_event));
@@ -392,7 +412,19 @@ static int list_lttng_kernel_events(char *channel_name,
 		i++;
 	}
 
-end:
+syscall:
+	if (syscall_table) {
+		ssize_t new_size;
+
+		new_size = syscall_list_channel(kchan, events, nb_event);
+		if (new_size < 0) {
+			free(events);
+			ret = -new_size;
+			goto error;
+		}
+		nb_event = new_size;
+	}
+
 	return nb_event;
 
 error:
@@ -907,10 +939,20 @@ int cmd_enable_channel(struct ltt_session *session,
 	int ret;
 	struct ltt_ust_session *usess = session->ust_session;
 	struct lttng_ht *chan_ht;
+	size_t len;
 
 	assert(session);
 	assert(attr);
 	assert(domain);
+
+	len = strnlen(attr->name, sizeof(attr->name));
+
+	/* Validate channel name */
+	if (attr->name[0] == '.' ||
+		memchr(attr->name, '/', len) != NULL) {
+		ret = LTTNG_ERR_INVALID_CHANNEL_NAME;
+		goto end;
+	}
 
 	DBG("Enabling channel %s for session %s", attr->name, session->name);
 
@@ -992,6 +1034,7 @@ int cmd_enable_channel(struct ltt_session *session,
 
 error:
 	rcu_read_unlock();
+end:
 	return ret;
 }
 
@@ -1000,9 +1043,25 @@ error:
  * Command LTTNG_DISABLE_EVENT processed by the client thread.
  */
 int cmd_disable_event(struct ltt_session *session, int domain,
-		char *channel_name, char *event_name)
+		char *channel_name,
+		struct lttng_event *event)
 {
 	int ret;
+	char *event_name;
+
+	DBG("Disable event command for event \'%s\'", event->name);
+
+	event_name = event->name;
+
+	/* Error out on unhandled search criteria */
+	if (event->loglevel_type || event->loglevel != -1 || event->enabled
+			|| event->pid || event->filter || event->exclusion) {
+		return LTTNG_ERR_UNK;
+	}
+	/* Special handling for kernel domain all events. */
+	if (domain == LTTNG_DOMAIN_KERNEL && !strcmp(event_name, "*")) {
+		return disable_kevent_all(session, domain, channel_name, event);
+	}
 
 	rcu_read_lock();
 
@@ -1030,8 +1089,22 @@ int cmd_disable_event(struct ltt_session *session, int domain,
 			goto error;
 		}
 
-		ret = event_kernel_disable_tracepoint(kchan, event_name);
-		if (ret != LTTNG_OK) {
+		switch (event->type) {
+		case LTTNG_EVENT_ALL:
+		case LTTNG_EVENT_TRACEPOINT:
+			ret = event_kernel_disable_tracepoint(kchan, event_name);
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
+			break;
+		case LTTNG_EVENT_SYSCALL:
+			ret = event_kernel_disable_syscall(kchan, event_name);
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
+			break;
+		default:
+			ret = LTTNG_ERR_UNK;
 			goto error;
 		}
 
@@ -1062,8 +1135,15 @@ int cmd_disable_event(struct ltt_session *session, int domain,
 			goto error;
 		}
 
-		ret = event_ust_disable_tracepoint(usess, uchan, event_name);
-		if (ret != LTTNG_OK) {
+		switch (event->type) {
+		case LTTNG_EVENT_ALL:
+			ret = event_ust_disable_tracepoint(usess, uchan, event_name);
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
+			break;
+		default:
+			ret = LTTNG_ERR_UNK;
 			goto error;
 		}
 
@@ -1071,13 +1151,33 @@ int cmd_disable_event(struct ltt_session *session, int domain,
 				channel_name);
 		break;
 	}
+	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_JUL:
 	{
+		struct agent *agt;
 		struct ltt_ust_session *usess = session->ust_session;
 
 		assert(usess);
 
-		ret = event_jul_disable(usess, event_name);
+		switch (event->type) {
+		case LTTNG_EVENT_ALL:
+			break;
+		default:
+			ret = LTTNG_ERR_UNK;
+			goto error;
+		}
+
+		agt = trace_ust_find_agent(usess, domain);
+		if (!agt) {
+			ret = -LTTNG_ERR_UST_EVENT_NOT_FOUND;
+			goto error;
+		}
+		/* The wild card * means that everything should be disabled. */
+		if (strncmp(event->name, "*", 1) == 0 && strlen(event->name) == 1) {
+			ret = event_agent_disable_all(usess, agt);
+		} else {
+			ret = event_agent_disable(usess, agt, event_name);
+		}
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
@@ -1102,10 +1202,12 @@ error:
 }
 
 /*
- * Command LTTNG_DISABLE_ALL_EVENT processed by the client thread.
+ * Command LTTNG_DISABLE_EVENT for event "*" processed by the client thread.
  */
-int cmd_disable_event_all(struct ltt_session *session, int domain,
-		char *channel_name)
+static
+int disable_kevent_all(struct ltt_session *session, int domain,
+		char *channel_name,
+		struct lttng_event *event)
 {
 	int ret;
 
@@ -1135,65 +1237,27 @@ int cmd_disable_event_all(struct ltt_session *session, int domain,
 			goto error;
 		}
 
-		ret = event_kernel_disable_all(kchan);
-		if (ret != LTTNG_OK) {
+		switch (event->type) {
+		case LTTNG_EVENT_ALL:
+			ret = event_kernel_disable_all(kchan);
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
+			break;
+		case LTTNG_EVENT_SYSCALL:
+			ret = event_kernel_disable_syscall(kchan, "");
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
+			break;
+		default:
+			ret = LTTNG_ERR_UNK;
 			goto error;
 		}
 
 		kernel_wait_quiescent(kernel_tracer_fd);
 		break;
 	}
-	case LTTNG_DOMAIN_UST:
-	{
-		struct ltt_ust_session *usess;
-		struct ltt_ust_channel *uchan;
-
-		usess = session->ust_session;
-
-		/*
-		 * If a non-default channel has been created in the
-		 * session, explicitely require that -c chan_name needs
-		 * to be provided.
-		 */
-		if (usess->has_non_default_channel && channel_name[0] == '\0') {
-			ret = LTTNG_ERR_NEED_CHANNEL_NAME;
-			goto error;
-		}
-
-		uchan = trace_ust_find_channel_by_name(usess->domain_global.channels,
-				channel_name);
-		if (uchan == NULL) {
-			ret = LTTNG_ERR_UST_CHAN_NOT_FOUND;
-			goto error;
-		}
-
-		ret = event_ust_disable_all_tracepoints(usess, uchan);
-		if (ret != 0) {
-			goto error;
-		}
-
-		DBG3("Disable all UST events in channel %s completed", channel_name);
-
-		break;
-	}
-	case LTTNG_DOMAIN_JUL:
-	{
-		struct ltt_ust_session *usess = session->ust_session;
-
-		assert(usess);
-
-		ret = event_jul_disable_all(usess);
-		if (ret != LTTNG_OK) {
-			goto error;
-		}
-
-		break;
-	}
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
 	default:
 		ret = LTTNG_ERR_UND;
 		goto error;
@@ -1301,8 +1365,41 @@ error:
 	return ret;
 }
 
+static int validate_event_name(const char *name)
+{
+	int ret = 0;
+	const char *c = name;
+	const char *event_name_end = c + LTTNG_SYMBOL_NAME_LEN;
+
+	/*
+	 * Make sure that unescaped wildcards are only used as the last
+	 * character of the event name.
+	 */
+	while (c < event_name_end) {
+		switch (*c) {
+		case '\0':
+			goto end;
+		case '\\':
+			c++;
+			break;
+		case '*':
+			if ((c + 1) < event_name_end && *(c + 1)) {
+				/* Wildcard is not the last character */
+				ret = LTTNG_ERR_INVALID_EVENT_NAME;
+				goto end;
+			}
+		default:
+			break;
+		}
+		c++;
+	}
+end:
+	return ret;
+}
+
 /*
  * Command LTTNG_ENABLE_EVENT processed by the client thread.
+ * We own filter, exclusion, and filter_expression.
  */
 int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		char *channel_name, struct lttng_event *event,
@@ -1317,6 +1414,19 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 	assert(session);
 	assert(event);
 	assert(channel_name);
+
+	DBG("Enable event command for event \'%s\'", event->name);
+
+	/* Special handling for kernel domain all events. */
+	if (domain->type == LTTNG_DOMAIN_KERNEL && !strcmp(event->name, "*")) {
+		return enable_kevent_all(session, domain, channel_name, event,
+				filter_expression, filter, wpipe);
+	}
+
+	ret = validate_event_name(event->name);
+	if (ret) {
+		goto error;
+	}
 
 	rcu_read_lock();
 
@@ -1366,12 +1476,29 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 			goto error;
 		}
 
-		ret = event_kernel_enable_tracepoint(kchan, event);
-		if (ret != LTTNG_OK) {
-			if (channel_created) {
-				/* Let's not leak a useless channel. */
-				kernel_destroy_channel(kchan);
+		switch (event->type) {
+		case LTTNG_EVENT_ALL:
+		case LTTNG_EVENT_PROBE:
+		case LTTNG_EVENT_FUNCTION:
+		case LTTNG_EVENT_FUNCTION_ENTRY:
+		case LTTNG_EVENT_TRACEPOINT:
+			ret = event_kernel_enable_tracepoint(kchan, event);
+			if (ret != LTTNG_OK) {
+				if (channel_created) {
+					/* Let's not leak a useless channel. */
+					kernel_destroy_channel(kchan);
+				}
+				goto error;
 			}
+			break;
+		case LTTNG_EVENT_SYSCALL:
+			ret = event_kernel_enable_syscall(kchan, event->name);
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
+			break;
+		default:
+			ret = LTTNG_ERR_UNK;
 			goto error;
 		}
 
@@ -1424,30 +1551,46 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		/* At this point, the session and channel exist on the tracer */
 		ret = event_ust_enable_tracepoint(usess, uchan, event,
 				filter_expression, filter, exclusion);
+		/* We have passed ownership */
+		filter_expression = NULL;
+		filter = NULL;
+		exclusion = NULL;
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
 		break;
 	}
+	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_JUL:
 	{
+		const char *default_event_name, *default_chan_name;
+		struct agent *agt;
 		struct lttng_event uevent;
 		struct lttng_domain tmp_dom;
 		struct ltt_ust_session *usess = session->ust_session;
 
 		assert(usess);
 
-		/* Create the default JUL tracepoint. */
+		agt = trace_ust_find_agent(usess, domain->type);
+		if (!agt) {
+			agt = agent_create(domain->type);
+			if (!agt) {
+				ret = -LTTNG_ERR_NOMEM;
+				goto error;
+			}
+			agent_add(agt, usess->agents);
+		}
+
+		/* Create the default tracepoint. */
 		memset(&uevent, 0, sizeof(uevent));
 		uevent.type = LTTNG_EVENT_TRACEPOINT;
 		uevent.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
-		if (is_root) {
-			strncpy(uevent.name, DEFAULT_SYS_JUL_EVENT_NAME,
-					sizeof(uevent.name));
-		} else {
-			strncpy(uevent.name, DEFAULT_USER_JUL_EVENT_NAME,
-					sizeof(uevent.name));
+		default_event_name = event_get_default_agent_ust_name(domain->type);
+		if (!default_event_name) {
+			ret = -LTTNG_ERR_FATAL;
+			goto error;
 		}
+		strncpy(uevent.name, default_event_name, sizeof(uevent.name));
 		uevent.name[sizeof(uevent.name) - 1] = '\0';
 
 		/*
@@ -1458,17 +1601,47 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		memcpy(&tmp_dom, domain, sizeof(tmp_dom));
 		tmp_dom.type = LTTNG_DOMAIN_UST;
 
-		ret = cmd_enable_event(session, &tmp_dom, DEFAULT_JUL_CHANNEL_NAME,
-			&uevent, filter_expression, filter, NULL, wpipe);
+		if (domain->type == LTTNG_DOMAIN_LOG4J) {
+			default_chan_name = DEFAULT_LOG4J_CHANNEL_NAME;
+		} else {
+			default_chan_name = DEFAULT_JUL_CHANNEL_NAME;
+		}
+
+		{
+			struct lttng_filter_bytecode *filter_copy = NULL;
+
+			if (filter) {
+				filter_copy = zmalloc(
+					sizeof(struct lttng_filter_bytecode)
+					+ filter->len);
+				if (!filter_copy) {
+					goto error;
+				}
+
+				memcpy(filter_copy, filter,
+					sizeof(struct lttng_filter_bytecode)
+					+ filter->len);
+			}
+
+			ret = cmd_enable_event(session, &tmp_dom,
+					(char *) default_chan_name,
+					&uevent, filter_expression, filter_copy,
+					NULL, wpipe);
+			/* We have passed ownership */
+			filter_expression = NULL;
+		}
+
 		if (ret != LTTNG_OK && ret != LTTNG_ERR_UST_EVENT_ENABLED) {
 			goto error;
 		}
 
 		/* The wild card * means that everything should be enabled. */
 		if (strncmp(event->name, "*", 1) == 0 && strlen(event->name) == 1) {
-			ret = event_jul_enable_all(usess, event, filter);
+			ret = event_agent_enable_all(usess, agt, event, filter);
+			filter = NULL;
 		} else {
-			ret = event_jul_enable(usess, event, filter);
+			ret = event_agent_enable(usess, agt, event, filter);
+			filter = NULL;
 		}
 		if (ret != LTTNG_OK) {
 			goto error;
@@ -1489,15 +1662,20 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 	ret = LTTNG_OK;
 
 error:
+	free(filter_expression);
+	free(filter);
+	free(exclusion);
 	rcu_read_unlock();
 	return ret;
 }
 
 /*
- * Command LTTNG_ENABLE_ALL_EVENT processed by the client thread.
+ * Command LTTNG_ENABLE_EVENT for event "*" processed by the client thread.
  */
-int cmd_enable_event_all(struct ltt_session *session,
-		struct lttng_domain *domain, char *channel_name, int event_type,
+static
+int enable_kevent_all(struct ltt_session *session,
+		struct lttng_domain *domain, char *channel_name,
+		struct lttng_event *event,
 		char *filter_expression,
 		struct lttng_filter_bytecode *filter, int wpipe)
 {
@@ -1552,9 +1730,12 @@ int cmd_enable_event_all(struct ltt_session *session,
 			assert(kchan);
 		}
 
-		switch (event_type) {
+		switch (event->type) {
 		case LTTNG_EVENT_SYSCALL:
-			ret = event_kernel_enable_all_syscalls(kchan, kernel_tracer_fd);
+			ret = event_kernel_enable_syscall(kchan, "");
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
 			break;
 		case LTTNG_EVENT_TRACEPOINT:
 			/*
@@ -1584,123 +1765,6 @@ int cmd_enable_event_all(struct ltt_session *session,
 		kernel_wait_quiescent(kernel_tracer_fd);
 		break;
 	}
-	case LTTNG_DOMAIN_UST:
-	{
-		struct ltt_ust_channel *uchan;
-		struct ltt_ust_session *usess = session->ust_session;
-
-		assert(usess);
-
-		/*
-		 * If a non-default channel has been created in the
-		 * session, explicitely require that -c chan_name needs
-		 * to be provided.
-		 */
-		if (usess->has_non_default_channel && channel_name[0] == '\0') {
-			ret = LTTNG_ERR_NEED_CHANNEL_NAME;
-			goto error;
-		}
-
-		/* Get channel from global UST domain */
-		uchan = trace_ust_find_channel_by_name(usess->domain_global.channels,
-				channel_name);
-		if (uchan == NULL) {
-			/* Create default channel */
-			attr = channel_new_default_attr(LTTNG_DOMAIN_UST,
-					usess->buffer_type);
-			if (attr == NULL) {
-				ret = LTTNG_ERR_FATAL;
-				goto error;
-			}
-			strncpy(attr->name, channel_name, sizeof(attr->name));
-
-			ret = cmd_enable_channel(session, domain, attr, wpipe);
-			if (ret != LTTNG_OK) {
-				free(attr);
-				goto error;
-			}
-			free(attr);
-
-			/* Get the newly created channel reference back */
-			uchan = trace_ust_find_channel_by_name(
-					usess->domain_global.channels, channel_name);
-			assert(uchan);
-		}
-
-		/* At this point, the session and channel exist on the tracer */
-
-		switch (event_type) {
-		case LTTNG_EVENT_ALL:
-		case LTTNG_EVENT_TRACEPOINT:
-			ret = event_ust_enable_all_tracepoints(usess, uchan,
-				filter_expression, filter);
-			if (ret != LTTNG_OK) {
-				goto error;
-			}
-			break;
-		default:
-			ret = LTTNG_ERR_UST_ENABLE_FAIL;
-			goto error;
-		}
-
-		/* Manage return value */
-		if (ret != LTTNG_OK) {
-			goto error;
-		}
-
-		break;
-	}
-	case LTTNG_DOMAIN_JUL:
-	{
-		struct lttng_event uevent, event;
-		struct lttng_domain tmp_dom;
-		struct ltt_ust_session *usess = session->ust_session;
-
-		assert(usess);
-
-		/* Create the default JUL tracepoint. */
-		uevent.type = LTTNG_EVENT_TRACEPOINT;
-		uevent.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
-		if (is_root) {
-			strncpy(uevent.name, DEFAULT_SYS_JUL_EVENT_NAME,
-					sizeof(uevent.name));
-		} else {
-			strncpy(uevent.name, DEFAULT_USER_JUL_EVENT_NAME,
-					sizeof(uevent.name));
-		}
-		uevent.name[sizeof(uevent.name) - 1] = '\0';
-
-		/*
-		 * The domain type is changed because we are about to enable the
-		 * default channel and event for the JUL domain that are hardcoded.
-		 * This happens in the UST domain.
-		 */
-		memcpy(&tmp_dom, domain, sizeof(tmp_dom));
-		tmp_dom.type = LTTNG_DOMAIN_UST;
-
-		ret = cmd_enable_event(session, &tmp_dom, DEFAULT_JUL_CHANNEL_NAME,
-			&uevent, NULL, NULL, NULL, wpipe);
-		if (ret != LTTNG_OK && ret != LTTNG_ERR_UST_EVENT_ENABLED) {
-			goto error;
-		}
-
-		event.loglevel = LTTNG_LOGLEVEL_JUL_ALL;
-		event.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
-		strncpy(event.name, "*", sizeof(event.name));
-		event.name[sizeof(event.name) - 1] = '\0';
-
-		ret = event_jul_enable_all(usess, &event, filter);
-		if (ret != LTTNG_OK) {
-			goto error;
-		}
-
-		break;
-	}
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
 	default:
 		ret = LTTNG_ERR_UND;
 		goto error;
@@ -1737,8 +1801,9 @@ ssize_t cmd_list_tracepoints(int domain, struct lttng_event **events)
 			goto error;
 		}
 		break;
+	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_JUL:
-		nb_events = jul_list_events(events);
+		nb_events = agent_list_events(events, domain);
 		if (nb_events < 0) {
 			ret = LTTNG_ERR_UST_LIST_FAIL;
 			goto error;
@@ -1786,6 +1851,11 @@ error:
 	return -ret;
 }
 
+ssize_t cmd_list_syscalls(struct lttng_event **events)
+{
+	return syscall_table_list(events);
+}
+
 /*
  * Command LTTNG_START_TRACE processed by the client thread.
  */
@@ -1813,7 +1883,9 @@ int cmd_start_trace(struct ltt_session *session)
 	 * possible to enable channel thus inform the client.
 	 */
 	if (usess && usess->domain_global.channels) {
+		rcu_read_lock();
 		nb_chan += lttng_ht_get_count(usess->domain_global.channels);
+		rcu_read_unlock();
 	}
 	if (ksession) {
 		nb_chan += ksession->channel_count;
@@ -1934,13 +2006,12 @@ error:
 /*
  * Command LTTNG_SET_CONSUMER_URI processed by the client thread.
  */
-int cmd_set_consumer_uri(int domain, struct ltt_session *session,
-		size_t nb_uri, struct lttng_uri *uris)
+int cmd_set_consumer_uri(struct ltt_session *session, size_t nb_uri,
+		struct lttng_uri *uris)
 {
 	int ret, i;
 	struct ltt_kernel_session *ksess = session->kernel_session;
 	struct ltt_ust_session *usess = session->ust_session;
-	struct consumer_output *consumer = NULL;
 
 	assert(session);
 	assert(uris);
@@ -1952,38 +2023,38 @@ int cmd_set_consumer_uri(int domain, struct ltt_session *session,
 		goto error;
 	}
 
-	/*
-	 * This case switch makes sure the domain session has a temporary consumer
-	 * so the URL can be set.
-	 */
-	switch (domain) {
-	case 0:
-		/* Code flow error. A session MUST always have a consumer object */
-		assert(session->consumer);
-		/*
-		 * The URL will be added to the tracing session consumer instead of a
-		 * specific domain consumer.
-		 */
-		consumer = session->consumer;
-		break;
-	case LTTNG_DOMAIN_KERNEL:
-		/* Code flow error if we don't have a kernel session here. */
-		assert(ksess);
-		assert(ksess->consumer);
-		consumer = ksess->consumer;
-		break;
-	case LTTNG_DOMAIN_UST:
-		/* Code flow error if we don't have a kernel session here. */
-		assert(usess);
-		assert(usess->consumer);
-		consumer = usess->consumer;
-		break;
-	}
-
+	/* Set the "global" consumer URIs */
 	for (i = 0; i < nb_uri; i++) {
-		ret = add_uri_to_consumer(consumer, &uris[i], domain, session->name);
+		ret = add_uri_to_consumer(session->consumer,
+				&uris[i], 0, session->name);
 		if (ret != LTTNG_OK) {
 			goto error;
+		}
+	}
+
+	/* Set UST session URIs */
+	if (session->ust_session) {
+		for (i = 0; i < nb_uri; i++) {
+			ret = add_uri_to_consumer(
+					session->ust_session->consumer,
+					&uris[i], LTTNG_DOMAIN_UST,
+					session->name);
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
+		}
+	}
+
+	/* Set kernel session URIs */
+	if (session->kernel_session) {
+		for (i = 0; i < nb_uri; i++) {
+			ret = add_uri_to_consumer(
+					session->kernel_session->consumer,
+					&uris[i], LTTNG_DOMAIN_KERNEL,
+					session->name);
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
 		}
 	}
 
@@ -1994,7 +2065,9 @@ int cmd_set_consumer_uri(int domain, struct ltt_session *session,
 	session->output_traces = 1;
 	if (ksess) {
 		ksess->output_traces = 1;
-	} else if (usess) {
+	}
+
+	if (usess) {
 		usess->output_traces = 1;
 	}
 
@@ -2056,7 +2129,7 @@ int cmd_create_session_uri(char *name, struct lttng_uri *uris,
 	}
 
 	if (uris) {
-		ret = cmd_set_consumer_uri(0, session, nb_uri, uris);
+		ret = cmd_set_consumer_uri(session, nb_uri, uris);
 		if (ret != LTTNG_OK) {
 			goto consumer_error;
 		}
@@ -2333,6 +2406,8 @@ ssize_t cmd_list_domains(struct ltt_session *session,
 {
 	int ret, index = 0;
 	ssize_t nb_dom = 0;
+	struct agent *agt;
+	struct lttng_ht_iter iter;
 
 	if (session->kernel_session != NULL) {
 		DBG3("Listing domains found kernel domain");
@@ -2343,9 +2418,14 @@ ssize_t cmd_list_domains(struct ltt_session *session,
 		DBG3("Listing domains found UST global domain");
 		nb_dom++;
 
-		if (session->ust_session->domain_jul.being_used) {
-			nb_dom++;
+		rcu_read_lock();
+		cds_lfht_for_each_entry(session->ust_session->agents->ht, &iter.iter,
+				agt, node.node) {
+			if (agt->being_used) {
+				nb_dom++;
+			}
 		}
+		rcu_read_unlock();
 	}
 
 	*domains = zmalloc(nb_dom * sizeof(struct lttng_domain));
@@ -2364,11 +2444,16 @@ ssize_t cmd_list_domains(struct ltt_session *session,
 		(*domains)[index].buf_type = session->ust_session->buffer_type;
 		index++;
 
-		if (session->ust_session->domain_jul.being_used) {
-			(*domains)[index].type = LTTNG_DOMAIN_JUL;
-			(*domains)[index].buf_type = session->ust_session->buffer_type;
-			index++;
+		rcu_read_lock();
+		cds_lfht_for_each_entry(session->ust_session->agents->ht, &iter.iter,
+				agt, node.node) {
+			if (agt->being_used) {
+				(*domains)[index].type = agt->domain;
+				(*domains)[index].buf_type = session->ust_session->buffer_type;
+				index++;
+			}
 		}
+		rcu_read_unlock();
 	}
 
 	return nb_dom;
@@ -2400,16 +2485,18 @@ ssize_t cmd_list_channels(int domain, struct ltt_session *session,
 		break;
 	case LTTNG_DOMAIN_UST:
 		if (session->ust_session != NULL) {
+			rcu_read_lock();
 			nb_chan = lttng_ht_get_count(
-					session->ust_session->domain_global.channels);
+				session->ust_session->domain_global.channels);
+			rcu_read_unlock();
 		}
 		DBG3("Number of UST global channels %zd", nb_chan);
-		if (nb_chan <= 0) {
+		if (nb_chan < 0) {
 			ret = LTTNG_ERR_UST_CHAN_NOT_FOUND;
+			goto error;
 		}
 		break;
 	default:
-		*channels = NULL;
 		ret = LTTNG_ERR_UND;
 		goto error;
 	}
@@ -2422,10 +2509,6 @@ ssize_t cmd_list_channels(int domain, struct ltt_session *session,
 		}
 
 		list_lttng_channels(domain, session, *channels);
-	} else {
-		*channels = NULL;
-		/* Ret value was set in the domain switch case */
-		goto error;
 	}
 
 	return nb_chan;
@@ -2459,10 +2542,18 @@ ssize_t cmd_list_events(int domain, struct ltt_session *session,
 		}
 		break;
 	}
+	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_JUL:
 		if (session->ust_session) {
-			nb_event = list_lttng_jul_events(
-					&session->ust_session->domain_jul, events);
+			struct lttng_ht_iter iter;
+			struct agent *agt;
+
+			rcu_read_lock();
+			cds_lfht_for_each_entry(session->ust_session->agents->ht,
+					&iter.iter, agt, node.node) {
+				nb_event = list_lttng_agent_events(agt, events);
+			}
+			rcu_read_unlock();
 		}
 		break;
 	default:
@@ -2711,7 +2802,7 @@ ssize_t cmd_snapshot_list_outputs(struct ltt_session *session,
 		struct lttng_snapshot_output **outputs)
 {
 	int ret, idx = 0;
-	struct lttng_snapshot_output *list;
+	struct lttng_snapshot_output *list = NULL;
 	struct lttng_ht_iter iter;
 	struct snapshot_output *output;
 
@@ -2725,7 +2816,7 @@ ssize_t cmd_snapshot_list_outputs(struct ltt_session *session,
 	 * set in no output mode.
 	 */
 	if (session->output_traces) {
-		ret = LTTNG_ERR_EPERM;
+		ret = -LTTNG_ERR_EPERM;
 		goto error;
 	}
 
@@ -2736,11 +2827,12 @@ ssize_t cmd_snapshot_list_outputs(struct ltt_session *session,
 
 	list = zmalloc(session->snapshot.nb_output * sizeof(*list));
 	if (!list) {
-		ret = LTTNG_ERR_NOMEM;
+		ret = -LTTNG_ERR_NOMEM;
 		goto error;
 	}
 
 	/* Copy list from session to the new list object. */
+	rcu_read_lock();
 	cds_lfht_for_each_entry(session->snapshot.output_ht->ht, &iter.iter,
 			output, node.node) {
 		assert(output->consumer);
@@ -2755,28 +2847,28 @@ ssize_t cmd_snapshot_list_outputs(struct ltt_session *session,
 			ret = uri_to_str_url(&output->consumer->dst.net.control,
 					list[idx].ctrl_url, sizeof(list[idx].ctrl_url));
 			if (ret < 0) {
-				ret = LTTNG_ERR_NOMEM;
-				goto free_error;
+				ret = -LTTNG_ERR_NOMEM;
+				goto error;
 			}
 
 			/* Data URI. */
 			ret = uri_to_str_url(&output->consumer->dst.net.data,
 					list[idx].data_url, sizeof(list[idx].data_url));
 			if (ret < 0) {
-				ret = LTTNG_ERR_NOMEM;
-				goto free_error;
+				ret = -LTTNG_ERR_NOMEM;
+				goto error;
 			}
 		}
 		idx++;
 	}
 
 	*outputs = list;
-	return session->snapshot.nb_output;
-
-free_error:
-	free(list);
+	list = NULL;
+	ret = session->snapshot.nb_output;
 error:
-	return -ret;
+	free(list);
+	rcu_read_unlock();
+	return ret;
 }
 
 /*
@@ -2832,7 +2924,7 @@ error:
  */
 static int record_kernel_snapshot(struct ltt_kernel_session *ksess,
 		struct snapshot_output *output, struct ltt_session *session,
-		int wait, uint64_t max_stream_size)
+		int wait, uint64_t nb_packets_per_stream)
 {
 	int ret;
 
@@ -2863,17 +2955,19 @@ static int record_kernel_snapshot(struct ltt_kernel_session *ksess,
 		goto error_snapshot;
 	}
 
-	ret = kernel_snapshot_record(ksess, output, wait, max_stream_size);
+	ret = kernel_snapshot_record(ksess, output, wait, nb_packets_per_stream);
 	if (ret != LTTNG_OK) {
 		goto error_snapshot;
 	}
 
 	ret = LTTNG_OK;
+	goto end;
 
 error_snapshot:
 	/* Clean up copied sockets so this output can use some other later on. */
 	consumer_destroy_output_sockets(output->consumer);
 error:
+end:
 	return ret;
 }
 
@@ -2884,7 +2978,7 @@ error:
  */
 static int record_ust_snapshot(struct ltt_ust_session *usess,
 		struct snapshot_output *output, struct ltt_session *session,
-		int wait, uint64_t max_stream_size)
+		int wait, uint64_t nb_packets_per_stream)
 {
 	int ret;
 
@@ -2915,7 +3009,7 @@ static int record_ust_snapshot(struct ltt_ust_session *usess,
 		goto error_snapshot;
 	}
 
-	ret = ust_app_snapshot_record(usess, output, wait, max_stream_size);
+	ret = ust_app_snapshot_record(usess, output, wait, nb_packets_per_stream);
 	if (ret < 0) {
 		switch (-ret) {
 		case EINVAL:
@@ -2940,67 +3034,90 @@ error:
 	return ret;
 }
 
-/*
- * Return the biggest subbuffer size of all channels in the given session.
- */
-static uint64_t get_session_max_subbuf_size(struct ltt_session *session)
+static
+uint64_t get_session_size_one_more_packet_per_stream(struct ltt_session *session,
+	uint64_t cur_nr_packets)
 {
-	uint64_t max_size = 0;
-
-	assert(session);
+	uint64_t tot_size = 0;
 
 	if (session->kernel_session) {
 		struct ltt_kernel_channel *chan;
 		struct ltt_kernel_session *ksess = session->kernel_session;
 
-		/*
-		 * For each channel, add to the max size the size of each subbuffer
-		 * multiplied by their sized.
-		 */
 		cds_list_for_each_entry(chan, &ksess->channel_list.head, list) {
-			if (chan->channel->attr.subbuf_size > max_size) {
-				max_size = chan->channel->attr.subbuf_size;
+			if (cur_nr_packets >= chan->channel->attr.num_subbuf) {
+				/*
+				 * Don't take channel into account if we
+				 * already grab all its packets.
+				 */
+				continue;
 			}
+			tot_size += chan->channel->attr.subbuf_size
+				* chan->stream_count;
 		}
 	}
 
 	if (session->ust_session) {
-		struct lttng_ht_iter iter;
-		struct ltt_ust_channel *uchan;
 		struct ltt_ust_session *usess = session->ust_session;
 
-		cds_lfht_for_each_entry(usess->domain_global.channels->ht, &iter.iter,
-				uchan, node.node) {
-			if (uchan->attr.subbuf_size > max_size) {
-				max_size = uchan->attr.subbuf_size;
-			}
-		}
+		tot_size += ust_app_get_size_one_more_packet_per_stream(usess,
+				cur_nr_packets);
 	}
 
-	return max_size;
+	return tot_size;
 }
 
 /*
- * Returns the total number of streams for a session or a negative value
- * on error.
+ * Calculate the number of packets we can grab from each stream that
+ * fits within the overall snapshot max size.
+ *
+ * Returns -1 on error, 0 means infinite number of packets, else > 0 is
+ * the number of packets per stream.
+ *
+ * TODO: this approach is not perfect: we consider the worse case
+ * (packet filling the sub-buffers) as an upper bound, but we could do
+ * better if we do this calculation while we actually grab the packet
+ * content: we would know how much padding we don't actually store into
+ * the file.
+ *
+ * This algorithm is currently bounded by the number of packets per
+ * stream.
+ *
+ * Since we call this algorithm before actually grabbing the data, it's
+ * an approximation: for instance, applications could appear/disappear
+ * in between this call and actually grabbing data.
  */
-static unsigned int get_session_nb_streams(struct ltt_session *session)
+static
+int64_t get_session_nb_packets_per_stream(struct ltt_session *session, uint64_t max_size)
 {
-	unsigned int total_streams = 0;
+	int64_t size_left;
+	uint64_t cur_nb_packets = 0;
 
-	if (session->kernel_session) {
-		struct ltt_kernel_session *ksess = session->kernel_session;
-
-		total_streams += ksess->stream_count_global;
+	if (!max_size) {
+		return 0;	/* Infinite */
 	}
 
-	if (session->ust_session) {
-		struct ltt_ust_session *usess = session->ust_session;
+	size_left = max_size;
+	for (;;) {
+		uint64_t one_more_packet_tot_size;
 
-		total_streams += ust_app_get_nb_stream(usess);
+		one_more_packet_tot_size = get_session_size_one_more_packet_per_stream(session,
+					cur_nb_packets);
+		if (!one_more_packet_tot_size) {
+			/* We are already grabbing all packets. */
+			break;
+		}
+		size_left -= one_more_packet_tot_size;
+		if (size_left < 0) {
+			break;
+		}
+		cur_nb_packets++;
 	}
-
-	return total_streams;
+	if (!cur_nb_packets) {
+		/* Not enough room to grab one packet of each stream, error. */
+		return -1;
+	}
+	return cur_nb_packets;
 }
 
 /*
@@ -3018,9 +3135,9 @@ int cmd_snapshot_record(struct ltt_session *session,
 	unsigned int use_tmp_output = 0;
 	struct snapshot_output tmp_output;
 	unsigned int nb_streams, snapshot_success = 0;
-	uint64_t session_max_size = 0, max_stream_size = 0;
 
 	assert(session);
+	assert(output);
 
 	DBG("Cmd snapshot record for session %s", session->name);
 
@@ -3040,7 +3157,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 	}
 
 	/* Use temporary output for the session. */
-	if (output && *output->ctrl_url != '\0') {
+	if (*output->ctrl_url != '\0') {
 		ret = snapshot_output_init(output->max_size, output->name,
 				output->ctrl_url, output->data_url, session->consumer,
 				&tmp_output, NULL);
@@ -3057,44 +3174,20 @@ int cmd_snapshot_record(struct ltt_session *session,
 		use_tmp_output = 1;
 	}
 
-	/*
-	 * Get the session maximum size for a snapshot meaning it will compute the
-	 * size of all streams from all domain.
-	 */
-	max_stream_size = get_session_max_subbuf_size(session);
-
-	nb_streams = get_session_nb_streams(session);
-	if (nb_streams) {
-		/*
-		 * The maximum size of the snapshot is the number of streams multiplied
-		 * by the biggest subbuf size of all channels in a session which is the
-		 * maximum stream size available for each stream. The session max size
-		 * is now checked against the snapshot max size value given by the user
-		 * and if lower, an error is returned.
-		 */
-		session_max_size = max_stream_size * nb_streams;
-	}
-
-	DBG3("Snapshot max size is %" PRIu64 " for max stream size of %" PRIu64,
-			session_max_size, max_stream_size);
-
-	/*
-	 * If we use a temporary output, check right away if the max size fits else
-	 * for each output the max size will be checked.
-	 */
-	if (use_tmp_output &&
-			(tmp_output.max_size != 0 &&
-			tmp_output.max_size < session_max_size)) {
-		ret = LTTNG_ERR_MAX_SIZE_INVALID;
-		goto error;
-	}
-
 	if (session->kernel_session) {
 		struct ltt_kernel_session *ksess = session->kernel_session;
 
 		if (use_tmp_output) {
+			int64_t nb_packets_per_stream;
+
+			nb_packets_per_stream = get_session_nb_packets_per_stream(session,
+					tmp_output.max_size);
+			if (nb_packets_per_stream < 0) {
+				ret = LTTNG_ERR_MAX_SIZE_INVALID;
+				goto error;
+			}
 			ret = record_kernel_snapshot(ksess, &tmp_output, session,
-					wait, max_stream_size);
+					wait, nb_packets_per_stream);
 			if (ret != LTTNG_OK) {
 				goto error;
 			}
@@ -3106,6 +3199,8 @@ int cmd_snapshot_record(struct ltt_session *session,
 			rcu_read_lock();
 			cds_lfht_for_each_entry(session->snapshot.output_ht->ht,
 					&iter.iter, sout, node.node) {
+				int64_t nb_packets_per_stream;
+
 				/*
 				 * Make a local copy of the output and assign the possible
 				 * temporary value given by the caller.
@@ -3113,14 +3208,13 @@ int cmd_snapshot_record(struct ltt_session *session,
 				memset(&tmp_output, 0, sizeof(tmp_output));
 				memcpy(&tmp_output, sout, sizeof(tmp_output));
 
-				/* Use temporary max size. */
 				if (output->max_size != (uint64_t) -1ULL) {
 					tmp_output.max_size = output->max_size;
 				}
 
-				if (tmp_output.max_size != 0 &&
-						tmp_output.max_size < session_max_size) {
-					rcu_read_unlock();
+				nb_packets_per_stream = get_session_nb_packets_per_stream(session,
+						tmp_output.max_size);
+				if (nb_packets_per_stream < 0) {
 					ret = LTTNG_ERR_MAX_SIZE_INVALID;
 					goto error;
 				}
@@ -3134,7 +3228,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 				tmp_output.nb_snapshot = session->snapshot.nb_snapshot;
 
 				ret = record_kernel_snapshot(ksess, &tmp_output,
-						session, wait, max_stream_size);
+						session, wait, nb_packets_per_stream);
 				if (ret != LTTNG_OK) {
 					rcu_read_unlock();
 					goto error;
@@ -3149,8 +3243,16 @@ int cmd_snapshot_record(struct ltt_session *session,
 		struct ltt_ust_session *usess = session->ust_session;
 
 		if (use_tmp_output) {
+			int64_t nb_packets_per_stream;
+
+			nb_packets_per_stream = get_session_nb_packets_per_stream(session,
+					tmp_output.max_size);
+			if (nb_packets_per_stream < 0) {
+				ret = LTTNG_ERR_MAX_SIZE_INVALID;
+				goto error;
+			}
 			ret = record_ust_snapshot(usess, &tmp_output, session,
-					wait, max_stream_size);
+					wait, nb_packets_per_stream);
 			if (ret != LTTNG_OK) {
 				goto error;
 			}
@@ -3162,6 +3264,8 @@ int cmd_snapshot_record(struct ltt_session *session,
 			rcu_read_lock();
 			cds_lfht_for_each_entry(session->snapshot.output_ht->ht,
 					&iter.iter, sout, node.node) {
+				int64_t nb_packets_per_stream;
+
 				/*
 				 * Make a local copy of the output and assign the possible
 				 * temporary value given by the caller.
@@ -3169,15 +3273,15 @@ int cmd_snapshot_record(struct ltt_session *session,
 				memset(&tmp_output, 0, sizeof(tmp_output));
 				memcpy(&tmp_output, sout, sizeof(tmp_output));
 
-				/* Use temporary max size. */
 				if (output->max_size != (uint64_t) -1ULL) {
 					tmp_output.max_size = output->max_size;
 				}
 
-				if (tmp_output.max_size != 0 &&
-						tmp_output.max_size < session_max_size) {
-					rcu_read_unlock();
+				nb_packets_per_stream = get_session_nb_packets_per_stream(session,
+						tmp_output.max_size);
+				if (nb_packets_per_stream < 0) {
 					ret = LTTNG_ERR_MAX_SIZE_INVALID;
+					rcu_read_unlock();
 					goto error;
 				}
 
@@ -3190,7 +3294,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 				tmp_output.nb_snapshot = session->snapshot.nb_snapshot;
 
 				ret = record_ust_snapshot(usess, &tmp_output, session,
-						wait, max_stream_size);
+						wait, nb_packets_per_stream);
 				if (ret != LTTNG_OK) {
 					rcu_read_unlock();
 					goto error;

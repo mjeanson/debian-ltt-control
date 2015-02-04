@@ -84,6 +84,21 @@ enum lttng_loglevel_jul {
 };
 
 /*
+ * Available loglevels for the LOG4j domain. Those are an exact map from the
+ * class org.apache.log4j.Level.
+ */
+enum lttng_loglevel_log4j {
+	LTTNG_LOGLEVEL_LOG4J_OFF              = INT32_MAX,
+	LTTNG_LOGLEVEL_LOG4J_FATAL            = 50000,
+	LTTNG_LOGLEVEL_LOG4J_ERROR            = 40000,
+	LTTNG_LOGLEVEL_LOG4J_WARN             = 30000,
+	LTTNG_LOGLEVEL_LOG4J_INFO             = 20000,
+	LTTNG_LOGLEVEL_LOG4J_DEBUG            = 10000,
+	LTTNG_LOGLEVEL_LOG4J_TRACE            = 5000,
+	LTTNG_LOGLEVEL_LOG4J_ALL              = INT32_MIN,
+};
+
+/*
  * LTTng consumer mode
  */
 enum lttng_event_output {
@@ -116,6 +131,11 @@ enum lttng_event_field_type {
 	LTTNG_EVENT_FIELD_ENUM                = 2,
 	LTTNG_EVENT_FIELD_FLOAT               = 3,
 	LTTNG_EVENT_FIELD_STRING              = 4,
+};
+
+enum lttng_event_flag {
+	LTTNG_EVENT_FLAG_SYSCALL_32           = (1U << 0),
+	LTTNG_EVENT_FLAG_SYSCALL_64           = (1U << 1),
 };
 
 /*
@@ -183,7 +203,7 @@ struct lttng_event_function_attr {
  *
  * The structures should be initialized to zero before use.
  */
-#define LTTNG_EVENT_PADDING1               14
+#define LTTNG_EVENT_PADDING1               10
 #define LTTNG_EVENT_PADDING2               LTTNG_SYMBOL_NAME_LEN + 32
 struct lttng_event {
 	enum lttng_event_type type;
@@ -196,6 +216,9 @@ struct lttng_event {
 	pid_t pid;
 	unsigned char filter;	/* filter enabled ? */
 	unsigned char exclusion; /* exclusions added ? */
+
+	/* Event flag, from 2.6 and above. */
+	enum lttng_event_flag flags;
 
 	char padding[LTTNG_EVENT_PADDING1];
 
@@ -250,6 +273,15 @@ extern int lttng_list_tracepoints(struct lttng_handle *handle,
  */
 extern int lttng_list_tracepoint_fields(struct lttng_handle *handle,
 		struct lttng_event_field **fields);
+
+/*
+ * List the available kernel syscall.
+ *
+ * Return the size (number of entries) of the allocated "lttng_event" array.
+ * All events in will be of type syscall. Caller must free events. On error a
+ * negative LTTng error code is returned.
+ */
+extern int lttng_list_syscalls(struct lttng_event **events);
 
 /*
  * Add context to event(s) for a specific channel (or for all).
@@ -327,6 +359,23 @@ extern int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
  */
 extern int lttng_disable_event(struct lttng_handle *handle,
 		const char *name, const char *channel_name);
+
+/*
+ * Disable event(s) of a channel and domain.
+ *
+ * Takes a struct lttng_event as parameter.
+ * If channel_name is NULL, the default channel is used (channel0).
+ *
+ * Currently, @filter_expression must be NULL. (disabling specific
+ * filter expressions not implemented)
+ * Currently, only LTTNG_EVENT_ALL and LTTNG_EVENT_SYSCALL event types
+ * are implemented for field @ev.
+ *
+ * Return 0 on success else a negative LTTng error code.
+ */
+int lttng_disable_event_ext(struct lttng_handle *handle,
+		struct lttng_event *ev, const char *channel_name,
+		const char *filter_expression);
 
 #ifdef __cplusplus
 }
