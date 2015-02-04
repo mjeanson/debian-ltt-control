@@ -27,6 +27,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <common/mi-lttng.h>
+
 #include "../command.h"
 #include "../utils.h"
 
@@ -45,13 +47,14 @@ static int opt_no_consumer;
 static int opt_no_output;
 static int opt_snapshot;
 static unsigned int opt_live_timer;
-static int opt_disable_consumer;
 
 enum {
 	OPT_HELP = 1,
 	OPT_LIST_OPTIONS,
 	OPT_LIVE_TIMER,
 };
+
+static struct mi_writer *writer;
 
 static struct poptOption long_options[] = {
 	/* longName, shortName, argInfo, argPtr, value, descrip, argDesc */
@@ -63,7 +66,6 @@ static struct poptOption long_options[] = {
 	{"data-url",       'D', POPT_ARG_STRING, &opt_data_url, 0, 0, 0},
 	{"no-output",       0, POPT_ARG_VAL, &opt_no_output, 1, 0, 0},
 	{"no-consumer",     0, POPT_ARG_VAL, &opt_no_consumer, 1, 0, 0},
-	{"disable-consumer", 0, POPT_ARG_VAL, &opt_disable_consumer, 1, 0, 0},
 	{"snapshot",        0, POPT_ARG_VAL, &opt_snapshot, 1, 0, 0},
 	{"live",            0, POPT_ARG_INT | POPT_ARGFLAG_OPTIONAL, 0, OPT_LIVE_TIMER, 0, 0},
 	{0, 0, 0, 0, 0, 0, 0}
@@ -111,7 +113,6 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "  -U, --set-url=URL    Set URL destination of the trace data.\n");
 	fprintf(ofp, "                       It is persistent for the session lifetime.\n");
 	fprintf(ofp, "                       This will set both data and control URL.\n");
-	fprintf(ofp, "                       You can change it with the enable-consumer cmd\n");
 	fprintf(ofp, "  -C, --ctrl-url=URL   Set control path URL. (Must use -D also)\n");
 	fprintf(ofp, "  -D, --data-url=URL   Set data path URL. (Must use -C also)\n");
 	fprintf(ofp, "\n");
@@ -145,6 +146,57 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "    # lttng create s1 -U net://myhost.com:3229\n");
 	fprintf(ofp, "    Set the consumer to the remote HOST on port 3229 for control.\n");
 	fprintf(ofp, "\n");
+}
+
+/*
+ * Retrieve the created session and mi output it based on provided argument
+ * This is currently a summary of what was pretty printed and is subject to
+ * enhancements.
+ */
+static int mi_created_session(const char *session_name)
+{
+	int ret, i, count, found;
+	struct lttng_session *sessions;
+
+	/* session_name should not be null */
+	assert(session_name);
+	assert(writer);
+
+	count = lttng_list_sessions(&sessions);
+	if (count < 0) {
+		ret = count;
+		ERR("%s", lttng_strerror(ret));
+		goto error;
+	}
+
+	if (count == 0) {
+		ERR("Error session creation failed: session %s not found", session_name);
+		ret = -LTTNG_ERR_SESS_NOT_FOUND;
+		goto end;
+	}
+
+	found = 0;
+	for (i = 0; i < count; i++) {
+		if (strncmp(sessions[i].name, session_name, NAME_MAX) == 0) {
+			found = 1;
+			ret = mi_lttng_session(writer, &sessions[i], 0);
+			if (ret) {
+				goto error;
+			}
+			break;
+		}
+	}
+
+	if (!found) {
+		ret = -LTTNG_ERR_SESS_NOT_FOUND;
+	} else {
+		ret = CMD_SUCCESS;
+	}
+
+error:
+	free(sessions);
+end:
+	return ret;
 }
 
 /*
@@ -304,7 +356,7 @@ static int create_session(void)
 			goto error;
 		}
 
-		/* Create URL string from the local filesytem path */
+		/* Create URL string from the local file system path */
 		ret = asprintf(&alloc_url, "file://%s", traces_path);
 		if (ret < 0) {
 			PERROR("asprintf url path");
@@ -324,16 +376,22 @@ static int create_session(void)
 		 */
 		url = NULL;
 	} else if (!opt_no_output) {
+		char *tmp_path;
+
 		/* Auto output path */
-		alloc_path = utils_get_home_dir();
-		if (alloc_path == NULL) {
+		tmp_path = utils_get_home_dir();
+		if (tmp_path == NULL) {
 			ERR("HOME path not found.\n \
 					Please specify an output path using -o, --output PATH");
 			ret = CMD_FATAL;
 			goto error;
 		}
-		alloc_path = strdup(alloc_path);
-
+		alloc_path = strdup(tmp_path);
+		if (!alloc_path) {
+			PERROR("allocating alloc_path");
+			ret = CMD_FATAL;
+			goto error;
+		}
 		ret = asprintf(&alloc_url,
 				"file://%s/" DEFAULT_TRACE_DIR_NAME "/%s",
 				alloc_path, session_name_date);
@@ -437,6 +495,15 @@ static int create_session(void)
 				"be set in overwrite mode and mmap output.");
 	}
 
+	/* Mi output */
+	if (lttng_opt_mi) {
+		ret = mi_created_session(session_name);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto error;
+		}
+	}
+
 	/* Init lttng session config */
 	ret = config_init(session_name);
 	if (ret < 0) {
@@ -464,7 +531,7 @@ error:
  */
 int cmd_create(int argc, const char **argv)
 {
-	int opt, ret = CMD_SUCCESS;
+	int opt, ret = CMD_SUCCESS, command_ret = CMD_SUCCESS, success = 1;
 	char *opt_arg = NULL;
 	static poptContext pc;
 
@@ -521,17 +588,71 @@ int cmd_create(int argc, const char **argv)
 		goto end;
 	}
 
-	if (opt_disable_consumer) {
-		MSG("The option --disable-consumer is obsolete.");
-		ret = CMD_WARNING;
-		goto end;
-	}
+	/* MI initialization */
+	if (lttng_opt_mi) {
+		writer = mi_lttng_writer_create(fileno(stdout), lttng_opt_mi);
+		if (!writer) {
+			ret = -LTTNG_ERR_NOMEM;
+			goto end;
+		}
 
+		/* Open command element */
+		ret = mi_lttng_writer_command_open(writer,
+				mi_lttng_element_command_create);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
+
+		/* Open output element */
+		ret = mi_lttng_writer_open_element(writer,
+				mi_lttng_element_command_output);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
+	}
 	opt_session_name = (char*) poptGetArg(pc);
 
-	ret = create_session();
+	command_ret = create_session();
+	if (command_ret) {
+		success = 0;
+	}
+
+	if (lttng_opt_mi) {
+		/* Close  output element */
+		ret = mi_lttng_writer_close_element(writer);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
+
+		/* Success ? */
+		ret = mi_lttng_writer_write_element_bool(writer,
+				mi_lttng_element_command_success, success);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
+
+		/* Command element close */
+		ret = mi_lttng_writer_command_close(writer);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
+	}
 
 end:
+	/* Mi clean-up */
+	if (writer && mi_lttng_writer_destroy(writer)) {
+		/* Preserve original error code */
+		ret = ret ? ret : -LTTNG_ERR_MI_IO_FAIL;
+	}
+
+	/* Overwrite ret if an error occurred in create_session() */
+	ret = command_ret ? command_ret : ret;
+
 	poptFreeContext(pc);
 	return ret;
 }

@@ -78,13 +78,19 @@ No output at all.
 .BR "    --no-kernel"
 No kernel tracer support
 .TP
-.BR "    --jul-tcp-port"
-JUL application registration TCP port (default: 5345)
+.BR "    --agent-tcp-port"
+Agent application registration TCP port (default: 5345)
 .TP
 .BR "    --kmod-probes=probe1, probe2, ..."
 Specify the kernel modules containing LTTng probes to load by the session daemon.
 Only the component name of the probe needs to be specified, e.g. to load the
 lttng-probe-irq and lttng-probe-sched use: --kmod-probes="irq, sched".
+.TP
+.BR "    --extra-kmod-probes=probe1, probe2, ..."
+Specify extra kernel modules containing LTTng probes to be loaded by the session
+daemon. The list follows the format of the \fB--kmod-probes\fP option.
+This list is appended to the list provided by \fB--kmod-probes\fP or, if
+\fB--kmod-probes\fP is missing, to the default list of probes.
 .TP
 .BR "-c, --client-sock=PATH"
 Specify path for the client unix socket
@@ -124,6 +130,9 @@ Specify path for the 64-bit UST consumer daemon libraries
 .TP
 .BR "-l, --load PATH
 Specify path from which to automatically load session configuration(s).
+.TP
+.BR "-f, --config PATH
+Specify path from which to load daemon configuration.
 
 .SH "LOADING SESSIONS"
 
@@ -175,6 +184,8 @@ the timeout of the operating system (this is the default).
 Specify the path that contains the XML session configuration schema (xsd).
 .IP "LTTNG_KMOD_PROBES"
 Specify the kernel modules probes that should be loaded by the session daemon.
+.IP "LTTNG_EXTRA_KMOD_PROBES"
+Specify extra kernel modules probes that should be loaded by the session daemon.
 .SH "SEE ALSO"
 
 .PP

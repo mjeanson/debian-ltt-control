@@ -85,7 +85,15 @@ DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 	$(top_srcdir)/config/depcomp
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
+	$(top_srcdir)/config/ax_check_class.m4 \
+	$(top_srcdir)/config/ax_java_options.m4 \
 	$(top_srcdir)/config/ax_pkg_swig.m4 \
+	$(top_srcdir)/config/ax_prog_jar.m4 \
+	$(top_srcdir)/config/ax_prog_java.m4 \
+	$(top_srcdir)/config/ax_prog_java_works.m4 \
+	$(top_srcdir)/config/ax_prog_javac.m4 \
+	$(top_srcdir)/config/ax_prog_javac_works.m4 \
+	$(top_srcdir)/config/ax_try_compile_java.m4 \
 	$(top_srcdir)/config/config_feature.m4 \
 	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
 	$(top_srcdir)/config/libxml.m4 \
@@ -111,10 +119,9 @@ am_lttng_OBJECTS = conf.$(OBJEXT) commands/start.$(OBJEXT) \
 	commands/disable_channels.$(OBJEXT) \
 	commands/add_context.$(OBJEXT) commands/set_session.$(OBJEXT) \
 	commands/version.$(OBJEXT) commands/calibrate.$(OBJEXT) \
-	commands/view.$(OBJEXT) commands/enable_consumer.$(OBJEXT) \
-	commands/disable_consumer.$(OBJEXT) \
-	commands/snapshot.$(OBJEXT) commands/save.$(OBJEXT) \
-	commands/load.$(OBJEXT) utils.$(OBJEXT) lttng.$(OBJEXT)
+	commands/view.$(OBJEXT) commands/snapshot.$(OBJEXT) \
+	commands/save.$(OBJEXT) commands/load.$(OBJEXT) \
+	utils.$(OBJEXT) lttng.$(OBJEXT)
 lttng_OBJECTS = $(am_lttng_OBJECTS)
 lttng_DEPENDENCIES =  \
 	$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
@@ -223,6 +230,12 @@ INSTALL_DATA = @INSTALL_DATA@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
 INSTALL_SCRIPT = @INSTALL_SCRIPT@
 INSTALL_STRIP_PROGRAM = @INSTALL_STRIP_PROGRAM@
+JAR = @JAR@
+JAVA = @JAVA@
+JAVAC = @JAVAC@
+JAVACFLAGS = @JAVACFLAGS@
+JAVAFLAGS = @JAVAFLAGS@
+JAVAPREFIX = @JAVAPREFIX@
 JAVA_JDK = @JAVA_JDK@
 LD = @LD@
 LDFLAGS = @LDFLAGS@
@@ -273,6 +286,7 @@ SHELL = @SHELL@
 STRIP = @STRIP@
 SWIG = @SWIG@
 SWIG_LIB = @SWIG_LIB@
+UUDECODE = @UUDECODE@
 VERSION = @VERSION@
 XML2_CONFIG = @XML2_CONFIG@
 XML_CPPFLAGS = @XML_CPPFLAGS@
@@ -312,7 +326,7 @@ htmldir = @htmldir@
 includedir = @includedir@
 infodir = @infodir@
 install_sh = @install_sh@
-java_jul_jar_path = @java_jul_jar_path@
+java_agent_jar_path = @java_agent_jar_path@
 libdir = @libdir@
 libexecdir = @libexecdir@
 localedir = @localedir@
@@ -353,7 +367,6 @@ lttng_SOURCES = command.h conf.c conf.h commands/start.c \
 				commands/disable_channels.c commands/add_context.c \
 				commands/set_session.c commands/version.c \
 				commands/calibrate.c commands/view.c \
-				commands/enable_consumer.c commands/disable_consumer.c \
 				commands/snapshot.c \
 				commands/save.c \
 				commands/load.c \
@@ -480,10 +493,6 @@ commands/calibrate.$(OBJEXT): commands/$(am__dirstamp) \
 	commands/$(DEPDIR)/$(am__dirstamp)
 commands/view.$(OBJEXT): commands/$(am__dirstamp) \
 	commands/$(DEPDIR)/$(am__dirstamp)
-commands/enable_consumer.$(OBJEXT): commands/$(am__dirstamp) \
-	commands/$(DEPDIR)/$(am__dirstamp)
-commands/disable_consumer.$(OBJEXT): commands/$(am__dirstamp) \
-	commands/$(DEPDIR)/$(am__dirstamp)
 commands/snapshot.$(OBJEXT): commands/$(am__dirstamp) \
 	commands/$(DEPDIR)/$(am__dirstamp)
 commands/save.$(OBJEXT): commands/$(am__dirstamp) \
@@ -510,10 +519,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/create.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/destroy.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/disable_channels.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/disable_consumer.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/disable_events.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/enable_channels.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/enable_consumer.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/enable_events.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/list.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/load.Po@am__quote@

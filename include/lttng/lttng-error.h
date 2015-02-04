@@ -111,9 +111,9 @@ enum lttng_error_code {
 	LTTNG_ERR_LOAD_IO_FAIL           = 88,  /* IO error while reading a session configuration */
 	LTTNG_ERR_LOAD_SESSION_NOENT     = 89,  /* Session file not found */
 	LTTNG_ERR_MAX_SIZE_INVALID       = 90,  /* Snapshot max size is invalid. */
-	/* 91 */
-	/* 92 */
-	/* 93 */
+	LTTNG_ERR_MI_OUTPUT_TYPE         = 91,  /* Invalid MI output format */
+	LTTNG_ERR_MI_IO_FAIL             = 92,  /* IO error while writing machine interface output */
+	LTTNG_ERR_MI_NOT_IMPLEMENTED     = 93,  /* Mi feature not implemented */
 	/* 94 */
 	/* 95 */
 	/* 96 */
@@ -132,6 +132,8 @@ enum lttng_error_code {
 	LTTNG_ERR_NO_CONSUMER            = 109, /* No consumer exist for the session */
 	LTTNG_ERR_EXCLUSION_INVAL        = 110, /* Invalid event exclusion data */
 	LTTNG_ERR_EXCLUSION_NOMEM        = 111, /* Lack of memory while processing event exclusions */
+	LTTNG_ERR_INVALID_EVENT_NAME     = 112, /* Invalid event name */
+	LTTNG_ERR_INVALID_CHANNEL_NAME   = 113, /* Invalid channel name */
 
 	/* MUST be last element */
 	LTTNG_ERR_NR,                           /* Last element */

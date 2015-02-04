@@ -1,3 +1,6 @@
+#ifndef VERSION_H
+#define VERSION_H
+
 /*
  * Copyright (C) 2013-2014 - Raphaël Beamonte <raphael.beamonte@gmail.com>
  *
@@ -17,18 +20,6 @@
 
 #include <config.h>
 
-#ifndef VERSION_H
-#define VERSION_H
-
-#define GIT_VERSION "heads/stable-2.5-0-g69049c5"
-
-/*
- * Define the macro containing the FULL version
- */
-#ifdef GIT_VERSION
-#define FULL_VERSION "" GIT_VERSION
-#else /* GIT_VERSION */
-#define FULL_VERSION "" VERSION
-#endif /* GIT_VERSION */
+#define GIT_VERSION	""
 
 #endif /* VERSION_H */

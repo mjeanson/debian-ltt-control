@@ -275,6 +275,7 @@ struct lttcomm_sock *lttcomm_accept_inet_sock(struct lttcomm_sock *sock)
 	int new_fd;
 	socklen_t len;
 	struct lttcomm_sock *new_sock;
+	unsigned long timeout;
 
 	if (sock->proto == LTTCOMM_SOCK_UDP) {
 		/*
@@ -298,12 +299,30 @@ struct lttcomm_sock *lttcomm_accept_inet_sock(struct lttcomm_sock *sock)
 		PERROR("accept inet");
 		goto error;
 	}
+	timeout = lttcomm_get_network_timeout();
+	if (timeout) {
+		int ret;
+
+		ret = lttcomm_setsockopt_rcv_timeout(new_fd, timeout);
+		if (ret) {
+			goto error_close;
+		}
+		ret = lttcomm_setsockopt_snd_timeout(new_fd, timeout);
+		if (ret) {
+			goto error_close;
+		}
+	}
 
 	new_sock->fd = new_fd;
 	new_sock->ops = &inet_ops;
 
 end:
 	return new_sock;
+
+error_close:
+	if (close(new_fd) < 0) {
+		PERROR("accept inet close fd");
+	}
 
 error:
 	free(new_sock);

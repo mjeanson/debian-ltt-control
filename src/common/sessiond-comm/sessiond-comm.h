@@ -60,10 +60,10 @@ enum lttcomm_sessiond_command {
 	LTTNG_CALIBRATE                     = 1,
 	LTTNG_DISABLE_CHANNEL               = 2,
 	LTTNG_DISABLE_EVENT                 = 3,
-	LTTNG_DISABLE_ALL_EVENT             = 4,
+	LTTNG_LIST_SYSCALLS                 = 4,
 	LTTNG_ENABLE_CHANNEL                = 5,
 	LTTNG_ENABLE_EVENT                  = 6,
-	LTTNG_ENABLE_ALL_EVENT              = 7,
+	/* 7 */
 	/* Session daemon command */
 	LTTNG_CREATE_SESSION                = 8,
 	LTTNG_DESTROY_SESSION               = 9,
@@ -227,10 +227,6 @@ struct lttcomm_session_msg {
 	struct lttng_session session;
 	struct lttng_domain domain;
 	union {
-		struct {
-			char channel_name[LTTNG_SYMBOL_NAME_LEN];
-			char name[NAME_MAX];
-		} LTTNG_PACKED disable;
 		/* Event data */
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];
@@ -249,6 +245,20 @@ struct lttcomm_session_msg {
 			 * - unsigned char filter_bytecode[bytecode_len]
 			 */
 		} LTTNG_PACKED enable;
+		struct {
+			char channel_name[LTTNG_SYMBOL_NAME_LEN];
+			struct lttng_event event LTTNG_PACKED;
+			/* Length of following filter expression. */
+			uint32_t expression_len;
+			/* Length of following bytecode for filter. */
+			uint32_t bytecode_len;
+			/*
+			 * After this structure, the following variable-length
+			 * items are transmitted:
+			 * - unsigned char filter_expression[expression_len]
+			 * - unsigned char filter_bytecode[bytecode_len]
+			 */
+		} LTTNG_PACKED disable;
 		/* Create channel */
 		struct {
 			struct lttng_channel chan LTTNG_PACKED;
@@ -442,7 +452,7 @@ struct lttcomm_consumer_msg {
 			uint32_t metadata;		/* This a metadata snapshot. */
 			uint64_t relayd_id;		/* Relayd id if apply. */
 			uint64_t key;
-			uint64_t max_stream_size;
+			uint64_t nb_packets_per_stream;
 		} LTTNG_PACKED snapshot_channel;
 		struct {
 			uint64_t channel_key;

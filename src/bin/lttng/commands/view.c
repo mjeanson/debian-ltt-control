@@ -151,7 +151,7 @@ static char **alloc_argv_from_user_opts(char *opts, const char *trace_path)
 	} while (*token != '\0');
 
 	/* Add two here for the NULL terminating element and trace path */
-	argv = malloc(sizeof(char *) * (num_opts + 2));
+	argv = zmalloc(sizeof(char *) * (num_opts + 2));
 	if (argv == NULL) {
 		goto error;
 	}
@@ -159,6 +159,9 @@ static char **alloc_argv_from_user_opts(char *opts, const char *trace_path)
 	token = strtok(opts, " ");
 	while (token != NULL) {
 		argv[i] = strdup(token);
+		if (argv[i] == NULL) {
+			goto error;
+		}
 		token = strtok(NULL, " ");
 		i++;
 	}
@@ -169,6 +172,13 @@ static char **alloc_argv_from_user_opts(char *opts, const char *trace_path)
 	return argv;
 
 error:
+	if (argv) {
+		for (i = 0; i < num_opts + 2; i++) {
+			free(argv[i]);
+		}
+		free(argv);
+	}
+
 	return NULL;
 }
 
@@ -198,7 +208,7 @@ static char **alloc_argv_from_local_opts(const char **opts, size_t opts_len,
 	size = sizeof(char *) * mem_len;
 
 	/* Add two here for the trace_path and the NULL terminating element. */
-	argv = malloc(size);
+	argv = zmalloc(size);
 	if (argv == NULL) {
 		goto error;
 	}
@@ -444,6 +454,10 @@ int cmd_view(int argc, const char **argv)
 
 	pc = poptGetContext(NULL, argc, argv, long_options, 0);
 	poptReadDefaultConfig(pc, 0);
+
+	if (lttng_opt_mi) {
+		WARN("mi does not apply to view command");
+	}
 
 	while ((opt = poptGetNextOpt(pc)) != -1) {
 		switch (opt) {

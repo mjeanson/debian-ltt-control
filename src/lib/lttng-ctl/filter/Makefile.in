@@ -89,7 +89,15 @@ DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 	$(noinst_HEADERS)
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
+	$(top_srcdir)/config/ax_check_class.m4 \
+	$(top_srcdir)/config/ax_java_options.m4 \
 	$(top_srcdir)/config/ax_pkg_swig.m4 \
+	$(top_srcdir)/config/ax_prog_jar.m4 \
+	$(top_srcdir)/config/ax_prog_java.m4 \
+	$(top_srcdir)/config/ax_prog_java_works.m4 \
+	$(top_srcdir)/config/ax_prog_javac.m4 \
+	$(top_srcdir)/config/ax_prog_javac_works.m4 \
+	$(top_srcdir)/config/ax_try_compile_java.m4 \
 	$(top_srcdir)/config/config_feature.m4 \
 	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
 	$(top_srcdir)/config/libxml.m4 \
@@ -111,6 +119,7 @@ am_libfilter_la_OBJECTS = libfilter_la-filter-lexer.lo \
 	libfilter_la-filter-visitor-xml.lo \
 	libfilter_la-filter-visitor-generate-ir.lo \
 	libfilter_la-filter-visitor-ir-check-binary-op-nesting.lo \
+	libfilter_la-filter-visitor-ir-validate-string.lo \
 	libfilter_la-filter-visitor-generate-bytecode.lo
 libfilter_la_OBJECTS = $(am_libfilter_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
@@ -243,6 +252,12 @@ INSTALL_DATA = @INSTALL_DATA@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
 INSTALL_SCRIPT = @INSTALL_SCRIPT@
 INSTALL_STRIP_PROGRAM = @INSTALL_STRIP_PROGRAM@
+JAR = @JAR@
+JAVA = @JAVA@
+JAVAC = @JAVAC@
+JAVACFLAGS = @JAVACFLAGS@
+JAVAFLAGS = @JAVAFLAGS@
+JAVAPREFIX = @JAVAPREFIX@
 JAVA_JDK = @JAVA_JDK@
 LD = @LD@
 LDFLAGS = @LDFLAGS@
@@ -293,6 +308,7 @@ SHELL = @SHELL@
 STRIP = @STRIP@
 SWIG = @SWIG@
 SWIG_LIB = @SWIG_LIB@
+UUDECODE = @UUDECODE@
 VERSION = @VERSION@
 XML2_CONFIG = @XML2_CONFIG@
 XML_CPPFLAGS = @XML_CPPFLAGS@
@@ -332,7 +348,7 @@ htmldir = @htmldir@
 includedir = @includedir@
 infodir = @infodir@
 install_sh = @install_sh@
-java_jul_jar_path = @java_jul_jar_path@
+java_agent_jar_path = @java_agent_jar_path@
 libdir = @libdir@
 libexecdir = @libexecdir@
 localedir = @localedir@
@@ -376,9 +392,8 @@ libfilter_la_SOURCES = filter-lexer.l filter-parser.y \
 	filter-visitor-xml.c \
 	filter-visitor-generate-ir.c \
 	filter-visitor-ir-check-binary-op-nesting.c \
+	filter-visitor-ir-validate-string.c \
 	filter-visitor-generate-bytecode.c \
-	align.h \
-	bug.h \
 	filter-ast.h \
 	filter-bytecode.h \
 	filter-ir.h \
@@ -466,6 +481,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-generate-bytecode.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-generate-ir.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-ir-check-binary-op-nesting.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-ir-validate-string.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-set-parent.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-xml.Plo@am__quote@
 
@@ -531,6 +547,13 @@ libfilter_la-filter-visitor-ir-check-binary-op-nesting.lo: filter-visitor-ir-che
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='filter-visitor-ir-check-binary-op-nesting.c' object='libfilter_la-filter-visitor-ir-check-binary-op-nesting.lo' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -c -o libfilter_la-filter-visitor-ir-check-binary-op-nesting.lo `test -f 'filter-visitor-ir-check-binary-op-nesting.c' || echo '$(srcdir)/'`filter-visitor-ir-check-binary-op-nesting.c
+
+libfilter_la-filter-visitor-ir-validate-string.lo: filter-visitor-ir-validate-string.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -MT libfilter_la-filter-visitor-ir-validate-string.lo -MD -MP -MF $(DEPDIR)/libfilter_la-filter-visitor-ir-validate-string.Tpo -c -o libfilter_la-filter-visitor-ir-validate-string.lo `test -f 'filter-visitor-ir-validate-string.c' || echo '$(srcdir)/'`filter-visitor-ir-validate-string.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libfilter_la-filter-visitor-ir-validate-string.Tpo $(DEPDIR)/libfilter_la-filter-visitor-ir-validate-string.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='filter-visitor-ir-validate-string.c' object='libfilter_la-filter-visitor-ir-validate-string.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -c -o libfilter_la-filter-visitor-ir-validate-string.lo `test -f 'filter-visitor-ir-validate-string.c' || echo '$(srcdir)/'`filter-visitor-ir-validate-string.c
 
 libfilter_la-filter-visitor-generate-bytecode.lo: filter-visitor-generate-bytecode.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -MT libfilter_la-filter-visitor-generate-bytecode.lo -MD -MP -MF $(DEPDIR)/libfilter_la-filter-visitor-generate-bytecode.Tpo -c -o libfilter_la-filter-visitor-generate-bytecode.lo `test -f 'filter-visitor-generate-bytecode.c' || echo '$(srcdir)/'`filter-visitor-generate-bytecode.c

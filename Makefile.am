@@ -8,7 +8,7 @@ SUBDIRS = include \
 
 dist_doc_DATA = LICENSE \
                 ChangeLog \
-		README
+		README.md
 
 dist_noinst_DATA = CodingStyle
 

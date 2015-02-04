@@ -21,7 +21,7 @@
 
 #define _LGPL_SOURCE
 #include <urcu.h>
-#include <urcu/wfqueue.h>
+#include <urcu/wfcqueue.h>
 
 #include <common/sessiond-comm/sessiond-comm.h>
 #include <common/compat/poll.h>
@@ -55,7 +55,7 @@ struct command_ctx {
 struct ust_command {
 	int sock;
 	struct ust_register_msg reg_msg;
-	struct cds_wfq_node node;
+	struct cds_wfcq_node node;
 };
 
 /*
@@ -64,7 +64,8 @@ struct ust_command {
  */
 struct ust_cmd_queue {
 	int32_t futex;
-	struct cds_wfq_queue queue;
+	struct cds_wfcq_head head;
+	struct cds_wfcq_tail tail;
 };
 
 /*
@@ -106,9 +107,9 @@ extern int ht_cleanup_pipe[2];
 extern long page_size;
 
 /*
- * Global set once in main(). JUL TCP port for registration.
+ * Global set once in main(). Agent TCP port for registration.
  */
-extern unsigned int jul_tcp_port;
+extern unsigned int agent_tcp_port;
 
 /*
  * Section name to look for in the daemon configuration file.

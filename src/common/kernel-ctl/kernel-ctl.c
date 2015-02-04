@@ -19,6 +19,7 @@
 #define __USE_LINUX_IOCTL_DEFS
 #include <sys/ioctl.h>
 #include <string.h>
+#include <common/align.h>
 
 #include "kernel-ctl.h"
 #include "kernel-ioctl.h"
@@ -139,6 +140,81 @@ int kernctl_create_channel(int fd, struct lttng_channel_attr *chops)
 	return ioctl(fd, LTTNG_KERNEL_CHANNEL, &channel);
 }
 
+int kernctl_enable_syscall(int fd, const char *syscall_name)
+{
+	struct lttng_kernel_event event;
+
+	memset(&event, 0, sizeof(event));
+	strncpy(event.name, syscall_name, sizeof(event.name));
+	event.name[sizeof(event.name) - 1] = '\0';
+	event.instrumentation = LTTNG_KERNEL_SYSCALL;
+	event.u.syscall.enable = 1;
+	return ioctl(fd, LTTNG_KERNEL_EVENT, &event);
+}
+
+int kernctl_disable_syscall(int fd, const char *syscall_name)
+{
+	struct lttng_kernel_event event;
+
+	memset(&event, 0, sizeof(event));
+	strncpy(event.name, syscall_name, sizeof(event.name));
+	event.name[sizeof(event.name) - 1] = '\0';
+	event.instrumentation = LTTNG_KERNEL_SYSCALL;
+	event.u.syscall.enable = 0;
+	return ioctl(fd, LTTNG_KERNEL_EVENT, &event);
+}
+
+int kernctl_syscall_mask(int fd, char **syscall_mask, uint32_t *nr_bits)
+{
+	struct lttng_kernel_syscall_mask kmask_len, *kmask = NULL;
+	size_t array_alloc_len;
+	char *new_mask;
+	int ret = 0;
+
+	if (!syscall_mask) {
+		ret = -1;
+		goto end;
+	}
+
+	if (!nr_bits) {
+		ret = -1;
+		goto end;
+	}
+
+	kmask_len.len = 0;
+	ret = ioctl(fd, LTTNG_KERNEL_SYSCALL_MASK, &kmask_len);
+	if (ret) {
+		goto end;
+	}
+
+	array_alloc_len = ALIGN(kmask_len.len, 8) >> 3;
+
+	kmask = zmalloc(sizeof(*kmask) + array_alloc_len);
+	if (!kmask) {
+		ret = -1;
+		goto end;
+	}
+
+	kmask->len = kmask_len.len;
+	ret = ioctl(fd, LTTNG_KERNEL_SYSCALL_MASK, kmask);
+	if (ret) {
+		goto end;
+	}
+
+	new_mask = realloc(*syscall_mask, array_alloc_len);
+	if (!new_mask) {
+		ret = -1;
+		goto end;
+	}
+	memcpy(new_mask, kmask->mask, array_alloc_len);
+	*syscall_mask = new_mask;
+	*nr_bits = kmask->len;
+
+end:
+	free(kmask);
+	return ret;
+}
+
 int kernctl_create_stream(int fd)
 {
 	return compat_ioctl_no_arg(fd, LTTNG_KERNEL_OLD_STREAM,
@@ -235,6 +311,11 @@ int kernctl_tracepoint_list(int fd)
 			LTTNG_KERNEL_TRACEPOINT_LIST);
 }
 
+int kernctl_syscall_list(int fd)
+{
+	return ioctl(fd, LTTNG_KERNEL_SYSCALL_LIST);
+}
+
 int kernctl_tracer_version(int fd, struct lttng_kernel_tracer_version *v)
 {
 	int ret;
@@ -263,6 +344,12 @@ int kernctl_tracer_version(int fd, struct lttng_kernel_tracer_version *v)
 
 end:
 	return ret;
+}
+
+int kernctl_tracer_abi_version(int fd,
+		struct lttng_kernel_tracer_abi_version *v)
+{
+	return ioctl(fd, LTTNG_KERNEL_TRACER_ABI_VERSION, v);
 }
 
 int kernctl_wait_quiescent(int fd)

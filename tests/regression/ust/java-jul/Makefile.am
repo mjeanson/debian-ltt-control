@@ -1,4 +1,4 @@
-if BUILD_JAVA_JUL
+if BUILD_JAVA_AGENT
 
 noinst_SCRIPTS = test_java_jul JTestLTTng.java
 EXTRA_DIST = test_java_jul JTestLTTng.java
@@ -9,12 +9,12 @@ else
 JCC=javac
 endif
 
-JUL_JAR_FILE=$(java_jul_jar_path)
+AGENT_JAR_FILE=$(java_agent_jar_path)
 
 all-local: JTestLTTng.class
 
 %.class: %.java
-	$(JCC) -d "$(builddir)" -cp "$(JUL_JAR_FILE):." $<
+	$(JCC) -d "$(builddir)" -cp "$(AGENT_JAR_FILE):." $<
 
 JTestLTTng.class: JTestLTTng.java
 
@@ -33,4 +33,4 @@ clean-local:
 		done; \
 	fi
 
-endif # BUILD_JAVA_JUL
+endif # BUILD_JAVA_AGENT

@@ -26,12 +26,14 @@
 
 #include <common/common.h>
 #include <common/kernel-ctl/kernel-ctl.h>
+#include <common/kernel-ctl/kernel-ioctl.h>
 #include <common/sessiond-comm/sessiond-comm.h>
 
 #include "consumer.h"
 #include "kernel.h"
 #include "kernel-consumer.h"
 #include "kern-modules.h"
+#include "utils.h"
 
 /*
  * Add context on a kernel channel.
@@ -171,6 +173,7 @@ error:
 /*
  * Create a kernel event, enable it to the kernel tracer and add it to the
  * channel event list of the kernel session.
+ * We own filter_expression and filter.
  */
 int kernel_create_event(struct lttng_event *ev,
 		struct ltt_kernel_channel *channel)
@@ -349,6 +352,18 @@ int kernel_disable_event(struct ltt_kernel_event *event)
 
 error:
 	return ret;
+}
+
+int kernel_enable_syscall(const char *syscall_name,
+		struct ltt_kernel_channel *channel)
+{
+	return kernctl_enable_syscall(channel->fd, syscall_name);
+}
+
+int kernel_disable_syscall(const char *syscall_name,
+		struct ltt_kernel_channel *channel)
+{
+	return kernctl_disable_syscall(channel->fd, syscall_name);
 }
 
 /*
@@ -685,6 +700,7 @@ int kernel_validate_version(int tracer_fd)
 {
 	int ret;
 	struct lttng_kernel_tracer_version version;
+	struct lttng_kernel_tracer_abi_version abi_version;
 
 	ret = kernctl_tracer_version(tracer_fd, &version);
 	if (ret < 0) {
@@ -693,17 +709,28 @@ int kernel_validate_version(int tracer_fd)
 	}
 
 	/* Validate version */
-	if (version.major != KERN_MODULES_PRE_MAJOR
-		&& version.major != KERN_MODULES_MAJOR) {
+	if (version.major != VERSION_MAJOR) {
+		ERR("Kernel tracer major version (%d) is not compatible with lttng-tools major version (%d)",
+			version.major, VERSION_MAJOR);
 		goto error_version;
 	}
-
-	DBG2("Kernel tracer version validated (major version %d)", version.major);
+	ret = kernctl_tracer_abi_version(tracer_fd, &abi_version);
+	if (ret < 0) {
+		ERR("Failed at getting lttng-modules ABI version");
+		goto error;
+	}
+	if (abi_version.major != LTTNG_MODULES_ABI_MAJOR_VERSION) {
+		ERR("Kernel tracer ABI version (%d.%d) is not compatible with expected ABI major version (%d.*)",
+			abi_version.major, abi_version.minor,
+			LTTNG_MODULES_ABI_MAJOR_VERSION);
+		goto error;
+	}
+	DBG2("Kernel tracer version validated (%d.%d, ABI %d.%d)",
+			version.major, version.minor,
+			abi_version.major, abi_version.minor);
 	return 0;
 
 error_version:
-	ERR("Kernel major version %d is not compatible (supporting <= %d)",
-			version.major, KERN_MODULES_MAJOR)
 	ret = -1;
 
 error:
@@ -766,6 +793,7 @@ void kernel_destroy_session(struct ltt_kernel_session *ksess)
 		struct lttng_ht_iter iter;
 
 		/* For each consumer socket. */
+		rcu_read_lock();
 		cds_lfht_for_each_entry(ksess->consumer->socks->ht, &iter.iter,
 				socket, node.node) {
 			struct ltt_kernel_channel *chan;
@@ -779,6 +807,7 @@ void kernel_destroy_session(struct ltt_kernel_session *ksess)
 				}
 			}
 		}
+		rcu_read_unlock();
 	}
 
 	/* Close any relayd session */
@@ -823,7 +852,8 @@ void kernel_destroy_channel(struct ltt_kernel_channel *kchan)
  * Return 0 on success or else return a LTTNG_ERR code.
  */
 int kernel_snapshot_record(struct ltt_kernel_session *ksess,
-		struct snapshot_output *output, int wait, uint64_t max_size_per_stream)
+		struct snapshot_output *output, int wait,
+		uint64_t nb_packets_per_stream)
 {
 	int err, ret, saved_metadata_fd;
 	struct consumer_socket *socket;
@@ -884,7 +914,7 @@ int kernel_snapshot_record(struct ltt_kernel_session *ksess,
 			ret = consumer_snapshot_channel(socket, chan->fd, output, 0,
 					ksess->uid, ksess->gid,
 					DEFAULT_KERNEL_TRACE_DIR, wait,
-					max_size_per_stream);
+					nb_packets_per_stream);
 			pthread_mutex_unlock(socket->lock);
 			if (ret < 0) {
 				ret = LTTNG_ERR_KERN_CONSUMER_FAIL;
@@ -898,7 +928,7 @@ int kernel_snapshot_record(struct ltt_kernel_session *ksess,
 		pthread_mutex_lock(socket->lock);
 		ret = consumer_snapshot_channel(socket, ksess->metadata->fd, output,
 				1, ksess->uid, ksess->gid,
-				DEFAULT_KERNEL_TRACE_DIR, wait, max_size_per_stream);
+				DEFAULT_KERNEL_TRACE_DIR, wait, 0);
 		pthread_mutex_unlock(socket->lock);
 		if (ret < 0) {
 			ret = LTTNG_ERR_KERN_CONSUMER_FAIL;
@@ -930,4 +960,18 @@ error:
 
 	rcu_read_unlock();
 	return ret;
+}
+
+/*
+ * Get the syscall mask array from the kernel tracer.
+ *
+ * Return 0 on success else a negative value. In both case, syscall_mask should
+ * be freed.
+ */
+int kernel_syscall_mask(int chan_fd, char **syscall_mask, uint32_t *nr_bits)
+{
+	assert(syscall_mask);
+	assert(nr_bits);
+
+	return kernctl_syscall_mask(chan_fd, syscall_mask, nr_bits);
 }
