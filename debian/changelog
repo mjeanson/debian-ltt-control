@@ -1,3 +1,9 @@
+ltt-control (2.6.0-1) unstable; urgency=medium
+
+  * [a00e8a5] New upstream version 2.6.0
+
+ -- Michael Jeanson <mjeanson@ubuntu.com>  Wed, 04 Feb 2015 22:28:49 +0100
+
 ltt-control (2.5.2-1) unstable; urgency=medium
 
   * [8304e3f] New upstream version 2.5.2
