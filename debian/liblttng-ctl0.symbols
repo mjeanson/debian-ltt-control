@@ -8,6 +8,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  config_buffer_type_per_uid@Base 2.5.0
  config_domain_type_jul@Base 2.5.0
  config_domain_type_kernel@Base 2.5.0
+ config_domain_type_log4j@Base 2.6.0
  config_domain_type_ust@Base 2.5.0
  config_element_address@Base 2.5.0
  config_element_attributes@Base 2.5.0
@@ -134,6 +135,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_disable_channel@Base 2.3.0
  lttng_disable_consumer@Base 2.3.0
  lttng_disable_event@Base 2.3.0
+ lttng_disable_event_ext@Base 2.6.0
  lttng_enable_channel@Base 2.3.0
  lttng_enable_consumer@Base 2.3.0
  lttng_enable_event@Base 2.3.0
@@ -183,6 +185,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_list_domains@Base 2.3.0
  lttng_list_events@Base 2.3.0
  lttng_list_sessions@Base 2.3.0
+ lttng_list_syscalls@Base 2.6.0
  lttng_list_tracepoint_fields@Base 2.3.0
  lttng_list_tracepoints@Base 2.3.0
  lttng_load_session@Base 2.5.0
@@ -194,6 +197,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_load_session_attr_set_input_url@Base 2.5.0
  lttng_load_session_attr_set_overwrite@Base 2.5.0
  lttng_load_session_attr_set_session_name@Base 2.5.0
+ lttng_opt_mi@Base 2.6.0
  lttng_opt_quiet@Base 2.3.0
  lttng_opt_verbose@Base 2.3.0
  lttng_pipe_close@Base 2.3.0
@@ -269,3 +273,102 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_yyset_lineno@Base 2.3.0
  lttng_yyset_lval@Base 2.3.0
  lttng_yyset_out@Base 2.3.0
+ mi_lttng_context_type_perf_counter@Base 2.6.0
+ mi_lttng_context_type_perf_cpu_counter@Base 2.6.0
+ mi_lttng_context_type_perf_thread_counter@Base 2.6.0
+ mi_lttng_element_calibrate@Base 2.6.0
+ mi_lttng_element_calibrate_function@Base 2.6.0
+ mi_lttng_element_command@Base 2.6.0
+ mi_lttng_element_command_action@Base 2.6.0
+ mi_lttng_element_command_add_context@Base 2.6.0
+ mi_lttng_element_command_calibrate@Base 2.6.0
+ mi_lttng_element_command_create@Base 2.6.0
+ mi_lttng_element_command_destroy@Base 2.6.0
+ mi_lttng_element_command_disable_channel@Base 2.6.0
+ mi_lttng_element_command_disable_event@Base 2.6.0
+ mi_lttng_element_command_enable_channels@Base 2.6.0
+ mi_lttng_element_command_enable_event@Base 2.6.0
+ mi_lttng_element_command_list@Base 2.6.0
+ mi_lttng_element_command_load@Base 2.6.0
+ mi_lttng_element_command_name@Base 2.6.0
+ mi_lttng_element_command_output@Base 2.6.0
+ mi_lttng_element_command_save@Base 2.6.0
+ mi_lttng_element_command_set_session@Base 2.6.0
+ mi_lttng_element_command_snapshot@Base 2.6.0
+ mi_lttng_element_command_snapshot_add@Base 2.6.0
+ mi_lttng_element_command_snapshot_del@Base 2.6.0
+ mi_lttng_element_command_snapshot_list@Base 2.6.0
+ mi_lttng_element_command_snapshot_record@Base 2.6.0
+ mi_lttng_element_command_start@Base 2.6.0
+ mi_lttng_element_command_stop@Base 2.6.0
+ mi_lttng_element_command_success@Base 2.6.0
+ mi_lttng_element_command_version@Base 2.6.0
+ mi_lttng_element_empty@Base 2.6.0
+ mi_lttng_element_event_field@Base 2.6.0
+ mi_lttng_element_event_fields@Base 2.6.0
+ mi_lttng_element_id@Base 2.6.0
+ mi_lttng_element_load@Base 2.6.0
+ mi_lttng_element_nowrite@Base 2.6.0
+ mi_lttng_element_perf_counter_context@Base 2.6.0
+ mi_lttng_element_pid@Base 2.6.0
+ mi_lttng_element_pid_id@Base 2.6.0
+ mi_lttng_element_pids@Base 2.6.0
+ mi_lttng_element_save@Base 2.6.0
+ mi_lttng_element_snapshot_ctrl_url@Base 2.6.0
+ mi_lttng_element_snapshot_data_url@Base 2.6.0
+ mi_lttng_element_snapshot_max_size@Base 2.6.0
+ mi_lttng_element_snapshot_n_ptr@Base 2.6.0
+ mi_lttng_element_snapshot_session_name@Base 2.6.0
+ mi_lttng_element_snapshots@Base 2.6.0
+ mi_lttng_element_success@Base 2.6.0
+ mi_lttng_element_type_enum@Base 2.6.0
+ mi_lttng_element_type_float@Base 2.6.0
+ mi_lttng_element_type_integer@Base 2.6.0
+ mi_lttng_element_type_other@Base 2.6.0
+ mi_lttng_element_type_string@Base 2.6.0
+ mi_lttng_element_version@Base 2.6.0
+ mi_lttng_element_version_commit@Base 2.6.0
+ mi_lttng_element_version_description@Base 2.6.0
+ mi_lttng_element_version_license@Base 2.6.0
+ mi_lttng_element_version_major@Base 2.6.0
+ mi_lttng_element_version_minor@Base 2.6.0
+ mi_lttng_element_version_patch_level@Base 2.6.0
+ mi_lttng_element_version_str@Base 2.6.0
+ mi_lttng_element_version_web@Base 2.6.0
+ mi_lttng_loglevel_str_alert@Base 2.6.0
+ mi_lttng_loglevel_str_crit@Base 2.6.0
+ mi_lttng_loglevel_str_debug@Base 2.6.0
+ mi_lttng_loglevel_str_debug_function@Base 2.6.0
+ mi_lttng_loglevel_str_debug_line@Base 2.6.0
+ mi_lttng_loglevel_str_debug_module@Base 2.6.0
+ mi_lttng_loglevel_str_debug_process@Base 2.6.0
+ mi_lttng_loglevel_str_debug_program@Base 2.6.0
+ mi_lttng_loglevel_str_debug_system@Base 2.6.0
+ mi_lttng_loglevel_str_debug_unit@Base 2.6.0
+ mi_lttng_loglevel_str_emerg@Base 2.6.0
+ mi_lttng_loglevel_str_err@Base 2.6.0
+ mi_lttng_loglevel_str_info@Base 2.6.0
+ mi_lttng_loglevel_str_jul_all@Base 2.6.0
+ mi_lttng_loglevel_str_jul_config@Base 2.6.0
+ mi_lttng_loglevel_str_jul_fine@Base 2.6.0
+ mi_lttng_loglevel_str_jul_finer@Base 2.6.0
+ mi_lttng_loglevel_str_jul_finest@Base 2.6.0
+ mi_lttng_loglevel_str_jul_info@Base 2.6.0
+ mi_lttng_loglevel_str_jul_off@Base 2.6.0
+ mi_lttng_loglevel_str_jul_severe@Base 2.6.0
+ mi_lttng_loglevel_str_jul_warning@Base 2.6.0
+ mi_lttng_loglevel_str_log4j_all@Base 2.6.0
+ mi_lttng_loglevel_str_log4j_debug@Base 2.6.0
+ mi_lttng_loglevel_str_log4j_error@Base 2.6.0
+ mi_lttng_loglevel_str_log4j_fatal@Base 2.6.0
+ mi_lttng_loglevel_str_log4j_info@Base 2.6.0
+ mi_lttng_loglevel_str_log4j_off@Base 2.6.0
+ mi_lttng_loglevel_str_log4j_trace@Base 2.6.0
+ mi_lttng_loglevel_str_log4j_warn@Base 2.6.0
+ mi_lttng_loglevel_str_notice@Base 2.6.0
+ mi_lttng_loglevel_str_unknown@Base 2.6.0
+ mi_lttng_loglevel_str_warning@Base 2.6.0
+ mi_lttng_loglevel_type_all@Base 2.6.0
+ mi_lttng_loglevel_type_range@Base 2.6.0
+ mi_lttng_loglevel_type_single@Base 2.6.0
+ mi_lttng_loglevel_type_unknown@Base 2.6.0
