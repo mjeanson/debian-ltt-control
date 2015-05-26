@@ -4,7 +4,7 @@ set -e
 
 case "$1" in
     configure)
-        if which addgroup; then
+        if which addgroup >/dev/null; then
             addgroup --system --quiet tracing > /dev/null || true
         fi
     ;;
