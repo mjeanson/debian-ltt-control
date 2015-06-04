@@ -8,25 +8,15 @@ ifneq ($(DEB_BUILD_ARCH), armel)
 endif
 
 %:
-	dh $@ --with autoreconf
+	dh $@ --with autoreconf,bash-completion
 
 override_dh_auto_build:
 	dh_auto_build -- V=1
 
 override_dh_auto_test:
 
-override_dh_auto_install:
-	# rename the bash completion file before installation
-	mkdir $(CURDIR)/debian/bash_completion
-	cp $(CURDIR)/extras/lttng-bash_completion $(CURDIR)/debian/bash_completion/lttng
-	dh_auto_install
-
 override_dh_installinit:
 	dh_installinit --name=lttng-sessiond
-
-override_dh_clean:
-	dh_clean
-	rm -Rf $(CURDIR)/debian/bash_completion
 
 override_dh_makeshlibs:
 	dh_makeshlibs -V

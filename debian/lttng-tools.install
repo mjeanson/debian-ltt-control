@@ -1,4 +1,3 @@
 usr/bin
 usr/share/man
 usr/lib/*/lttng/libexec/lttng-consumerd
-debian/bash_completion/lttng                /etc/bash_completion.d/
