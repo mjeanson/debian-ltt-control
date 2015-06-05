@@ -1,3 +1,17 @@
+ltt-control (2.6.0-1) unstable; urgency=medium
+
+  [ Michael Jeanson ]
+  * [a00e8a5] New upstream version 2.6.0
+  * [fbc62ca] debian/lttng-tools.docs: Renamed README to README.md
+  * [9bf5726] debian/liblttng-ctl0.symbols: Update symbols
+  * [04b614a] debian/lttng-tools.postinst: Clean script output to stdout
+  * [280584f] debian/control: Update build dependency for 2.6.0
+
+  [ Jon Bernard ]
+  * [2354b9d] Use dh_bash-completion to handle completion scripts
+
+ -- Jon Bernard <jbernard@debian.org>  Fri, 05 Jun 2015 14:45:57 +0000
+
 ltt-control (2.5.2-1) unstable; urgency=medium
 
   * [8304e3f] New upstream version 2.5.2
