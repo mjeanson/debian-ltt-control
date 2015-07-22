@@ -11,7 +11,7 @@ Homepage: http://lttng.org/
 
 Package: lttng-tools
 Section: utils
-Architecture: amd64 armel armhf i386 mips mipsel powerpc s390x
+Architecture: amd64 armel armhf i386 mips mipsel powerpc ppc64el s390x
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Recommends: babeltrace
 Suggests: lttng-modules-dkms
@@ -28,7 +28,7 @@ Description: LTTng control and utility programs
  and userspace (UST) tracers.
 
 Package: liblttng-ctl0
-Architecture: amd64 armel armhf i386 mips mipsel powerpc s390x
+Architecture: amd64 armel armhf i386 mips mipsel powerpc ppc64el s390x
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends}, ${misc:Depends}
@@ -45,7 +45,7 @@ Description: LTTng control and utility library
 
 Package: liblttng-ctl-dev
 Section: libdevel
-Architecture: amd64 armel armhf i386 mips mipsel powerpc s390x
+Architecture: amd64 armel armhf i386 mips mipsel powerpc ppc64el s390x
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends}, liblttng-ctl0 (= ${binary:Version})
@@ -63,7 +63,7 @@ Description: LTTng control and utility library (development files)
 
 Package: ltt-bin
 Section: oldlibs
-Architecture: amd64 armel armhf i386 mips mipsel powerpc s390x
+Architecture: amd64 armel armhf i386 mips mipsel powerpc ppc64el s390x
 Depends: ${misc:Depends}, lttng-tools
 Description: Transitional package for lttng-tools
  This is a transitional package to ease upgrades to the lttng-tools package.
@@ -71,7 +71,7 @@ Description: Transitional package for lttng-tools
 
 Package: liblttd0
 Section: oldlibs
-Architecture: amd64 armel armhf i386 mips mipsel powerpc s390x
+Architecture: amd64 armel armhf i386 mips mipsel powerpc ppc64el s390x
 Depends: ${misc:Depends}, liblttng-ctl0
 Description: Transitional package for liblttng-ctl0
  This is a transitional package to ease upgrades to the liblttng-ctl0 package.
@@ -79,7 +79,7 @@ Description: Transitional package for liblttng-ctl0
 
 Package: liblttd-dev
 Section: oldlibs
-Architecture: amd64 armel armhf i386 mips mipsel powerpc s390x
+Architecture: amd64 armel armhf i386 mips mipsel powerpc ppc64el s390x
 Depends: ${misc:Depends}, liblttng-ctl-dev
 Description: Transitional package for liblttng-ctl-dev
  This is a transitional package to ease upgrades to the liblttng-ctl-dev
@@ -87,7 +87,7 @@ Description: Transitional package for liblttng-ctl-dev
 
 Package: liblttctl0
 Section: oldlibs
-Architecture: amd64 armel armhf i386 mips mipsel powerpc s390x
+Architecture: amd64 armel armhf i386 mips mipsel powerpc ppc64el s390x
 Depends: ${misc:Depends}, liblttng-ctl0
 Description: Transitional package for liblttng-ctl0
  This is a transitional package to ease upgrades to the liblttng-ctl0 package.
@@ -95,7 +95,7 @@ Description: Transitional package for liblttng-ctl0
 
 Package: liblttctl-dev
 Section: oldlibs
-Architecture: amd64 armel armhf i386 mips mipsel powerpc s390x
+Architecture: amd64 armel armhf i386 mips mipsel powerpc ppc64el s390x
 Depends: ${misc:Depends}, liblttng-ctl-dev
 Description: Transitional package for liblttng-ctl-dev
  This is a transitional package to ease upgrades to the liblttng-ctl-dev
