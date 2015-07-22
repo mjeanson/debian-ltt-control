@@ -1,3 +1,10 @@
+ltt-control (2.6.0-1ppc64el1) unstable; urgency=medium
+
+  * [2adaaf1] debian/control: add ppc64el architecture.
+    Thanks to Fernando Seiti Furusato (Closes: #790682)
+
+ -- Jon Bernard <jbernard@debian.org>  Wed, 22 Jul 2015 18:57:12 +0000
+
 ltt-control (2.6.0-1) unstable; urgency=medium
 
   [ Michael Jeanson ]
