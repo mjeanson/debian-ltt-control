@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <common/bitfield.h>
 #include <common/common.h>
 #include <common/kernel-ctl/kernel-ctl.h>
@@ -423,7 +424,7 @@ ssize_t syscall_list_channel(struct ltt_kernel_channel *kchan,
 		strncpy(events[count].name, syscall_table[i].name,
 				sizeof(events[count].name));
 		events[count].enabled = 1;
-		events[count].type = LTTNG_KERNEL_SYSCALL;
+		events[count].type = LTTNG_EVENT_SYSCALL;
 		count++;
 	}
 

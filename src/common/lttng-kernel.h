@@ -97,10 +97,6 @@ struct lttng_kernel_function {
 	char symbol_name[LTTNG_KERNEL_SYM_NAME_LEN];
 } LTTNG_PACKED;
 
-struct lttng_kernel_syscall {
-	char enable;
-} __attribute__((packed));
-
 #define LTTNG_KERNEL_EVENT_PADDING1    16
 #define LTTNG_KERNEL_EVENT_PADDING2    LTTNG_KERNEL_SYM_NAME_LEN + 32
 struct lttng_kernel_event {
@@ -113,7 +109,6 @@ struct lttng_kernel_event {
 		struct lttng_kernel_kretprobe kretprobe;
 		struct lttng_kernel_kprobe kprobe;
 		struct lttng_kernel_function ftrace;
-		struct lttng_kernel_syscall syscall;
 		char padding[LTTNG_KERNEL_EVENT_PADDING2];
 	} u;
 } LTTNG_PACKED;
@@ -155,6 +150,14 @@ struct lttng_kernel_channel {
 
 	int overwrite;                      /* 1: overwrite, 0: discard */
 	char padding[LTTNG_KERNEL_CHANNEL_PADDING1];
+} LTTNG_PACKED;
+
+#define KERNEL_FILTER_BYTECODE_MAX_LEN		65536
+struct lttng_kernel_filter_bytecode {
+	uint32_t len;
+	uint32_t reloc_offset;
+	uint64_t seqnum;
+	char data[0];
 } LTTNG_PACKED;
 
 #endif /* _LTTNG_KERNEL_H */

@@ -24,10 +24,14 @@
 #include <lttng/lttng.h>
 
 extern char *opt_relayd_path;
+extern int opt_no_sessiond;
+extern char * opt_sessiond_path;
+extern pid_t sessiond_pid;
 
 struct cmd_struct;
 
 char *get_session_name(void);
+char *get_session_name_quiet(void);
 void list_commands(struct cmd_struct *commands, FILE *ofp);
 void list_cmd_options(FILE *ofp, struct poptOption *options);
 
@@ -51,11 +55,7 @@ int get_count_order_ulong(unsigned long x);
 
 const char *get_domain_str(enum lttng_domain_type domain);
 
-static inline
-void print_missing_domain(void)
-{
-	ERR("Please specify a domain (-k/-u/-j).");
-}
+int print_missing_or_multiple_domains(unsigned int sum);
 
 int spawn_relayd(const char *pathname, int port);
 int check_relayd(void);

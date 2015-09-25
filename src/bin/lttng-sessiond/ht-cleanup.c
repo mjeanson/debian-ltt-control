@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 
 #include <common/hashtable/hashtable.h>
@@ -41,19 +42,22 @@ void *thread_ht_cleanup(void *data)
 	health_register(health_sessiond, HEALTH_SESSIOND_TYPE_HT_CLEANUP);
 
 	if (testpoint(sessiond_thread_ht_cleanup)) {
+		DBG("[ht-thread] testpoint.");
 		goto error_testpoint;
 	}
 
 	health_code_update();
 
-	ret = sessiond_set_thread_pollset(&events, 2);
+	ret = sessiond_set_ht_cleanup_thread_pollset(&events, 2);
 	if (ret < 0) {
+		DBG("[ht-thread] sessiond_set_ht_cleanup_thread_pollset error %d.", ret);
 		goto error_poll_create;
 	}
 
 	/* Add pipe to the pollset. */
 	ret = lttng_poll_add(&events, ht_cleanup_pipe[0], LPOLLIN | LPOLLERR);
 	if (ret < 0) {
+		DBG("[ht-thread] lttng_poll_add error %d.", ret);
 		goto error;
 	}
 
@@ -91,47 +95,64 @@ restart:
 			pollfd = LTTNG_POLL_GETFD(&events, i);
 
 			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
+
+			if (pollfd != ht_cleanup_pipe[0]) {
+				continue;
+			}
+
+			if (revents & LPOLLIN) {
+				/* Get socket from dispatch thread. */
+				size_ret = lttng_read(ht_cleanup_pipe[0], &ht,
+						sizeof(ht));
+				if (size_ret < sizeof(ht)) {
+					PERROR("ht cleanup notify pipe");
+					goto error;
+				}
+				health_code_update();
 				/*
-				 * No activity for this FD
-				 * (poll implementation).
+				 * The whole point of this thread is to call
+				 * lttng_ht_destroy from a context that is NOT:
+				 * 1) a read-side RCU lock,
+				 * 2) a call_rcu thread.
 				 */
+				lttng_ht_destroy(ht);
+
+				health_code_update();
+			} else if (revents & (LPOLLERR | LPOLLHUP | LPOLLRDHUP)) {
+				ERR("ht cleanup pipe error");
+				goto error;
+			} else {
+				ERR("Unexpected poll events %u for sock %d", revents, pollfd);
+				goto error;
+			}
+		}
+
+		for (i = 0; i < nb_fd; i++) {
+			health_code_update();
+
+			/* Fetch once the poll data */
+			revents = LTTNG_POLL_GETEV(&events, i);
+			pollfd = LTTNG_POLL_GETFD(&events, i);
+
+			if (!revents) {
+				/* No activity for this FD (poll implementation). */
+				continue;
+			}
+
+			if (pollfd == ht_cleanup_pipe[0]) {
 				continue;
 			}
 
 			/* Thread quit pipe has been closed. Killing thread. */
-			ret = sessiond_check_thread_quit_pipe(pollfd, revents);
+			ret = sessiond_check_ht_cleanup_quit(pollfd, revents);
 			if (ret) {
 				err = 0;
+				DBG("[ht-cleanup] quit.");
 				goto exit;
 			}
-			assert(pollfd == ht_cleanup_pipe[0]);
-
-			if (revents & (LPOLLERR | LPOLLHUP | LPOLLRDHUP)) {
-				ERR("ht cleanup pipe error");
-				goto error;
-			} else if (!(revents & LPOLLIN)) {
-				/* No POLLIN and not a catched error, stop the thread. */
-				ERR("ht cleanup failed. revent: %u", revents);
-				goto error;
-			}
-
-			/* Get socket from dispatch thread. */
-			size_ret = lttng_read(ht_cleanup_pipe[0], &ht,
-					sizeof(ht));
-			if (size_ret < sizeof(ht)) {
-				PERROR("ht cleanup notify pipe");
-				goto error;
-			}
-			health_code_update();
-			/*
-			 * The whole point of this thread is to call
-			 * lttng_ht_destroy from a context that is NOT:
-			 * 1) a read-side RCU lock,
-			 * 2) a call_rcu thread.
-			 */
-			lttng_ht_destroy(ht);
-
-			health_code_update();
 		}
 	}
 
@@ -140,9 +161,7 @@ error:
 	lttng_poll_clean(&events);
 error_poll_create:
 error_testpoint:
-	utils_close_pipe(ht_cleanup_pipe);
-	ht_cleanup_pipe[0] = ht_cleanup_pipe[1] = -1;
-	DBG("[ust-thread] cleanup complete.");
+	DBG("[ht-cleanup] Thread terminates.");
 	if (err) {
 		health_error();
 		ERR("Health error occurred in %s", __func__);

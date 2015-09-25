@@ -1,8 +1,8 @@
-/* A Bison parser, made by GNU Bison 3.0.2.  */
+/* A Bison parser, made by GNU Bison 3.0.4.  */
 
 /* Bison implementation for Yacc-like parsers in C
 
-   Copyright (C) 1984, 1989-1990, 2000-2013 Free Software Foundation, Inc.
+   Copyright (C) 1984, 1989-1990, 2000-2015 Free Software Foundation, Inc.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -44,7 +44,7 @@
 #define YYBISON 1
 
 /* Bison version.  */
-#define YYBISON_VERSION "3.0.2"
+#define YYBISON_VERSION "3.0.4"
 
 /* Skeleton name.  */
 #define YYSKELETON_NAME "yacc.c"
@@ -506,7 +506,7 @@ extern int yydebug;
 
 /* Value type.  */
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
-typedef union YYSTYPE YYSTYPE;
+
 union YYSTYPE
 {
 #line 329 "filter-parser.y" /* yacc.c:355  */
@@ -518,6 +518,8 @@ union YYSTYPE
 
 #line 520 "filter-parser.c" /* yacc.c:355  */
 };
+
+typedef union YYSTYPE YYSTYPE;
 # define YYSTYPE_IS_TRIVIAL 1
 # define YYSTYPE_IS_DECLARED 1
 #endif
@@ -530,7 +532,7 @@ int yyparse (struct filter_parser_ctx *parser_ctx, yyscan_t scanner);
 
 /* Copy the second part of user declarations.  */
 
-#line 534 "filter-parser.c" /* yacc.c:358  */
+#line 536 "filter-parser.c" /* yacc.c:358  */
 
 #ifdef short
 # undef short
@@ -1683,19 +1685,19 @@ yyreduce:
         case 2:
 #line 361 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.gs) = (yyvsp[0].gs);					}
-#line 1687 "filter-parser.c" /* yacc.c:1646  */
+#line 1689 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 3:
 #line 363 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.gs) = gc_string_append(parser_ctx, (yyvsp[-1].gs), (yyvsp[0].gs));		}
-#line 1693 "filter-parser.c" /* yacc.c:1646  */
+#line 1695 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 4:
 #line 368 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.gs) = yylval.gs;					}
-#line 1699 "filter-parser.c" /* yacc.c:1646  */
+#line 1701 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 5:
@@ -1703,25 +1705,25 @@ yyreduce:
     {
 			parse_error(parser_ctx, "escape sequences not supported yet");
 		}
-#line 1707 "filter-parser.c" /* yacc.c:1646  */
+#line 1709 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 6:
 #line 379 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.gs) = (yyvsp[0].gs);					}
-#line 1713 "filter-parser.c" /* yacc.c:1646  */
+#line 1715 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 7:
 #line 381 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.gs) = gc_string_append(parser_ctx, (yyvsp[-1].gs), (yyvsp[0].gs));		}
-#line 1719 "filter-parser.c" /* yacc.c:1646  */
+#line 1721 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 8:
 #line 386 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.gs) = yylval.gs;					}
-#line 1725 "filter-parser.c" /* yacc.c:1646  */
+#line 1727 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 9:
@@ -1729,7 +1731,7 @@ yyreduce:
     {
 			parse_error(parser_ctx, "escape sequences not supported yet");
 		}
-#line 1733 "filter-parser.c" /* yacc.c:1646  */
+#line 1735 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 10:
@@ -1739,7 +1741,7 @@ yyreduce:
 			(yyval.n)->u.expression.type = AST_EXP_IDENTIFIER;
 			(yyval.n)->u.expression.u.identifier = yylval.gs->s;
 		}
-#line 1743 "filter-parser.c" /* yacc.c:1646  */
+#line 1745 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 11:
@@ -1749,7 +1751,7 @@ yyreduce:
 			(yyval.n)->u.expression.type = AST_EXP_GLOBAL_IDENTIFIER;
 			(yyval.n)->u.expression.u.identifier = yylval.gs->s;
 		}
-#line 1753 "filter-parser.c" /* yacc.c:1646  */
+#line 1755 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 12:
@@ -1762,7 +1764,7 @@ yyreduce:
 				parse_error(parser_ctx, "cannot scanf decimal constant");
 			}
 		}
-#line 1766 "filter-parser.c" /* yacc.c:1646  */
+#line 1768 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 13:
@@ -1777,7 +1779,7 @@ yyreduce:
 				parse_error(parser_ctx, "cannot scanf octal constant");
 			}
 		}
-#line 1781 "filter-parser.c" /* yacc.c:1646  */
+#line 1783 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 14:
@@ -1790,7 +1792,7 @@ yyreduce:
 				parse_error(parser_ctx, "cannot scanf hexadecimal constant");
 			}
 		}
-#line 1794 "filter-parser.c" /* yacc.c:1646  */
+#line 1796 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 15:
@@ -1803,7 +1805,7 @@ yyreduce:
 				parse_error(parser_ctx, "cannot scanf float constant");
 			}
 		}
-#line 1807 "filter-parser.c" /* yacc.c:1646  */
+#line 1809 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 16:
@@ -1813,7 +1815,7 @@ yyreduce:
 			(yyval.n)->u.expression.type = AST_EXP_STRING;
 			(yyval.n)->u.expression.u.string = "";
 		}
-#line 1817 "filter-parser.c" /* yacc.c:1646  */
+#line 1819 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 17:
@@ -1823,7 +1825,7 @@ yyreduce:
 			(yyval.n)->u.expression.type = AST_EXP_STRING;
 			(yyval.n)->u.expression.u.string = (yyvsp[-1].gs)->s;
 		}
-#line 1827 "filter-parser.c" /* yacc.c:1646  */
+#line 1829 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 18:
@@ -1833,7 +1835,7 @@ yyreduce:
 			(yyval.n)->u.expression.type = AST_EXP_STRING;
 			(yyval.n)->u.expression.u.string = (yyvsp[-1].gs)->s;
 		}
-#line 1837 "filter-parser.c" /* yacc.c:1646  */
+#line 1839 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 19:
@@ -1843,13 +1845,13 @@ yyreduce:
 			(yyval.n)->u.expression.type = AST_EXP_NESTED;
 			(yyval.n)->u.expression.u.child = (yyvsp[-1].n);
 		}
-#line 1847 "filter-parser.c" /* yacc.c:1646  */
+#line 1849 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 20:
 #line 473 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 1853 "filter-parser.c" /* yacc.c:1646  */
+#line 1855 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 21:
@@ -1861,7 +1863,7 @@ yyreduce:
 			(yyval.n)->u.expression.u.identifier = (yyvsp[0].gs)->s;
 			(yyval.n)->u.expression.prev = (yyvsp[-2].n);
 		}
-#line 1865 "filter-parser.c" /* yacc.c:1646  */
+#line 1867 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 22:
@@ -1873,13 +1875,13 @@ yyreduce:
 			(yyval.n)->u.expression.u.identifier = (yyvsp[0].gs)->s;
 			(yyval.n)->u.expression.prev = (yyvsp[-2].n);
 		}
-#line 1877 "filter-parser.c" /* yacc.c:1646  */
+#line 1879 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 23:
 #line 494 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 1883 "filter-parser.c" /* yacc.c:1646  */
+#line 1885 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 24:
@@ -1888,7 +1890,7 @@ yyreduce:
 			(yyval.n) = (yyvsp[-1].n);
 			(yyval.n)->u.unary_op.child = (yyvsp[0].n);
 		}
-#line 1892 "filter-parser.c" /* yacc.c:1646  */
+#line 1894 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 25:
@@ -1897,7 +1899,7 @@ yyreduce:
 			(yyval.n) = make_node(parser_ctx, NODE_UNARY_OP);
 			(yyval.n)->u.unary_op.type = AST_UNARY_PLUS;
 		}
-#line 1901 "filter-parser.c" /* yacc.c:1646  */
+#line 1903 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 26:
@@ -1906,7 +1908,7 @@ yyreduce:
 			(yyval.n) = make_node(parser_ctx, NODE_UNARY_OP);
 			(yyval.n)->u.unary_op.type = AST_UNARY_MINUS;
 		}
-#line 1910 "filter-parser.c" /* yacc.c:1646  */
+#line 1912 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 27:
@@ -1915,7 +1917,7 @@ yyreduce:
 			(yyval.n) = make_node(parser_ctx, NODE_UNARY_OP);
 			(yyval.n)->u.unary_op.type = AST_UNARY_NOT;
 		}
-#line 1919 "filter-parser.c" /* yacc.c:1646  */
+#line 1921 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 28:
@@ -1924,13 +1926,13 @@ yyreduce:
 			(yyval.n) = make_node(parser_ctx, NODE_UNARY_OP);
 			(yyval.n)->u.unary_op.type = AST_UNARY_BIN_NOT;
 		}
-#line 1928 "filter-parser.c" /* yacc.c:1646  */
+#line 1930 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 29:
 #line 527 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 1934 "filter-parser.c" /* yacc.c:1646  */
+#line 1936 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 30:
@@ -1938,7 +1940,7 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_MUL, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 1942 "filter-parser.c" /* yacc.c:1646  */
+#line 1944 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 31:
@@ -1946,7 +1948,7 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_DIV, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 1950 "filter-parser.c" /* yacc.c:1646  */
+#line 1952 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 32:
@@ -1954,13 +1956,13 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_MOD, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 1958 "filter-parser.c" /* yacc.c:1646  */
+#line 1960 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 33:
 #line 544 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 1964 "filter-parser.c" /* yacc.c:1646  */
+#line 1966 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 34:
@@ -1968,7 +1970,7 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_PLUS, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 1972 "filter-parser.c" /* yacc.c:1646  */
+#line 1974 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 35:
@@ -1976,13 +1978,13 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_MINUS, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 1980 "filter-parser.c" /* yacc.c:1646  */
+#line 1982 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 36:
 #line 557 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 1986 "filter-parser.c" /* yacc.c:1646  */
+#line 1988 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 37:
@@ -1990,7 +1992,7 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_LSHIFT, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 1994 "filter-parser.c" /* yacc.c:1646  */
+#line 1996 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 38:
@@ -1998,13 +2000,13 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_RSHIFT, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2002 "filter-parser.c" /* yacc.c:1646  */
+#line 2004 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 39:
 #line 570 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 2008 "filter-parser.c" /* yacc.c:1646  */
+#line 2010 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 40:
@@ -2012,7 +2014,7 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_LT, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2016 "filter-parser.c" /* yacc.c:1646  */
+#line 2018 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 41:
@@ -2020,7 +2022,7 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_GT, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2024 "filter-parser.c" /* yacc.c:1646  */
+#line 2026 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 42:
@@ -2028,7 +2030,7 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_LE, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2032 "filter-parser.c" /* yacc.c:1646  */
+#line 2034 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 43:
@@ -2036,13 +2038,13 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_GE, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2040 "filter-parser.c" /* yacc.c:1646  */
+#line 2042 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 44:
 #line 591 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 2046 "filter-parser.c" /* yacc.c:1646  */
+#line 2048 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 45:
@@ -2050,7 +2052,7 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_EQ, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2054 "filter-parser.c" /* yacc.c:1646  */
+#line 2056 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 46:
@@ -2058,13 +2060,13 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_NE, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2062 "filter-parser.c" /* yacc.c:1646  */
+#line 2064 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 47:
 #line 604 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 2068 "filter-parser.c" /* yacc.c:1646  */
+#line 2070 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 48:
@@ -2072,13 +2074,13 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_BIN_AND, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2076 "filter-parser.c" /* yacc.c:1646  */
+#line 2078 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 49:
 #line 613 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 2082 "filter-parser.c" /* yacc.c:1646  */
+#line 2084 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 50:
@@ -2086,13 +2088,13 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_BIN_XOR, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2090 "filter-parser.c" /* yacc.c:1646  */
+#line 2092 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 51:
 #line 622 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 2096 "filter-parser.c" /* yacc.c:1646  */
+#line 2098 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 52:
@@ -2100,13 +2102,13 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_BIN_OR, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2104 "filter-parser.c" /* yacc.c:1646  */
+#line 2106 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 53:
 #line 631 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 2110 "filter-parser.c" /* yacc.c:1646  */
+#line 2112 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 54:
@@ -2114,13 +2116,13 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_AND, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2118 "filter-parser.c" /* yacc.c:1646  */
+#line 2120 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 55:
 #line 640 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 2124 "filter-parser.c" /* yacc.c:1646  */
+#line 2126 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 56:
@@ -2128,13 +2130,13 @@ yyreduce:
     {
 			(yyval.n) = make_op_node(parser_ctx, AST_OP_OR, (yyvsp[-2].n), (yyvsp[0].n));
 		}
-#line 2132 "filter-parser.c" /* yacc.c:1646  */
+#line 2134 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 57:
 #line 649 "filter-parser.y" /* yacc.c:1646  */
     {	(yyval.n) = (yyvsp[0].n);					}
-#line 2138 "filter-parser.c" /* yacc.c:1646  */
+#line 2140 "filter-parser.c" /* yacc.c:1646  */
     break;
 
   case 58:
@@ -2142,11 +2144,11 @@ yyreduce:
     {
 			parser_ctx->ast->root.u.root.child = (yyvsp[0].n);
 		}
-#line 2146 "filter-parser.c" /* yacc.c:1646  */
+#line 2148 "filter-parser.c" /* yacc.c:1646  */
     break;
 
 
-#line 2150 "filter-parser.c" /* yacc.c:1646  */
+#line 2152 "filter-parser.c" /* yacc.c:1646  */
       default: break;
     }
   /* User semantic actions sometimes alter yychar, and that requires

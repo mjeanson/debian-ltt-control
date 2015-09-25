@@ -19,7 +19,6 @@
 #ifndef _LTT_SESSIOND_H
 #define _LTT_SESSIOND_H
 
-#define _LGPL_SOURCE
 #include <urcu.h>
 #include <urcu/wfcqueue.h>
 
@@ -121,6 +120,10 @@ extern int is_root;
 
 int sessiond_set_thread_pollset(struct lttng_poll_event *events, size_t size);
 int sessiond_check_thread_quit_pipe(int fd, uint32_t events);
+
+int sessiond_set_ht_cleanup_thread_pollset(struct lttng_poll_event *events,
+		size_t size);
+int sessiond_check_ht_cleanup_quit(int fd, uint32_t events);
 
 void *thread_ht_cleanup(void *data);
 

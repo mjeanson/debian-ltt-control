@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2013 - Julien Desfossez <jdesfossez@efficios.com>
  *                      David Goulet <dgoulet@efficios.com>
+ *               2015 - Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License, version 2 only, as
@@ -17,6 +18,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 
 #include <common/common.h>

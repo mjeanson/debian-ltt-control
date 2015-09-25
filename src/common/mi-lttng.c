@@ -16,7 +16,8 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-
+#define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <include/config.h>
 #include <common/config/config.h>
 #include <lttng/snapshot-internal.h>
@@ -49,6 +50,8 @@ const char * const mi_lttng_element_command_snapshot_record = "record_snapshot";
 const char * const mi_lttng_element_command_start = "start";
 const char * const mi_lttng_element_command_stop = "stop";
 const char * const mi_lttng_element_command_success = "success";
+const char * const mi_lttng_element_command_track = "track";
+const char * const mi_lttng_element_command_untrack = "untrack";
 const char * const mi_lttng_element_command_version = "version";
 
 /* Strings related to version command */
@@ -75,8 +78,6 @@ const char * const mi_lttng_context_type_perf_thread_counter = "PERF_THREAD_COUN
 const char * const mi_lttng_element_perf_counter_context = "perf_counter_context";
 
 /* Strings related to pid */
-const char * const mi_lttng_element_pids = "pids";
-const char * const mi_lttng_element_pid = "pid";
 const char * const mi_lttng_element_pid_id = "id";
 
 /* Strings related to save command */
@@ -135,6 +136,14 @@ const char * const mi_lttng_loglevel_str_log4j_debug = "LOG4J_DEBUG";
 const char * const mi_lttng_loglevel_str_log4j_trace = "LOG4J_TRACE";
 const char * const mi_lttng_loglevel_str_log4j_all = "LOG4J_ALL";
 
+/* String related to loglevel Python */
+const char * const mi_lttng_loglevel_str_python_critical = "PYTHON_CRITICAL";
+const char * const mi_lttng_loglevel_str_python_error = "PYTHON_ERROR";
+const char * const mi_lttng_loglevel_str_python_warning = "PYTHON_WARNING";
+const char * const mi_lttng_loglevel_str_python_info = "PYTHON_INFO";
+const char * const mi_lttng_loglevel_str_python_debug = "PYTHON_DEBUG";
+const char * const mi_lttng_loglevel_str_python_notset = "PYTHON_NOTSET";
+
 /* String related to loglevel type */
 const char * const mi_lttng_loglevel_type_all = "ALL";
 const char * const mi_lttng_loglevel_type_range = "RANGE";
@@ -152,6 +161,12 @@ const char * const mi_lttng_element_snapshot_max_size = "max_size";
 const char * const mi_lttng_element_snapshot_n_ptr = "n_ptr";
 const char * const mi_lttng_element_snapshot_session_name = "session_name";
 const char * const mi_lttng_element_snapshots = "snapshots";
+
+/* String related to track/untrack command */
+const char * const mi_lttng_element_track_untrack_targets = "targets";
+const char * const mi_lttng_element_track_untrack_pid_target = "pid_target";
+const char * const mi_lttng_element_track_untrack_all_wildcard = "*";
+
 
 /* This is a merge of jul loglevel and regular loglevel
  * Those should never overlap by definition
@@ -246,6 +261,24 @@ const char *mi_lttng_loglevel_string(int value, enum lttng_domain_type domain)
 			return mi_lttng_loglevel_str_jul_finest;
 		case LTTNG_LOGLEVEL_JUL_ALL:
 			return mi_lttng_loglevel_str_jul_all;
+		default:
+			return mi_lttng_loglevel_str_unknown;
+		}
+		break;
+	case LTTNG_DOMAIN_PYTHON:
+		switch (value) {
+		case LTTNG_LOGLEVEL_PYTHON_CRITICAL:
+			return mi_lttng_loglevel_str_python_critical;
+		case LTTNG_LOGLEVEL_PYTHON_ERROR:
+			return mi_lttng_loglevel_str_python_error;
+		case LTTNG_LOGLEVEL_PYTHON_WARNING:
+			return mi_lttng_loglevel_str_python_warning;
+		case LTTNG_LOGLEVEL_PYTHON_INFO:
+			return mi_lttng_loglevel_str_python_info;
+		case LTTNG_LOGLEVEL_PYTHON_DEBUG:
+			return mi_lttng_loglevel_str_python_debug;
+		case LTTNG_LOGLEVEL_PYTHON_NOTSET:
+			return mi_lttng_loglevel_str_python_notset;
 		default:
 			return mi_lttng_loglevel_str_unknown;
 		}
@@ -363,6 +396,8 @@ const char *mi_lttng_domaintype_string(enum lttng_domain_type value)
 		return config_domain_type_jul;
 	case LTTNG_DOMAIN_LOG4J:
 		return config_domain_type_log4j;
+	case LTTNG_DOMAIN_PYTHON:
+		return config_domain_type_python;
 	default:
 		/* Should not have an unknown domain */
 		assert(0);
@@ -1091,19 +1126,46 @@ end:
 }
 
 LTTNG_HIDDEN
-int mi_lttng_pids_open(struct mi_writer *writer)
+int mi_lttng_trackers_open(struct mi_writer *writer)
 {
-	return mi_lttng_writer_open_element(writer, mi_lttng_element_pids);
+	return mi_lttng_writer_open_element(writer, config_element_trackers);
 }
 
 LTTNG_HIDDEN
-int mi_lttng_pid(struct mi_writer *writer, pid_t pid , const char *cmdline,
+int mi_lttng_pid_tracker_open(struct mi_writer *writer)
+{
+	int ret;
+
+	/* Open element pid_tracker */
+	ret = mi_lttng_writer_open_element(writer, config_element_pid_tracker);
+	if (ret) {
+		goto end;
+	}
+
+	/* Open targets element */
+	ret = mi_lttng_targets_open(writer);
+end:
+	return ret;
+}
+
+LTTNG_HIDDEN
+int mi_lttng_pids_open(struct mi_writer *writer)
+{
+	return mi_lttng_writer_open_element(writer, config_element_pids);
+}
+
+/*
+ * TODO: move the listing of pid for user agent to process semantic on
+ * mi api bump. The use of process element break the mi api.
+ */
+LTTNG_HIDDEN
+int mi_lttng_pid(struct mi_writer *writer, pid_t pid , const char *name,
 		int is_open)
 {
 	int ret;
 
-	/* Open element pid */
-	ret = mi_lttng_writer_open_element(writer, mi_lttng_element_pid);
+	/* Open pid process */
+	ret = mi_lttng_writer_open_element(writer, config_element_pid);
 	if (ret) {
 		goto end;
 	}
@@ -1116,15 +1178,62 @@ int mi_lttng_pid(struct mi_writer *writer, pid_t pid , const char *cmdline,
 	}
 
 	/* Writing name of the process */
-	ret = mi_lttng_writer_write_element_string(writer, config_element_name,
-			cmdline);
-	if (ret) {
-		goto end;
+	if (name) {
+		ret = mi_lttng_writer_write_element_string(writer, config_element_name,
+				name);
+		if (ret) {
+			goto end;
+		}
 	}
 
 	if (!is_open) {
 		/* Closing Pid */
 		ret = mi_lttng_writer_close_element(writer);
+	}
+
+end:
+	return ret;
+}
+
+LTTNG_HIDDEN
+int mi_lttng_targets_open(struct mi_writer *writer)
+{
+	return mi_lttng_writer_open_element(writer,
+			mi_lttng_element_track_untrack_targets);
+}
+
+LTTNG_HIDDEN
+int mi_lttng_pid_target(struct mi_writer *writer, pid_t pid, int is_open)
+{
+	int ret;
+
+	ret = mi_lttng_writer_open_element(writer,
+			mi_lttng_element_track_untrack_pid_target);
+	if (ret) {
+		goto end;
+	}
+
+	/* Writing pid number
+	 * Special case for element all on track untrack command
+	 * All pid is represented as wildcard *
+	 */
+	if ((int) pid == -1) {
+		ret = mi_lttng_writer_write_element_string(writer,
+				config_element_pid,
+				mi_lttng_element_track_untrack_all_wildcard);
+	} else {
+		ret = mi_lttng_writer_write_element_signed_int(writer,
+				config_element_pid, (int) pid);
+	}
+	if (ret) {
+		goto end;
+	}
+
+	if (!is_open) {
+		ret = mi_lttng_writer_close_element(writer);
+		if (ret) {
+			goto end;
+		}
 	}
 
 end:
@@ -1211,6 +1320,7 @@ int mi_lttng_calibrate(struct mi_writer *writer,
 end:
 	return ret;
 }
+
 LTTNG_HIDDEN
 int mi_lttng_context(struct mi_writer *writer,
 		struct lttng_event_context *context, int is_open)

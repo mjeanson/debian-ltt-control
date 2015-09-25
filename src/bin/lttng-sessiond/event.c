@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <errno.h>
 #include <urcu/list.h>
 #include <string.h>
@@ -48,7 +49,8 @@ static void add_unique_ust_event(struct lttng_ht *ht,
 
 	key.name = event->attr.name;
 	key.filter = (struct lttng_filter_bytecode *) event->filter;
-	key.loglevel = event->attr.loglevel;
+	key.loglevel_type = event->attr.loglevel_type;
+	key.loglevel_value = event->attr.loglevel;
 	key.exclusion = event->exclusion;
 
 	node_ptr = cds_lfht_add_unique(ht->ht,
@@ -58,123 +60,42 @@ static void add_unique_ust_event(struct lttng_ht *ht,
 }
 
 /*
- * Disable kernel tracepoint event for a channel from the kernel session.
+ * Disable kernel tracepoint events for a channel from the kernel session of
+ * a specified event_name and event type.
+ * On type LTTNG_EVENT_ALL all events with event_name are disabled.
+ * If event_name is NULL all events of the specified type are disabled.
  */
-int event_kernel_disable_tracepoint(struct ltt_kernel_channel *kchan,
-		char *event_name)
+int event_kernel_disable_event(struct ltt_kernel_channel *kchan,
+		char *event_name, enum lttng_event_type type)
 {
-	int ret;
-	struct ltt_kernel_event *kevent;
-
-	assert(kchan);
-
-	kevent = trace_kernel_get_event_by_name(event_name, kchan);
-	if (kevent == NULL) {
-		ret = LTTNG_ERR_NO_EVENT;
-		goto error;
-	}
-
-	ret = kernel_disable_event(kevent);
-	if (ret < 0) {
-		ret = LTTNG_ERR_KERN_DISABLE_FAIL;
-		goto error;
-	}
-
-	DBG("Kernel event %s disable for channel %s.",
-			kevent->event->name, kchan->channel->name);
-
-	ret = LTTNG_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Enable kernel system call for a channel from the kernel session.
- */
-int event_kernel_enable_syscall(struct ltt_kernel_channel *kchan,
-		char *syscall_name)
-{
-	int ret;
-
-	assert(kchan);
-
-	ret = kernel_enable_syscall(syscall_name, kchan);
-	if (ret < 0) {
-		ret = LTTNG_ERR_KERN_ENABLE_FAIL;
-		goto error;
-	}
-
-	DBG("Kernel event %s enable for channel %s.",
-			syscall_name, kchan->channel->name);
-
-	ret = LTTNG_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Disable kernel system call for a channel from the kernel session.
- */
-int event_kernel_disable_syscall(struct ltt_kernel_channel *kchan,
-		char *syscall_name)
-{
-	int ret;
-
-	assert(kchan);
-
-	ret = kernel_disable_syscall(syscall_name, kchan);
-	if (ret < 0) {
-		ret = LTTNG_ERR_KERN_DISABLE_FAIL;
-		goto error;
-	}
-
-	DBG("Kernel syscall %s disable for channel %s.",
-			syscall_name[0] == '\0' ? "<all>" : syscall_name,
-			kchan->channel->name);
-
-	ret = LTTNG_OK;
-
-error:
-	return ret;
-}
-
-/*
- * Disable kernel tracepoint events for a channel from the kernel session.
- */
-int event_kernel_disable_all_tracepoints(struct ltt_kernel_channel *kchan)
-{
-	int ret;
+	int ret, error = 0, found = 0;
 	struct ltt_kernel_event *kevent;
 
 	assert(kchan);
 
 	/* For each event in the kernel session */
 	cds_list_for_each_entry(kevent, &kchan->events_list.head, list) {
+		if (type != LTTNG_EVENT_ALL && kevent->type != type)
+			continue;
+		if (event_name != NULL && strcmp(event_name, kevent->event->name)) {
+			continue;
+		}
+		found++;
 		ret = kernel_disable_event(kevent);
 		if (ret < 0) {
-			/* We continue disabling the rest */
+			error = 1;
 			continue;
 		}
 	}
-	ret = LTTNG_OK;
-	return ret;
-}
+	DBG("Disable kernel event: found %d events with name: %s and type: %d",
+			found, event_name ? event_name : "NULL", type);
 
-/*
- * Disable all kernel event for a channel from the kernel session.
- */
-int event_kernel_disable_all(struct ltt_kernel_channel *kchan)
-{
-	int ret;
+	if (event_name != NULL && !found) {
+		ret = LTTNG_ERR_NO_EVENT;
+	} else {
+		ret = error ? LTTNG_ERR_KERN_DISABLE_FAIL : LTTNG_OK;
+	}
 
-	assert(kchan);
-
-	ret = event_kernel_disable_all_tracepoints(kchan);
-	if (ret != LTTNG_OK)
-		return ret;
-	ret = event_kernel_disable_syscall(kchan, "");
 	return ret;
 }
 
@@ -182,8 +103,9 @@ int event_kernel_disable_all(struct ltt_kernel_channel *kchan)
  * Enable kernel tracepoint event for a channel from the kernel session.
  * We own filter_expression and filter.
  */
-int event_kernel_enable_tracepoint(struct ltt_kernel_channel *kchan,
-		struct lttng_event *event)
+int event_kernel_enable_event(struct ltt_kernel_channel *kchan,
+		struct lttng_event *event, char *filter_expression,
+		struct lttng_filter_bytecode *filter)
 {
 	int ret;
 	struct ltt_kernel_event *kevent;
@@ -191,9 +113,14 @@ int event_kernel_enable_tracepoint(struct ltt_kernel_channel *kchan,
 	assert(kchan);
 	assert(event);
 
-	kevent = trace_kernel_get_event_by_name(event->name, kchan);
+	kevent = trace_kernel_find_event(event->name, kchan,
+			event->type, filter);
 	if (kevent == NULL) {
-		ret = kernel_create_event(event, kchan);
+		ret = kernel_create_event(event, kchan,
+			filter_expression, filter);
+		/* We have passed ownership */
+		filter_expression = NULL;
+		filter = NULL;
 		if (ret < 0) {
 			switch (-ret) {
 			case EEXIST:
@@ -222,85 +149,9 @@ int event_kernel_enable_tracepoint(struct ltt_kernel_channel *kchan,
 
 	ret = LTTNG_OK;
 end:
+	free(filter_expression);
+	free(filter);
 	return ret;
-}
-
-/*
- * Enable all kernel tracepoint events of a channel of the kernel session.
- */
-int event_kernel_enable_all_tracepoints(struct ltt_kernel_channel *kchan,
-		int kernel_tracer_fd)
-{
-	int size, i, ret;
-	struct ltt_kernel_event *kevent;
-	struct lttng_event *event_list = NULL;
-
-	assert(kchan);
-
-	/* For each event in the kernel session */
-	cds_list_for_each_entry(kevent, &kchan->events_list.head, list) {
-		if (kevent->enabled == 0) {
-			ret = kernel_enable_event(kevent);
-			if (ret < 0) {
-				/* Enable failed but still continue */
-				continue;
-			}
-		}
-	}
-
-	size = kernel_list_events(kernel_tracer_fd, &event_list);
-	if (size < 0) {
-		ret = LTTNG_ERR_KERN_LIST_FAIL;
-		goto end;
-	}
-
-	for (i = 0; i < size; i++) {
-		kevent = trace_kernel_get_event_by_name(event_list[i].name, kchan);
-		if (kevent == NULL) {
-			/* Default event type for enable all */
-			event_list[i].type = LTTNG_EVENT_TRACEPOINT;
-			/* Enable each single tracepoint event */
-			ret = kernel_create_event(&event_list[i], kchan);
-			if (ret < 0) {
-				/* Ignore error here and continue */
-			}
-		}
-	}
-	free(event_list);
-
-	ret = LTTNG_OK;
-end:
-	return ret;
-}
-
-/*
- * Enable all kernel events of a channel of the kernel session.
- */
-int event_kernel_enable_all(struct ltt_kernel_channel *kchan,
-		int kernel_tracer_fd)
-{
-	int tp_ret;
-
-	assert(kchan);
-
-	tp_ret = event_kernel_enable_all_tracepoints(kchan, kernel_tracer_fd);
-	if (tp_ret != LTTNG_OK) {
-		goto end;
-	}
-
-	/*
-	 * Reaching this code path means that all tracepoints were enabled without
-	 * errors so we ignore the error value of syscalls.
-	 *
-	 * At the moment, failing to enable syscalls on "lttng enable-event -a -k"
-	 * is not considered an error that need to be returned to the client since
-	 * tracepoints did not fail. Future work will allow us to send back
-	 * multiple errors to the client in one API call.
-	 */
-	(void) event_kernel_enable_syscall(kchan, "");
-
-end:
-	return tp_ret;
 }
 
 /*
@@ -310,103 +161,6 @@ end:
  */
 
 /*
- * Enable all UST tracepoints for a channel from a UST session.
- */
-int event_ust_enable_all_tracepoints(struct ltt_ust_session *usess,
-		struct ltt_ust_channel *uchan,
-		char *filter_expression,
-		struct lttng_filter_bytecode *filter)
-{
-	int ret, i, size;
-	struct lttng_ht_iter iter;
-	struct ltt_ust_event *uevent = NULL;
-	struct lttng_event *events = NULL;
-
-	assert(usess);
-	assert(uchan);
-
-	rcu_read_lock();
-
-	/* Enable existing events */
-	cds_lfht_for_each_entry(uchan->events->ht, &iter.iter, uevent,
-			node.node) {
-		if (uevent->enabled == 0) {
-			ret = ust_app_enable_event_glb(usess, uchan, uevent);
-			if (ret < 0) {
-				continue;
-			}
-			uevent->enabled = 1;
-		}
-	}
-
-	/* Get all UST available events */
-	size = ust_app_list_events(&events);
-	if (size < 0) {
-		ret = LTTNG_ERR_UST_LIST_FAIL;
-		goto error;
-	}
-
-	for (i = 0; i < size; i++) {
-		/*
-		 * Check if event exist and if so, continue since it was enable
-		 * previously.
-		 */
-		uevent = trace_ust_find_event(uchan->events, events[i].name, filter,
-				events[i].loglevel, NULL);
-		if (uevent != NULL) {
-			ret = ust_app_enable_event_pid(usess, uchan, uevent,
-					events[i].pid);
-			if (ret < 0) {
-				if (ret != -LTTNG_UST_ERR_EXIST) {
-					ret = LTTNG_ERR_UST_ENABLE_FAIL;
-					goto error;
-				}
-			}
-			continue;
-		}
-
-		/* Create ust event */
-		uevent = trace_ust_create_event(&events[i], filter_expression,
-			filter, NULL);
-		if (uevent == NULL) {
-			ret = LTTNG_ERR_FATAL;
-			goto error_destroy;
-		}
-
-		/* Create event for the specific PID */
-		ret = ust_app_enable_event_pid(usess, uchan, uevent,
-				events[i].pid);
-		if (ret < 0) {
-			if (ret == -LTTNG_UST_ERR_EXIST) {
-				ret = LTTNG_ERR_UST_EVENT_EXIST;
-				goto error;
-			} else {
-				ret = LTTNG_ERR_UST_ENABLE_FAIL;
-				goto error_destroy;
-			}
-		}
-
-		uevent->enabled = 1;
-		/* Add ltt ust event to channel */
-		rcu_read_lock();
-		add_unique_ust_event(uchan->events, uevent);
-		rcu_read_unlock();
-	}
-	free(events);
-
-	rcu_read_unlock();
-	return LTTNG_OK;
-
-error_destroy:
-	trace_ust_destroy_event(uevent);
-
-error:
-	free(events);
-	rcu_read_unlock();
-	return ret;
-}
-
-/*
  * Enable UST tracepoint event for a channel from a UST session.
  * We own filter_expression, filter, and exclusion.
  */
@@ -414,7 +168,8 @@ int event_ust_enable_tracepoint(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct lttng_event *event,
 		char *filter_expression,
 		struct lttng_filter_bytecode *filter,
-		struct lttng_event_exclusion *exclusion)
+		struct lttng_event_exclusion *exclusion,
+		bool internal_event)
 {
 	int ret = LTTNG_OK, to_create = 0;
 	struct ltt_ust_event *uevent;
@@ -426,10 +181,10 @@ int event_ust_enable_tracepoint(struct ltt_ust_session *usess,
 	rcu_read_lock();
 
 	uevent = trace_ust_find_event(uchan->events, event->name, filter,
-			event->loglevel, exclusion);
-	if (uevent == NULL) {
+			event->loglevel_type, event->loglevel, exclusion);
+	if (!uevent) {
 		uevent = trace_ust_create_event(event, filter_expression,
-			filter, exclusion);
+				filter, exclusion, internal_event);
 		/* We have passed ownership */
 		filter_expression = NULL;
 		filter = NULL;
@@ -577,7 +332,7 @@ error:
 int event_ust_disable_all_tracepoints(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan)
 {
-	int ret, i, size;
+	int ret, i, size, error = 0;
 	struct lttng_ht_iter iter;
 	struct ltt_ust_event *uevent = NULL;
 	struct lttng_event *events = NULL;
@@ -594,6 +349,7 @@ int event_ust_disable_all_tracepoints(struct ltt_ust_session *usess,
 			ret = event_ust_disable_tracepoint(usess, uchan,
 					uevent->attr.name);
 			if (ret < 0) {
+				error = LTTNG_ERR_UST_DISABLE_FAIL;
 				continue;
 			}
 		}
@@ -609,19 +365,17 @@ int event_ust_disable_all_tracepoints(struct ltt_ust_session *usess,
 	for (i = 0; i < size; i++) {
 		ret = event_ust_disable_tracepoint(usess, uchan,
 				events[i].name);
-		if (ret != LTTNG_OK) {
+		if (ret < 0) {
 			/* Continue to disable the rest... */
+			error = LTTNG_ERR_UST_DISABLE_FAIL;
 			continue;
 		}
 	}
-	free(events);
 
-	rcu_read_unlock();
-	return LTTNG_OK;
-
+	ret = error ? error : LTTNG_OK;
 error:
-	free(events);
 	rcu_read_unlock();
+	free(events);
 	return ret;
 }
 
@@ -632,7 +386,7 @@ error:
  */
 int event_agent_enable_all(struct ltt_ust_session *usess,
 		struct agent *agt, struct lttng_event *event,
-		struct lttng_filter_bytecode *filter)
+		struct lttng_filter_bytecode *filter ,char *filter_expression)
 {
 	int ret;
 	struct agent_event *aevent;
@@ -643,7 +397,7 @@ int event_agent_enable_all(struct ltt_ust_session *usess,
 	DBG("Event agent enabling ALL events for session %" PRIu64, usess->id);
 
 	/* Enable event on agent application through TCP socket. */
-	ret = event_agent_enable(usess, agt, event, filter);
+	ret = event_agent_enable(usess, agt, event, filter, filter_expression);
 	if (ret != LTTNG_OK) {
 		goto error;
 	}
@@ -669,7 +423,8 @@ error:
  */
 int event_agent_enable(struct ltt_ust_session *usess,
 		struct agent *agt, struct lttng_event *event,
-		struct lttng_filter_bytecode *filter)
+		struct lttng_filter_bytecode *filter,
+		char *filter_expression)
 {
 	int ret, created = 0;
 	struct agent_event *aevent;
@@ -679,18 +434,20 @@ int event_agent_enable(struct ltt_ust_session *usess,
 	assert(agt);
 
 	DBG("Event agent enabling %s for session %" PRIu64 " with loglevel type %d "
-			"and loglevel %d", event->name, usess->id, event->loglevel_type,
-			event->loglevel);
+			", loglevel %d and filter \"%s\"", event->name,
+			usess->id, event->loglevel_type, event->loglevel,
+			filter_expression ? filter_expression : "NULL");
 
-	aevent = agent_find_event(event->name, event->loglevel, agt);
+	aevent = agent_find_event(event->name, event->loglevel_type,
+		event->loglevel, agt);
 	if (!aevent) {
-		aevent = agent_create_event(event->name, filter);
+		aevent = agent_create_event(event->name, event->loglevel_type,
+				event->loglevel, filter,
+				filter_expression);
 		if (!aevent) {
 			ret = LTTNG_ERR_NOMEM;
 			goto error;
 		}
-		aevent->loglevel = event->loglevel;
-		aevent->loglevel_type = event->loglevel_type;
 		created = 1;
 	}
 
@@ -727,51 +484,52 @@ const char *event_get_default_agent_ust_name(enum lttng_domain_type domain)
 {
 	const char *default_event_name = NULL;
 
-	if (domain == LTTNG_DOMAIN_JUL) {
-		if (is_root) {
-			default_event_name = DEFAULT_SYS_JUL_EVENT_NAME;
-		} else {
-			default_event_name = DEFAULT_USER_JUL_EVENT_NAME;
-		}
-	} else if (domain == LTTNG_DOMAIN_LOG4J) {
+	switch (domain) {
+	case LTTNG_DOMAIN_LOG4J:
 		if (is_root) {
 			default_event_name = DEFAULT_SYS_LOG4J_EVENT_NAME;
 		} else {
 			default_event_name = DEFAULT_USER_LOG4J_EVENT_NAME;
 		}
-	} else {
+		break;
+	case LTTNG_DOMAIN_JUL:
+		if (is_root) {
+			default_event_name = DEFAULT_SYS_JUL_EVENT_NAME;
+		} else {
+			default_event_name = DEFAULT_USER_JUL_EVENT_NAME;
+		}
+		break;
+	case LTTNG_DOMAIN_PYTHON:
+		default_event_name = DEFAULT_PYTHON_EVENT_NAME;
+		break;
+	default:
 		assert(0);
 	}
 
 	return default_event_name;
 }
 
-
 /*
- * Disable a single agent event for a given UST session.
+ * Disable a given agent event for a given UST session.
  *
+ * Must be called with the RCU read lock held.
  * Return LTTNG_OK on success or else a LTTNG_ERR* code.
  */
-int event_agent_disable(struct ltt_ust_session *usess, struct agent *agt,
-		char *event_name)
+static int event_agent_disable_one(struct ltt_ust_session *usess,
+		struct agent *agt, struct agent_event *aevent)
 {
 	int ret;
-	struct agent_event *aevent;
 	struct ltt_ust_event *uevent = NULL;
 	struct ltt_ust_channel *uchan = NULL;
 	const char *ust_event_name, *ust_channel_name;
 
 	assert(agt);
 	assert(usess);
-	assert(event_name);
+	assert(aevent);
 
-	DBG("Event agent disabling %s for session %" PRIu64, event_name, usess->id);
-
-	aevent = agent_find_event_by_name(event_name, agt);
-	if (!aevent) {
-		ret = LTTNG_ERR_UST_EVENT_NOT_FOUND;
-		goto error;
-	}
+	DBG("Event agent disabling %s (loglevel type %d, loglevel value %d) for session %" PRIu64,
+		aevent->name, aevent->loglevel_type, aevent->loglevel_value,
+		usess->id);
 
 	/* Already disabled? */
 	if (!aevent->enabled) {
@@ -782,6 +540,8 @@ int event_agent_disable(struct ltt_ust_session *usess, struct agent *agt,
 		ust_channel_name = DEFAULT_JUL_CHANNEL_NAME;
 	} else if (agt->domain == LTTNG_DOMAIN_LOG4J) {
 		ust_channel_name = DEFAULT_LOG4J_CHANNEL_NAME;
+	} else if (agt->domain == LTTNG_DOMAIN_PYTHON) {
+		ust_channel_name = DEFAULT_PYTHON_CHANNEL_NAME;
 	} else {
 		ret = LTTNG_ERR_INVALID;
 		goto error;
@@ -805,12 +565,13 @@ int event_agent_disable(struct ltt_ust_session *usess, struct agent *agt,
 	}
 
 	/*
-	 * The loglevel is hardcoded with 0 here since the agent ust event is set
-	 * with the loglevel type to ALL thus the loglevel stays 0. The event's
-	 * filter is the one handling the loglevel for agent.
+	 * Agent UST event has its loglevel type forced to
+	 * LTTNG_UST_LOGLEVEL_ALL. The actual loglevel type/value filtering
+	 * happens thanks to an UST filter. The following -1 is actually
+	 * ignored since the type is LTTNG_UST_LOGLEVEL_ALL.
 	 */
 	uevent = trace_ust_find_event(uchan->events, (char *) ust_event_name,
-			aevent->filter, 0, NULL);
+			aevent->filter, LTTNG_UST_LOGLEVEL_ALL, -1, NULL);
 	/* If the agent event exists, it must be available on the UST side. */
 	assert(uevent);
 
@@ -837,6 +598,52 @@ end:
 error:
 	return ret;
 }
+
+/*
+ * Disable all agent events matching a given name for a given UST session.
+ *
+ * Return LTTNG_OK on success or else a LTTNG_ERR* code.
+ */
+int event_agent_disable(struct ltt_ust_session *usess, struct agent *agt,
+		char *event_name)
+{
+	int ret = LTTNG_OK;
+	struct agent_event *aevent;
+	struct lttng_ht_iter iter;
+	struct lttng_ht_node_str *node;
+
+	assert(agt);
+	assert(usess);
+	assert(event_name);
+
+	DBG("Event agent disabling %s (all loglevels) for session %" PRIu64, event_name, usess->id);
+
+	rcu_read_lock();
+	agent_find_events_by_name(event_name, agt, &iter);
+	node = lttng_ht_iter_get_node_str(&iter);
+
+	if (node == NULL) {
+		DBG2("Event agent NOT found by name %s", event_name);
+		ret = LTTNG_ERR_UST_EVENT_NOT_FOUND;
+		goto end;
+	}
+
+	do {
+		aevent = caa_container_of(node, struct agent_event, node);
+		ret = event_agent_disable_one(usess, agt, aevent);
+
+		if (ret != LTTNG_OK) {
+			goto end;
+		}
+
+		/* Get next duplicate agent event by name. */
+		agent_event_next_duplicate(event_name, agt, &iter);
+		node = lttng_ht_iter_get_node_str(&iter);
+	} while (node);
+end:
+	rcu_read_unlock();
+	return ret;
+}
 /*
  * Disable all agent event for a given UST session.
  *
@@ -861,7 +668,7 @@ int event_agent_disable_all(struct ltt_ust_session *usess,
 		goto error;
 	}
 
-	/* Flag every event that they are now enabled. */
+	/* Disable every event. */
 	rcu_read_lock();
 	cds_lfht_for_each_entry(agt->events->ht, &iter.iter, aevent,
 			node.node) {
@@ -871,14 +678,13 @@ int event_agent_disable_all(struct ltt_ust_session *usess,
 
 		ret = event_agent_disable(usess, agt, aevent->name);
 		if (ret != LTTNG_OK) {
-			rcu_read_unlock();
-			goto error;
+			goto error_unlock;
 		}
 	}
-	rcu_read_unlock();
-
 	ret = LTTNG_OK;
 
+error_unlock:
+	rcu_read_unlock();
 error:
 	return ret;
 }

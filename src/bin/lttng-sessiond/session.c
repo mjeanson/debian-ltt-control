@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <limits.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -23,6 +24,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <urcu.h>
+#include <dirent.h>
+#include <sys/types.h>
 
 #include <common/common.h>
 #include <common/sessiond-comm/sessiond-comm.h>
@@ -195,7 +198,7 @@ int session_destroy(struct ltt_session *session)
 	del_session_list(session);
 	pthread_mutex_destroy(&session->lock);
 
-	consumer_destroy_output(session->consumer);
+	consumer_output_put(session->consumer);
 	snapshot_destroy(&session->snapshot);
 	free(session);
 

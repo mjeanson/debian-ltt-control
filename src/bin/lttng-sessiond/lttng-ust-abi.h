@@ -44,7 +44,7 @@
 #define LTTNG_UST_COMM_MAGIC			0xC57C57C5
 
 /* Version for ABI between liblttng-ust, sessiond, consumerd */
-#define LTTNG_UST_ABI_MAJOR_VERSION		5
+#define LTTNG_UST_ABI_MAJOR_VERSION		6
 #define LTTNG_UST_ABI_MINOR_VERSION		0
 
 enum lttng_ust_instrumentation {
@@ -141,6 +141,7 @@ enum lttng_ust_context_type {
 	LTTNG_UST_CONTEXT_PROCNAME		= 3,
 	LTTNG_UST_CONTEXT_IP			= 4,
 	LTTNG_UST_CONTEXT_PERF_THREAD_COUNTER	= 5,
+	LTTNG_UST_CONTEXT_CPU_ID		= 6,
 };
 
 struct lttng_ust_perf_counter_ctx {
@@ -166,7 +167,7 @@ struct lttng_ust_context {
  */
 #define LTTNG_UST_CHANNEL_ATTR_PADDING	(LTTNG_UST_SYM_NAME_LEN + 32)
 struct lttng_ust_channel_attr {
-	uint64_t subbuf_size;			/* bytes */
+	uint64_t subbuf_size;			/* bytes, power of 2 */
 	uint64_t num_subbuf;			/* power of 2 */
 	int overwrite;				/* 1: overwrite, 0: discard */
 	unsigned int switch_timer_interval;	/* usec */

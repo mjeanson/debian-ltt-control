@@ -18,6 +18,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <ctype.h>
 #include <fcntl.h>
@@ -31,9 +32,11 @@
 #include <grp.h>
 #include <pwd.h>
 #include <sys/file.h>
+#include <dirent.h>
 
 #include <common/common.h>
 #include <common/runas.h>
+#include <common/compat/getenv.h>
 
 #include "utils.h"
 #include "defaults.h"
@@ -52,7 +55,7 @@
 LTTNG_HIDDEN
 char *utils_partial_realpath(const char *path, char *resolved_path, size_t size)
 {
-	char *cut_path, *try_path = NULL, *try_path_prev = NULL;
+	char *cut_path = NULL, *try_path = NULL, *try_path_prev = NULL;
 	const char *next, *prev, *end;
 
 	/* Safety net */
@@ -121,6 +124,7 @@ char *utils_partial_realpath(const char *path, char *resolved_path, size_t size)
 
 		/* Free the allocated memory */
 		free(cut_path);
+		cut_path = NULL;
 	};
 
 	/* Allocate memory for the resolved path if necessary */
@@ -171,6 +175,7 @@ char *utils_partial_realpath(const char *path, char *resolved_path, size_t size)
 
 error:
 	free(resolved_path);
+	free(cut_path);
 	return NULL;
 }
 
@@ -476,10 +481,14 @@ int utils_create_pid_file(pid_t pid, const char *filepath)
 	ret = fprintf(fp, "%d\n", pid);
 	if (ret < 0) {
 		PERROR("fprintf pid file");
+		goto error;
 	}
 
-	fclose(fp);
+	if (fclose(fp)) {
+		PERROR("fclose");
+	}
 	DBG("Pid %d written in file %s", pid, filepath);
+	ret = 0;
 error:
 	return ret;
 }
@@ -511,9 +520,11 @@ int utils_create_lock_file(const char *filepath)
 	 */
 	ret = flock(fd, LOCK_EX | LOCK_NB);
 	if (ret) {
-		WARN("Could not get lock file %s, another instance is running.",
+		ERR("Could not get lock file %s, another instance is running.",
 			filepath);
-		close(fd);
+		if (close(fd)) {
+			PERROR("close lock file");
+		}
 		fd = ret;
 		goto error;
 	}
@@ -523,12 +534,42 @@ error:
 }
 
 /*
- * Recursively create directory using the given path and mode.
+ * Create directory using the given path and mode.
  *
  * On success, return 0 else a negative error code.
  */
 LTTNG_HIDDEN
-int utils_mkdir_recursive(const char *path, mode_t mode)
+int utils_mkdir(const char *path, mode_t mode, int uid, int gid)
+{
+	int ret;
+
+	if (uid < 0 || gid < 0) {
+		ret = mkdir(path, mode);
+	} else {
+		ret = run_as_mkdir(path, mode, uid, gid);
+	}
+	if (ret < 0) {
+		if (errno != EEXIST) {
+			PERROR("mkdir %s, uid %d, gid %d", path ? path : "NULL",
+					uid, gid);
+		} else {
+			ret = 0;
+		}
+	}
+
+	return ret;
+}
+
+/*
+ * Internal version of mkdir_recursive. Runs as the current user.
+ * Don't call directly; use utils_mkdir_recursive().
+ *
+ * This function is ominously marked as "unsafe" since it should only
+ * be called by a caller that has transitioned to the uid and gid under which
+ * the directory creation should occur.
+ */
+LTTNG_HIDDEN
+int _utils_mkdir_recursive_unsafe(const char *path, mode_t mode)
 {
 	char *p, tmp[PATH_MAX];
 	size_t len;
@@ -573,7 +614,7 @@ int utils_mkdir_recursive(const char *path, mode_t mode)
 	ret = mkdir(tmp, mode);
 	if (ret < 0) {
 		if (errno != EEXIST) {
-			PERROR("mkdir recursive last piece");
+			PERROR("mkdir recursive last element");
 			ret = -errno;
 		} else {
 			ret = 0;
@@ -585,20 +626,44 @@ error:
 }
 
 /*
- * Create the stream tracefile on disk.
+ * Recursively create directory using the given path and mode, under the
+ * provided uid and gid.
+ *
+ * On success, return 0 else a negative error code.
+ */
+LTTNG_HIDDEN
+int utils_mkdir_recursive(const char *path, mode_t mode, int uid, int gid)
+{
+	int ret;
+
+	if (uid < 0 || gid < 0) {
+		/* Run as current user. */
+		ret = _utils_mkdir_recursive_unsafe(path, mode);
+	} else {
+		ret = run_as_mkdir_recursive(path, mode, uid, gid);
+	}
+	if (ret < 0) {
+		PERROR("mkdir %s, uid %d, gid %d", path ? path : "NULL",
+				uid, gid);
+	}
+
+	return ret;
+}
+
+/*
+ * path is the output parameter. It needs to be PATH_MAX len.
  *
  * Return 0 on success or else a negative value.
  */
-LTTNG_HIDDEN
-int utils_create_stream_file(const char *path_name, char *file_name, uint64_t size,
-		uint64_t count, int uid, int gid, char *suffix)
+static int utils_stream_file_name(char *path,
+		const char *path_name, const char *file_name,
+		uint64_t size, uint64_t count,
+		const char *suffix)
 {
-	int ret, out_fd, flags, mode;
-	char full_path[PATH_MAX], *path_name_suffix = NULL, *path;
+	int ret;
+	char full_path[PATH_MAX];
+	char *path_name_suffix = NULL;
 	char *extra = NULL;
-
-	assert(path_name);
-	assert(file_name);
 
 	ret = snprintf(full_path, sizeof(full_path), "%s/%s",
 			path_name, file_name);
@@ -621,8 +686,8 @@ int utils_create_stream_file(const char *path_name, char *file_name, uint64_t si
 	}
 
 	/*
-	 * If we split the trace in multiple files, we have to add the count at the
-	 * end of the tracefile name
+	 * If we split the trace in multiple files, we have to add the count at
+	 * the end of the tracefile name.
 	 */
 	if (extra) {
 		ret = asprintf(&path_name_suffix, "%s%s", full_path, extra);
@@ -630,9 +695,37 @@ int utils_create_stream_file(const char *path_name, char *file_name, uint64_t si
 			PERROR("Allocating path name with extra string");
 			goto error_free_suffix;
 		}
-		path = path_name_suffix;
+		strncpy(path, path_name_suffix, PATH_MAX - 1);
+		path[PATH_MAX - 1] = '\0';
 	} else {
-		path = full_path;
+		strncpy(path, full_path, PATH_MAX - 1);
+	}
+	path[PATH_MAX - 1] = '\0';
+	ret = 0;
+
+	free(path_name_suffix);
+error_free_suffix:
+	free(extra);
+error:
+	return ret;
+}
+
+/*
+ * Create the stream file on disk.
+ *
+ * Return 0 on success or else a negative value.
+ */
+LTTNG_HIDDEN
+int utils_create_stream_file(const char *path_name, char *file_name, uint64_t size,
+		uint64_t count, int uid, int gid, char *suffix)
+{
+	int ret, flags, mode;
+	char path[PATH_MAX];
+
+	ret = utils_stream_file_name(path, path_name, file_name,
+			size, count, suffix);
+	if (ret < 0) {
+		goto error;
 	}
 
 	flags = O_WRONLY | O_CREAT | O_TRUNC;
@@ -640,21 +733,44 @@ int utils_create_stream_file(const char *path_name, char *file_name, uint64_t si
 	mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
 
 	if (uid < 0 || gid < 0) {
-		out_fd = open(path, flags, mode);
+		ret = open(path, flags, mode);
 	} else {
-		out_fd = run_as_open(path, flags, mode, uid, gid);
+		ret = run_as_open(path, flags, mode, uid, gid);
 	}
-	if (out_fd < 0) {
+	if (ret < 0) {
 		PERROR("open stream path %s", path);
-		goto error_open;
 	}
-	ret = out_fd;
-
-error_open:
-	free(path_name_suffix);
-error_free_suffix:
-	free(extra);
 error:
+	return ret;
+}
+
+/*
+ * Unlink the stream tracefile from disk.
+ *
+ * Return 0 on success or else a negative value.
+ */
+LTTNG_HIDDEN
+int utils_unlink_stream_file(const char *path_name, char *file_name, uint64_t size,
+		uint64_t count, int uid, int gid, char *suffix)
+{
+	int ret;
+	char path[PATH_MAX];
+
+	ret = utils_stream_file_name(path, path_name, file_name,
+			size, count, suffix);
+	if (ret < 0) {
+		goto error;
+	}
+	if (uid < 0 || gid < 0) {
+		ret = unlink(path);
+	} else {
+		ret = run_as_unlink(path, uid, gid);
+	}
+	if (ret < 0) {
+		goto error;
+	}
+error:
+	DBG("utils_unlink_stream_file %s returns %d", path, ret);
 	return ret;
 }
 
@@ -684,7 +800,25 @@ int utils_rotate_stream_file(char *path_name, char *file_name, uint64_t size,
 	}
 
 	if (count > 0) {
+		/*
+		 * In tracefile rotation, for the relay daemon we need
+		 * to unlink the old file if present, because it may
+		 * still be open in reading by the live thread, and we
+		 * need to ensure that we do not overwrite the content
+		 * between get_index and get_packet. Since we have no
+		 * way to verify integrity of the data content compared
+		 * to the associated index, we need to ensure the reader
+		 * has exclusive access to the file content, and that
+		 * the open of the data file is performed in get_index.
+		 * Unlinking the old file rather than overwriting it
+		 * achieves this.
+		 */
 		*new_count = (*new_count + 1) % count;
+		ret = utils_unlink_stream_file(path_name, file_name,
+				size, *new_count, uid, gid, 0);
+		if (ret < 0 && errno != ENOENT) {
+			goto error;
+		}
 	} else {
 		(*new_count)++;
 	}
@@ -878,11 +1012,11 @@ char *utils_get_home_dir(void)
 	char *val = NULL;
 	struct passwd *pwd;
 
-	val = getenv(DEFAULT_LTTNG_HOME_ENV_VAR);
+	val = lttng_secure_getenv(DEFAULT_LTTNG_HOME_ENV_VAR);
 	if (val != NULL) {
 		goto end;
 	}
-	val = getenv(DEFAULT_LTTNG_FALLBACK_HOME_ENV_VAR);
+	val = lttng_secure_getenv(DEFAULT_LTTNG_FALLBACK_HOME_ENV_VAR);
 	if (val != NULL) {
 		goto end;
 	}
@@ -947,7 +1081,7 @@ end:
 LTTNG_HIDDEN
 char *utils_get_kmod_probes_list(void)
 {
-	return getenv(DEFAULT_LTTNG_KMOD_PROBES);
+	return lttng_secure_getenv(DEFAULT_LTTNG_KMOD_PROBES);
 }
 
 /*
@@ -957,7 +1091,7 @@ char *utils_get_kmod_probes_list(void)
 LTTNG_HIDDEN
 char *utils_get_extra_kmod_probes_list(void)
 {
-	return getenv(DEFAULT_LTTNG_EXTRA_KMOD_PROBES);
+	return lttng_secure_getenv(DEFAULT_LTTNG_EXTRA_KMOD_PROBES);
 }
 
 /*
@@ -1041,12 +1175,77 @@ char *utils_generate_optstring(const struct option *long_options,
 			break;
 		}
 
-		optstring[str_pos++] = (char)long_options[i].val;
-		if (long_options[i].has_arg) {
-			optstring[str_pos++] = ':';
+		if (long_options[i].val != '\0') {
+			optstring[str_pos++] = (char) long_options[i].val;
+			if (long_options[i].has_arg) {
+				optstring[str_pos++] = ':';
+			}
 		}
 	}
 
 end:
 	return optstring;
+}
+
+/*
+ * Try to remove a hierarchy of empty directories, recursively. Don't unlink
+ * any file. Try to rmdir any empty directory within the hierarchy.
+ */
+LTTNG_HIDDEN
+int utils_recursive_rmdir(const char *path)
+{
+	DIR *dir;
+	int dir_fd, ret = 0, closeret, is_empty = 1;
+	struct dirent *entry;
+
+	/* Open directory */
+	dir = opendir(path);
+	if (!dir) {
+		PERROR("Cannot open '%s' path", path);
+		return -1;
+	}
+	dir_fd = dirfd(dir);
+	if (dir_fd < 0) {
+		PERROR("dirfd");
+		return -1;
+	}
+
+	while ((entry = readdir(dir))) {
+		if (!strcmp(entry->d_name, ".")
+				|| !strcmp(entry->d_name, ".."))
+			continue;
+		switch (entry->d_type) {
+		case DT_DIR:
+		{
+			char subpath[PATH_MAX];
+
+			strncpy(subpath, path, PATH_MAX);
+			subpath[PATH_MAX - 1] = '\0';
+			strncat(subpath, "/",
+				PATH_MAX - strlen(subpath) - 1);
+			strncat(subpath, entry->d_name,
+				PATH_MAX - strlen(subpath) - 1);
+			if (utils_recursive_rmdir(subpath)) {
+				is_empty = 0;
+			}
+			break;
+		}
+		case DT_REG:
+			is_empty = 0;
+			break;
+		default:
+			ret = -EINVAL;
+			goto end;
+		}
+	}
+end:
+	closeret = closedir(dir);
+	if (closeret) {
+		PERROR("closedir");
+	}
+	if (is_empty) {
+		DBG3("Attempting rmdir %s", path);
+		ret = rmdir(path);
+	}
+	return ret;
 }

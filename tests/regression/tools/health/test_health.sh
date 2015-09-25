@@ -104,14 +104,14 @@ function test_health
 		create_lttng_session_no_output $SESSION_NAME
 
 		diag "With UST consumer daemons"
-		enable_ust_lttng_event $SESSION_NAME $UST_EVENT_NAME $CHANNEL_NAME
+		enable_ust_lttng_event_ok $SESSION_NAME $UST_EVENT_NAME $CHANNEL_NAME
 
 		skip $isroot "Root access is needed. Skipping kernel consumer health check test." "1" ||
 		{
 			diag "With kernel consumer daemon"
 			lttng_enable_kernel_event $SESSION_NAME $KERNEL_EVENT_NAME $CHANNEL_NAME
 		}
-		start_lttng_tracing $SESSION_NAME
+		start_lttng_tracing_ok $SESSION_NAME
 	fi
 
 	if [ ${test_relayd} -eq 1 ]; then
@@ -146,7 +146,9 @@ function test_health
 	fi
 
 	if [ ${test_relayd} -eq 1 ]; then
-		stop_lttng_relayd_nocheck
+		# We may fail to stop relayd here, and this is OK, since
+		# it may have been killed volountarily by testpoint.
+		stop_lttng_relayd_notap
 	fi
 	stop_lttng_sessiond
 

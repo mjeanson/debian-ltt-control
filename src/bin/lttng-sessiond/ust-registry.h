@@ -66,6 +66,12 @@ struct ust_registry_session {
 	size_t metadata_len, metadata_alloc_len;
 	/* Length of bytes sent to the consumer. */
 	size_t metadata_len_sent;
+
+	char root_shm_path[PATH_MAX];
+	char shm_path[PATH_MAX];
+	char metadata_path[PATH_MAX];
+	int metadata_fd;	/* file-backed metadata FD */
+
 	/*
 	 * Hash table containing channels sent by the UST tracer. MUST
 	 * be accessed with a RCU read side lock acquired.
@@ -81,6 +87,10 @@ struct ust_registry_session {
 	 * deletes its sessions.
 	 */
 	unsigned int metadata_closed;
+
+	/* User and group owning the session. */
+	uid_t uid;
+	gid_t gid;
 };
 
 struct ust_registry_channel {
@@ -129,7 +139,7 @@ struct ust_registry_event {
 	/* Name of the event returned by the tracer. */
 	char name[LTTNG_UST_SYM_NAME_LEN];
 	char *signature;
-	int loglevel;
+	int loglevel_value;
 	size_t nr_fields;
 	struct ustctl_field *fields;
 	char *model_emf_uri;
@@ -225,14 +235,18 @@ int ust_registry_session_init(struct ust_registry_session **sessionp,
 		uint32_t long_alignment,
 		int byte_order,
 		uint32_t major,
-		uint32_t minor);
+		uint32_t minor,
+		const char *root_shm_path,
+		const char *shm_path,
+		uid_t euid,
+		gid_t egid);
 void ust_registry_session_destroy(struct ust_registry_session *session);
 
 int ust_registry_create_event(struct ust_registry_session *session,
 		uint64_t chan_key, int session_objd, int channel_objd, char *name,
-		char *sig, size_t nr_fields, struct ustctl_field *fields, int loglevel,
-		char *model_emf_uri, int buffer_type, uint32_t *event_id_p,
-		struct ust_app *app);
+		char *sig, size_t nr_fields, struct ustctl_field *fields,
+		int loglevel_value, char *model_emf_uri, int buffer_type,
+		uint32_t *event_id_p, struct ust_app *app);
 struct ust_registry_event *ust_registry_find_event(
 		struct ust_registry_channel *chan, char *name, char *sig);
 void ust_registry_destroy_event(struct ust_registry_channel *chan,
@@ -288,8 +302,9 @@ void ust_registry_session_destroy(struct ust_registry_session *session)
 static inline
 int ust_registry_create_event(struct ust_registry_session *session,
 		uint64_t chan_key, int session_objd, int channel_objd, char *name,
-		char *sig, size_t nr_fields, struct ustctl_field *fields, int loglevel,
-		char *model_emf_uri, int buffer_type, uint32_t *event_id_p)
+		char *sig, size_t nr_fields, struct ustctl_field *fields,
+		int loglevel_value, char *model_emf_uri, int buffer_type,
+		uint32_t *event_id_p)
 {
 	return 0;
 }

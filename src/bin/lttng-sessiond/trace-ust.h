@@ -33,7 +33,8 @@
 struct ltt_ust_ht_key {
 	const char *name;
 	const struct lttng_filter_bytecode *filter;
-	enum lttng_ust_loglevel_type loglevel;
+	enum lttng_ust_loglevel_type loglevel_type;
+	int loglevel_value;
 	const struct lttng_event_exclusion *exclusion;
 };
 
@@ -50,14 +51,20 @@ struct ltt_ust_event {
 	struct lttng_ust_event attr;
 	struct lttng_ht_node_str node;
 	char *filter_expression;
-	struct lttng_ust_filter_bytecode *filter;
+	struct lttng_filter_bytecode *filter;
 	struct lttng_event_exclusion *exclusion;
+	bool internal;
 };
 
 /* UST channel */
 struct ltt_ust_channel {
 	uint64_t id;	/* unique id per session. */
 	unsigned int enabled;
+	/*
+	 * A UST channel can be part of a userspace sub-domain such as JUL,
+	 * Log4j, Python.
+	 */
+	enum lttng_domain_type domain;
 	char name[LTTNG_UST_SYM_NAME_LEN];
 	struct lttng_ust_channel_attr attr;
 	struct lttng_ht *ctx;
@@ -74,6 +81,14 @@ struct ltt_ust_domain_global {
 	struct cds_list_head registry_buffer_uid_list;
 };
 
+struct ust_pid_tracker_node {
+	struct lttng_ht_node_ulong node;
+};
+
+struct ust_pid_tracker {
+	struct lttng_ht *ht;
+};
+
 /* UST session */
 struct ltt_ust_session {
 	uint64_t id;    /* Unique identifier of session */
@@ -85,14 +100,7 @@ struct ltt_ust_session {
 	gid_t gid;
 	/* Is the session active meaning has is been started or stopped. */
 	unsigned int active:1;
-	/*
-	 * Two consumer_output object are needed where one is for the current
-	 * output object and the second one is the temporary object used to store
-	 * URI being set by the lttng_set_consumer_uri call. Once
-	 * lttng_enable_consumer is called, the two pointers are swapped.
-	 */
 	struct consumer_output *consumer;
-	struct consumer_output *tmp_consumer;
 	/* Sequence number for filters so the tracer knows the ordering. */
 	uint64_t filter_seq_num;
 	/* This indicates which type of buffer this session is set for. */
@@ -113,6 +121,14 @@ struct ltt_ust_session {
 
 	/* Metadata channel attributes. */
 	struct lttng_ust_channel_attr metadata_attr;
+
+	/*
+	 * Path where to keep the shared memory files.
+	 */
+	char root_shm_path[PATH_MAX];
+	char shm_path[PATH_MAX];
+
+	struct ust_pid_tracker pid_tracker;
 };
 
 /*
@@ -154,7 +170,8 @@ int trace_ust_ht_match_event_by_name(struct cds_lfht_node *node,
  * Lookup functions. NULL is returned if not found.
  */
 struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
-		char *name, struct lttng_filter_bytecode *filter, int loglevel,
+		char *name, struct lttng_filter_bytecode *filter,
+		enum lttng_ust_loglevel_type loglevel_type, int loglevel_value,
 		struct lttng_event_exclusion *exclusion);
 struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 		char *name);
@@ -165,11 +182,13 @@ struct agent *trace_ust_find_agent(struct ltt_ust_session *session,
  * Create functions malloc() the data structure.
  */
 struct ltt_ust_session *trace_ust_create_session(uint64_t session_id);
-struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr);
+struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr,
+		enum lttng_domain_type domain);
 struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
 		char *filter_expression,
 		struct lttng_filter_bytecode *filter,
-		struct lttng_event_exclusion *exclusion);
+		struct lttng_event_exclusion *exclusion,
+		bool internal_event);
 struct ltt_ust_context *trace_ust_create_context(
 		struct lttng_event_context *ctx);
 int trace_ust_match_context(struct ltt_ust_context *uctx,
@@ -184,6 +203,14 @@ void trace_ust_delete_channel(struct lttng_ht *ht,
 void trace_ust_destroy_session(struct ltt_ust_session *session);
 void trace_ust_destroy_channel(struct ltt_ust_channel *channel);
 void trace_ust_destroy_event(struct ltt_ust_event *event);
+
+int trace_ust_track_pid(struct ltt_ust_session *session, int pid);
+int trace_ust_untrack_pid(struct ltt_ust_session *session, int pid);
+
+int trace_ust_pid_tracker_lookup(struct ltt_ust_session *session, int pid);
+
+ssize_t trace_ust_list_tracker_pids(struct ltt_ust_session *session,
+		int32_t **_pids);
 
 #else /* HAVE_LIBLTTNG_UST_CTL */
 
@@ -210,7 +237,8 @@ struct ltt_ust_session *trace_ust_create_session(unsigned int session_id)
 	return NULL;
 }
 static inline
-struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr)
+struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr,
+		enum lttng_domain_type domain)
 {
 	return NULL;
 }
@@ -218,7 +246,8 @@ static inline
 struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
 		const char *filter_expression,
 		struct lttng_filter_bytecode *filter,
-		struct lttng_event_exclusion *exclusion)
+		struct lttng_event_exclusion *exclusion,
+		bool internal_event)
 {
 	return NULL;
 }
@@ -248,8 +277,10 @@ int trace_ust_match_context(struct ltt_ust_context *uctx,
 {
 	return 0;
 }
-static inline struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
-		char *name, struct lttng_filter_bytecode *filter, int loglevel,
+static inline
+struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
+		char *name, struct lttng_filter_bytecode *filter,
+		enum lttng_ust_loglevel_type loglevel_type, int loglevel_value,
 		struct lttng_event_exclusion *exclusion)
 {
 	return NULL;
@@ -266,7 +297,27 @@ struct agent *trace_ust_find_agent(struct ltt_ust_session *session,
 {
 	return NULL;
 }
-
+static inline
+int trace_ust_track_pid(struct ltt_ust_session *session, int pid)
+{
+	return 0;
+}
+static inline
+int trace_ust_untrack_pid(struct ltt_ust_session *session, int pid)
+{
+	return 0;
+}
+static inline
+int trace_ust_pid_tracker_lookup(struct ltt_ust_session *session, int pid)
+{
+	return 0;
+}
+static inline
+ssize_t trace_ust_list_tracker_pids(struct ltt_ust_session *session,
+		int32_t **_pids)
+{
+	return -1;
+}
 #endif /* HAVE_LIBLTTNG_UST_CTL */
 
 #endif /* _LTT_TRACE_UST_H */

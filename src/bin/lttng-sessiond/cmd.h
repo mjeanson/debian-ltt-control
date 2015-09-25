@@ -37,9 +37,10 @@ int cmd_destroy_session(struct ltt_session *session, int wpipe);
 /* Channel commands */
 int cmd_disable_channel(struct ltt_session *session, int domain,
 		char *channel_name);
-
 int cmd_enable_channel(struct ltt_session *session,
 		struct lttng_domain *domain, struct lttng_channel *attr, int wpipe);
+int cmd_track_pid(struct ltt_session *session, int domain, int pid);
+int cmd_untrack_pid(struct ltt_session *session, int domain, int pid);
 
 /* Event commands */
 int cmd_disable_event(struct ltt_session *session, int domain,
@@ -85,6 +86,8 @@ ssize_t cmd_list_tracepoints(int domain, struct lttng_event **events);
 ssize_t cmd_snapshot_list_outputs(struct ltt_session *session,
 		struct lttng_snapshot_output **outputs);
 ssize_t cmd_list_syscalls(struct lttng_event **events);
+ssize_t cmd_list_tracker_pids(struct ltt_session *session,
+		int domain, int32_t **pids);
 
 int cmd_calibrate(int domain, struct lttng_calibrate *calibrate);
 int cmd_data_pending(struct ltt_session *session);
@@ -96,5 +99,8 @@ int cmd_snapshot_del_output(struct ltt_session *session,
 		struct lttng_snapshot_output *output);
 int cmd_snapshot_record(struct ltt_session *session,
 		struct lttng_snapshot_output *output, int wait);
+
+int cmd_set_session_shm_path(struct ltt_session *session,
+		const char *shm_path);
 
 #endif /* CMD_H */

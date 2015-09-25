@@ -17,6 +17,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -98,8 +99,8 @@ static struct kern_modules_param *probes;
 static int nr_probes;
 static int probes_capacity;
 
-void modprobe_remove_lttng(const struct kern_modules_param *modules,
-			   int entries, int required)
+static void modprobe_remove_lttng(const struct kern_modules_param *modules,
+		int entries, int required)
 {
 	int ret = 0, i;
 	char modprobe[256];
@@ -358,11 +359,12 @@ static int grow_probes(void)
 static int append_list_to_probes(const char *list)
 {
 	char *next;
-	int index = nr_probes, ret;
+	int ret;
+	char *tmp_list, *cur_list;
 
 	assert(list);
 
-	char *tmp_list = strdup(list);
+	cur_list = tmp_list = strdup(list);
 	if (!tmp_list) {
 		PERROR("strdup temp list");
 		return -ENOMEM;
@@ -372,11 +374,11 @@ static int append_list_to_probes(const char *list)
 		size_t name_len;
 		struct kern_modules_param *cur_mod;
 
-		next = strtok(tmp_list, ",");
+		next = strtok(cur_list, ",");
 		if (!next) {
 			break;
 		}
-		tmp_list = NULL;
+		cur_list = NULL;
 
 		/* filter leading spaces */
 		while (*next == ' ') {
@@ -393,7 +395,7 @@ static int append_list_to_probes(const char *list)
 		/* Length 13 is "lttng-probe-" + \0 */
 		name_len = strlen(next) + 13;
 
-		cur_mod = &probes[index];
+		cur_mod = &probes[nr_probes];
 		cur_mod->name = zmalloc(name_len);
 		if (!cur_mod->name) {
 			PERROR("malloc probe list");
@@ -408,7 +410,6 @@ static int append_list_to_probes(const char *list)
 			goto error;
 		}
 
-		cur_mod++;
 		nr_probes++;
 	}
 
@@ -448,8 +449,8 @@ int modprobe_lttng_data(void)
 	} else {
 		/* Default probes. */
 		int def_len = ARRAY_SIZE(kern_modules_probes_default);
-		probes = zmalloc(sizeof(*probes) * def_len);
 
+		probes = zmalloc(sizeof(*probes) * def_len);
 		if (!probes) {
 			PERROR("malloc probe list");
 			return -ENOMEM;

@@ -20,7 +20,7 @@ components:
     that, the kernel version may probably be older, but we can't provide
     any guarantee. Please let us know if you are able to go lower
     without any problems.
-  - **[`liburcu`](http://urcu.so/) >= 0.8.0**: userspace RCU library,
+  - **[`liburcu`](http://www.liburcu.org/) >= 0.8.0**: userspace RCU library,
     by Mathieu Desnoyers and Paul E. McKenney.
   - **`libpopt` >= 1.13**:  command line arguments parsing library.
     - Debian/Ubuntu package: `libpopt-dev`
@@ -37,6 +37,9 @@ The following items are _optional_ dependencies:
   - **[Babeltrace](https://lttng.org/babeltrace)**: trace viewer.
     Enables the use of `lttng view` command.
     - Debian/Ubuntu package: `babeltrace`
+  - **[LTTng UST](https://lttng.org) (same version as LTTng Tools)**: userspace tracer.
+    Enables the tracing of userspace applications.
+    - Debian/Ubuntu package: `liblttng-ust-dev`
   - **Perl**: needed for `make check` and tests.
   - **Python >= 3.0**: needed for `make check` and tests.
     - Debian/Ubuntu package: `python3`
@@ -56,7 +59,7 @@ This source tree is based on the Autotools suite from GNU to simplify
 portability. Here are some things you should have on your system in
 order to compile the Git repository tree:
 
-  - GNU Autotools (Automake >= 1.10, Autoconf >= 2.50,
+  - GNU Autotools (Automake >= 1.10, Autoconf >= 2.64,
     Autoheader >= 2.50; make sure your system-wide `automake` points to
     a recent version!)
   - [GNU Libtool](http://www.gnu.org/software/autoconf/) >= 2.2

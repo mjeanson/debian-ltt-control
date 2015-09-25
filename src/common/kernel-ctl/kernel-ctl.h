@@ -22,6 +22,7 @@
 #include <lttng/lttng.h>
 #include <common/lttng-kernel.h>
 #include <common/lttng-kernel-old.h>
+#include <common/sessiond-comm/sessiond-comm.h>	/* for struct lttng_filter_bytecode */
 
 int kernctl_create_session(int fd);
 int kernctl_open_metadata(int fd, struct lttng_channel_attr *chops);
@@ -35,15 +36,15 @@ int kernctl_disable(int fd);
 int kernctl_start_session(int fd);
 int kernctl_stop_session(int fd);
 
+/* Apply on event FD */
+int kernctl_filter(int fd, struct lttng_filter_bytecode *filter);
+
 int kernctl_tracepoint_list(int fd);
 int kernctl_syscall_list(int fd);
 int kernctl_tracer_version(int fd, struct lttng_kernel_tracer_version *v);
 int kernctl_tracer_abi_version(int fd, struct lttng_kernel_tracer_abi_version *v);
 int kernctl_wait_quiescent(int fd);
 int kernctl_calibrate(int fd, struct lttng_kernel_calibrate *calibrate);
-
-int kernctl_enable_syscall(int fd, const char *syscall_name);
-int kernctl_disable_syscall(int fd, const char *syscall_name);
 
 /*
  * kernctl_syscall_mask - Get syscall mask associated to a channel FD.
@@ -58,6 +59,11 @@ int kernctl_disable_syscall(int fd, const char *syscall_name);
  */
 int kernctl_syscall_mask(int fd, char **syscall_mask,
 		uint32_t *nr_bits);
+
+/* Process ID tracking can be applied to session FD */
+int kernctl_track_pid(int fd, int pid);
+int kernctl_untrack_pid(int fd, int pid);
+int kernctl_list_tracker_pids(int fd);
 
 /* Buffer operations */
 

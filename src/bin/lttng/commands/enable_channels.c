@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <popt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -219,9 +220,8 @@ static int enable_channel(char *session_name)
 			dom.buf_type = LTTNG_BUFFER_PER_UID;
 		}
 	} else {
-		print_missing_domain();
-		ret = CMD_ERROR;
-		goto error;
+		/* Checked by the caller. */
+		assert(0);
 	}
 
 	set_default_attr(&dom);
@@ -277,7 +277,7 @@ static int enable_channel(char *session_name)
 		/* Validate channel name's length */
 		if (strlen(channel_name) >= NAME_MAX) {
 			ERR("Channel name is too long (max. %zu characters)",
-			    sizeof(chan.name) - 1);
+					sizeof(chan.name) - 1);
 			error = 1;
 			goto skip_enable;
 		}
@@ -567,6 +567,12 @@ int cmd_enable_channels(int argc, const char **argv)
 			ret = CMD_UNDEFINED;
 			goto end;
 		}
+	}
+
+	ret = print_missing_or_multiple_domains(opt_kernel + opt_userspace);
+	if (ret) {
+		ret = CMD_ERROR;
+		goto end;
 	}
 
 	/* Mi check */

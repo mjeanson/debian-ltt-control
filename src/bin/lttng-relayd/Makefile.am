@@ -17,7 +17,10 @@ lttng_relayd_SOURCES = main.c lttng-relayd.h utils.h utils.c cmd.h \
                        viewer-stream.h viewer-stream.c \
                        session.c session.h \
                        stream.c stream.h \
-                       connection.c connection.h
+                       stream-fd.c stream-fd.h \
+                       connection.c connection.h \
+                       viewer-session.c viewer-session.h \
+                       tracefile-array.c tracefile-array.h
 
 # link on liblttngctl for check if relayd is already alive.
 lttng_relayd_LDADD = -lrt -lurcu-common -lurcu \

@@ -37,8 +37,11 @@ void utils_close_pipe(int *src);
 char *utils_strdupdelim(const char *begin, const char *end);
 int utils_set_fd_cloexec(int fd);
 int utils_create_pid_file(pid_t pid, const char *filepath);
-int utils_mkdir_recursive(const char *path, mode_t mode);
+int utils_mkdir(const char *path, mode_t mode, int uid, int gid);
+int utils_mkdir_recursive(const char *path, mode_t mode, int uid, int gid);
 int utils_create_stream_file(const char *path_name, char *file_name, uint64_t size,
+		uint64_t count, int uid, int gid, char *suffix);
+int utils_unlink_stream_file(const char *path_name, char *file_name, uint64_t size,
 		uint64_t count, int uid, int gid, char *suffix);
 int utils_rotate_stream_file(char *path_name, char *file_name, uint64_t size,
 		uint64_t count, int uid, int gid, int out_fd, uint64_t *new_count,
@@ -54,5 +57,6 @@ gid_t utils_get_group_id(const char *name);
 char *utils_generate_optstring(const struct option *long_options,
 		size_t opt_count);
 int utils_create_lock_file(const char *filepath);
+int utils_recursive_rmdir(const char *path);
 
 #endif /* _COMMON_UTILS_H */

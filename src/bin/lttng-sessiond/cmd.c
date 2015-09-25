@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <string.h>
 #include <inttypes.h>
@@ -49,20 +50,15 @@
 static pthread_mutex_t relayd_net_seq_idx_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t relayd_net_seq_idx;
 
-/*
- * Both functions below are special case for the Kernel domain when
- * enabling/disabling all events.
- */
-static
-int enable_kevent_all(struct ltt_session *session,
-		struct lttng_domain *domain, char *channel_name,
-		struct lttng_event *event,
+static int validate_event_name(const char *);
+static int validate_ust_event_name(const char *);
+static int cmd_enable_event_internal(struct ltt_session *session,
+		struct lttng_domain *domain,
+		char *channel_name, struct lttng_event *event,
 		char *filter_expression,
-		struct lttng_filter_bytecode *filter, int wpipe);
-static
-int disable_kevent_all(struct ltt_session *session, int domain,
-		char *channel_name,
-		struct lttng_event *event);
+		struct lttng_filter_bytecode *filter,
+		struct lttng_event_exclusion *exclusion,
+		int wpipe);
 
 /*
  * Create a session path used by list_lttng_sessions for the case that the
@@ -240,7 +236,7 @@ static int list_lttng_agent_events(struct agent *agt,
 		strncpy(tmp_events[i].name, event->name, sizeof(tmp_events[i].name));
 		tmp_events[i].name[sizeof(tmp_events[i].name) - 1] = '\0';
 		tmp_events[i].enabled = event->enabled;
-		tmp_events[i].loglevel = event->loglevel;
+		tmp_events[i].loglevel = event->loglevel_value;
 		tmp_events[i].loglevel_type = event->loglevel_type;
 		i++;
 	}
@@ -281,8 +277,7 @@ static int list_lttng_ust_global_events(char *channel_name,
 
 	uchan = caa_container_of(&node->node, struct ltt_ust_channel, node.node);
 
-	nb_event += lttng_ht_get_count(uchan->events);
-
+	nb_event = lttng_ht_get_count(uchan->events);
 	if (nb_event == 0) {
 		ret = nb_event;
 		goto error;
@@ -297,6 +292,11 @@ static int list_lttng_ust_global_events(char *channel_name,
 	}
 
 	cds_lfht_for_each_entry(uchan->events->ht, &iter.iter, uevent, node.node) {
+		if (uevent->internal) {
+			/* This event should remain hidden from clients */
+			nb_event--;
+			continue;
+		}
 		strncpy(tmp[i].name, uevent->attr.name, LTTNG_SYMBOL_NAME_LEN);
 		tmp[i].name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
 		tmp[i].enabled = uevent->enabled;
@@ -379,6 +379,8 @@ static int list_lttng_kernel_events(char *channel_name,
 		strncpy((*events)[i].name, event->event->name, LTTNG_SYMBOL_NAME_LEN);
 		(*events)[i].name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
 		(*events)[i].enabled = event->enabled;
+		(*events)[i].filter =
+				(unsigned char) !!event->filter_expression;
 
 		switch (event->event->instrumentation) {
 		case LTTNG_KERNEL_TRACEPOINT:
@@ -911,11 +913,106 @@ int cmd_disable_channel(struct ltt_session *session, int domain,
 		}
 		break;
 	}
-#if 0
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-#endif
+	default:
+		ret = LTTNG_ERR_UNKNOWN_DOMAIN;
+		goto error;
+	}
+
+	ret = LTTNG_OK;
+
+error:
+	rcu_read_unlock();
+	return ret;
+}
+
+/*
+ * Command LTTNG_TRACK_PID processed by the client thread.
+ *
+ * Called with session lock held.
+ */
+int cmd_track_pid(struct ltt_session *session, int domain, int pid)
+{
+	int ret;
+
+	rcu_read_lock();
+
+	switch (domain) {
+	case LTTNG_DOMAIN_KERNEL:
+	{
+		struct ltt_kernel_session *ksess;
+
+		ksess = session->kernel_session;
+
+		ret = kernel_track_pid(ksess, pid);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+
+		kernel_wait_quiescent(kernel_tracer_fd);
+		break;
+	}
+	case LTTNG_DOMAIN_UST:
+	{
+		struct ltt_ust_session *usess;
+
+		usess = session->ust_session;
+
+		ret = trace_ust_track_pid(usess, pid);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+		break;
+	}
+	default:
+		ret = LTTNG_ERR_UNKNOWN_DOMAIN;
+		goto error;
+	}
+
+	ret = LTTNG_OK;
+
+error:
+	rcu_read_unlock();
+	return ret;
+}
+
+/*
+ * Command LTTNG_UNTRACK_PID processed by the client thread.
+ *
+ * Called with session lock held.
+ */
+int cmd_untrack_pid(struct ltt_session *session, int domain, int pid)
+{
+	int ret;
+
+	rcu_read_lock();
+
+	switch (domain) {
+	case LTTNG_DOMAIN_KERNEL:
+	{
+		struct ltt_kernel_session *ksess;
+
+		ksess = session->kernel_session;
+
+		ret = kernel_untrack_pid(ksess, pid);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+
+		kernel_wait_quiescent(kernel_tracer_fd);
+		break;
+	}
+	case LTTNG_DOMAIN_UST:
+	{
+		struct ltt_ust_session *usess;
+
+		usess = session->ust_session;
+
+		ret = trace_ust_untrack_pid(usess, pid);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+		break;
+	}
 	default:
 		ret = LTTNG_ERR_UNKNOWN_DOMAIN;
 		goto error;
@@ -1011,8 +1108,39 @@ int cmd_enable_channel(struct ltt_session *session,
 		break;
 	}
 	case LTTNG_DOMAIN_UST:
+	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_LOG4J:
+	case LTTNG_DOMAIN_PYTHON:
 	{
 		struct ltt_ust_channel *uchan;
+
+		/*
+		 * FIXME
+		 *
+		 * Current agent implementation limitations force us to allow
+		 * only one channel at once in "agent" subdomains. Each
+		 * subdomain has a default channel name which must be strictly
+		 * adhered to.
+		 */
+		if (domain->type == LTTNG_DOMAIN_JUL) {
+			if (strncmp(attr->name, DEFAULT_JUL_CHANNEL_NAME,
+					LTTNG_SYMBOL_NAME_LEN)) {
+				ret = LTTNG_ERR_INVALID_CHANNEL_NAME;
+				goto error;
+			}
+		} else if (domain->type == LTTNG_DOMAIN_LOG4J) {
+			if (strncmp(attr->name, DEFAULT_LOG4J_CHANNEL_NAME,
+					LTTNG_SYMBOL_NAME_LEN)) {
+				ret = LTTNG_ERR_INVALID_CHANNEL_NAME;
+				goto error;
+			}
+		} else if (domain->type == LTTNG_DOMAIN_PYTHON) {
+			if (strncmp(attr->name, DEFAULT_PYTHON_CHANNEL_NAME,
+					LTTNG_SYMBOL_NAME_LEN)) {
+				ret = LTTNG_ERR_INVALID_CHANNEL_NAME;
+				goto error;
+			}
+		}
 
 		chan_ht = usess->domain_global.channels;
 
@@ -1038,7 +1166,6 @@ end:
 	return ret;
 }
 
-
 /*
  * Command LTTNG_DISABLE_EVENT processed by the client thread.
  */
@@ -1052,15 +1179,16 @@ int cmd_disable_event(struct ltt_session *session, int domain,
 	DBG("Disable event command for event \'%s\'", event->name);
 
 	event_name = event->name;
+	if (validate_event_name(event_name)) {
+		ret = LTTNG_ERR_INVALID_EVENT_NAME;
+		goto error;
+	}
 
 	/* Error out on unhandled search criteria */
 	if (event->loglevel_type || event->loglevel != -1 || event->enabled
 			|| event->pid || event->filter || event->exclusion) {
-		return LTTNG_ERR_UNK;
-	}
-	/* Special handling for kernel domain all events. */
-	if (domain == LTTNG_DOMAIN_KERNEL && !strcmp(event_name, "*")) {
-		return disable_kevent_all(session, domain, channel_name, event);
+		ret = LTTNG_ERR_UNK;
+		goto error;
 	}
 
 	rcu_read_lock();
@@ -1080,32 +1208,36 @@ int cmd_disable_event(struct ltt_session *session, int domain,
 		 */
 		if (ksess->has_non_default_channel && channel_name[0] == '\0') {
 			ret = LTTNG_ERR_NEED_CHANNEL_NAME;
-			goto error;
+			goto error_unlock;
 		}
 
 		kchan = trace_kernel_get_channel_by_name(channel_name, ksess);
 		if (kchan == NULL) {
 			ret = LTTNG_ERR_KERN_CHAN_NOT_FOUND;
-			goto error;
+			goto error_unlock;
 		}
 
 		switch (event->type) {
 		case LTTNG_EVENT_ALL:
 		case LTTNG_EVENT_TRACEPOINT:
-			ret = event_kernel_disable_tracepoint(kchan, event_name);
-			if (ret != LTTNG_OK) {
-				goto error;
-			}
-			break;
 		case LTTNG_EVENT_SYSCALL:
-			ret = event_kernel_disable_syscall(kchan, event_name);
+		case LTTNG_EVENT_PROBE:
+		case LTTNG_EVENT_FUNCTION:
+		case LTTNG_EVENT_FUNCTION_ENTRY:/* fall-through */
+			if (event_name[0] == '\0') {
+				ret = event_kernel_disable_event(kchan,
+					NULL, event->type);
+			} else {
+				ret = event_kernel_disable_event(kchan,
+					event_name, event->type);
+			}
 			if (ret != LTTNG_OK) {
-				goto error;
+				goto error_unlock;
 			}
 			break;
 		default:
 			ret = LTTNG_ERR_UNK;
-			goto error;
+			goto error_unlock;
 		}
 
 		kernel_wait_quiescent(kernel_tracer_fd);
@@ -1118,33 +1250,47 @@ int cmd_disable_event(struct ltt_session *session, int domain,
 
 		usess = session->ust_session;
 
+		if (validate_ust_event_name(event_name)) {
+			ret = LTTNG_ERR_INVALID_EVENT_NAME;
+			goto error_unlock;
+		}
+
 		/*
 		 * If a non-default channel has been created in the
-		 * session, explicitely require that -c chan_name needs
+		 * session, explicitly require that -c chan_name needs
 		 * to be provided.
 		 */
 		if (usess->has_non_default_channel && channel_name[0] == '\0') {
 			ret = LTTNG_ERR_NEED_CHANNEL_NAME;
-			goto error;
+			goto error_unlock;
 		}
 
 		uchan = trace_ust_find_channel_by_name(usess->domain_global.channels,
 				channel_name);
 		if (uchan == NULL) {
 			ret = LTTNG_ERR_UST_CHAN_NOT_FOUND;
-			goto error;
+			goto error_unlock;
 		}
 
 		switch (event->type) {
 		case LTTNG_EVENT_ALL:
-			ret = event_ust_disable_tracepoint(usess, uchan, event_name);
+			/*
+			 * An empty event name means that everything
+			 * should be disabled.
+			 */
+			if (event->name[0] == '\0') {
+				ret = event_ust_disable_all_tracepoints(usess, uchan);
+			} else {
+				ret = event_ust_disable_tracepoint(usess, uchan,
+						event_name);
+			}
 			if (ret != LTTNG_OK) {
-				goto error;
+				goto error_unlock;
 			}
 			break;
 		default:
 			ret = LTTNG_ERR_UNK;
-			goto error;
+			goto error_unlock;
 		}
 
 		DBG3("Disable UST event %s in channel %s completed", event_name,
@@ -1153,6 +1299,7 @@ int cmd_disable_event(struct ltt_session *session, int domain,
 	}
 	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_PYTHON:
 	{
 		struct agent *agt;
 		struct ltt_ust_session *usess = session->ust_session;
@@ -1164,109 +1311,39 @@ int cmd_disable_event(struct ltt_session *session, int domain,
 			break;
 		default:
 			ret = LTTNG_ERR_UNK;
-			goto error;
+			goto error_unlock;
 		}
 
 		agt = trace_ust_find_agent(usess, domain);
 		if (!agt) {
 			ret = -LTTNG_ERR_UST_EVENT_NOT_FOUND;
-			goto error;
+			goto error_unlock;
 		}
-		/* The wild card * means that everything should be disabled. */
-		if (strncmp(event->name, "*", 1) == 0 && strlen(event->name) == 1) {
+		/*
+		 * An empty event name means that everything
+		 * should be disabled.
+		 */
+		if (event->name[0] == '\0') {
 			ret = event_agent_disable_all(usess, agt);
 		} else {
 			ret = event_agent_disable(usess, agt, event_name);
 		}
 		if (ret != LTTNG_OK) {
-			goto error;
+			goto error_unlock;
 		}
 
 		break;
 	}
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
 	default:
 		ret = LTTNG_ERR_UND;
-		goto error;
+		goto error_unlock;
 	}
 
 	ret = LTTNG_OK;
 
-error:
+error_unlock:
 	rcu_read_unlock();
-	return ret;
-}
-
-/*
- * Command LTTNG_DISABLE_EVENT for event "*" processed by the client thread.
- */
-static
-int disable_kevent_all(struct ltt_session *session, int domain,
-		char *channel_name,
-		struct lttng_event *event)
-{
-	int ret;
-
-	rcu_read_lock();
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-	{
-		struct ltt_kernel_session *ksess;
-		struct ltt_kernel_channel *kchan;
-
-		ksess = session->kernel_session;
-
-		/*
-		 * If a non-default channel has been created in the
-		 * session, explicitely require that -c chan_name needs
-		 * to be provided.
-		 */
-		if (ksess->has_non_default_channel && channel_name[0] == '\0') {
-			ret = LTTNG_ERR_NEED_CHANNEL_NAME;
-			goto error;
-		}
-
-		kchan = trace_kernel_get_channel_by_name(channel_name, ksess);
-		if (kchan == NULL) {
-			ret = LTTNG_ERR_KERN_CHAN_NOT_FOUND;
-			goto error;
-		}
-
-		switch (event->type) {
-		case LTTNG_EVENT_ALL:
-			ret = event_kernel_disable_all(kchan);
-			if (ret != LTTNG_OK) {
-				goto error;
-			}
-			break;
-		case LTTNG_EVENT_SYSCALL:
-			ret = event_kernel_disable_syscall(kchan, "");
-			if (ret != LTTNG_OK) {
-				goto error;
-			}
-			break;
-		default:
-			ret = LTTNG_ERR_UNK;
-			goto error;
-		}
-
-		kernel_wait_quiescent(kernel_tracer_fd);
-		break;
-	}
-	default:
-		ret = LTTNG_ERR_UND;
-		goto error;
-	}
-
-	ret = LTTNG_OK;
-
 error:
-	rcu_read_unlock();
 	return ret;
 }
 
@@ -1328,11 +1405,6 @@ int cmd_add_context(struct ltt_session *session, int domain,
 		}
 		break;
 	}
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
 	default:
 		ret = LTTNG_ERR_UND;
 		goto error;
@@ -1397,16 +1469,50 @@ end:
 	return ret;
 }
 
+static inline bool name_starts_with(const char *name, const char *prefix)
+{
+	const size_t max_cmp_len = min(strlen(prefix), LTTNG_SYMBOL_NAME_LEN);
+
+	return !strncmp(name, prefix, max_cmp_len);
+}
+
+/* Perform userspace-specific event name validation */
+static int validate_ust_event_name(const char *name)
+{
+	int ret = 0;
+
+	if (!name) {
+		ret = -1;
+		goto end;
+	}
+
+	/*
+	 * Check name against all internal UST event component namespaces used
+	 * by the agents.
+	 */
+	if (name_starts_with(name, DEFAULT_JUL_EVENT_COMPONENT) ||
+		name_starts_with(name, DEFAULT_LOG4J_EVENT_COMPONENT) ||
+		name_starts_with(name, DEFAULT_PYTHON_EVENT_COMPONENT)) {
+		ret = -1;
+	}
+
+end:
+	return ret;
+}
+
 /*
- * Command LTTNG_ENABLE_EVENT processed by the client thread.
- * We own filter, exclusion, and filter_expression.
+ * Internal version of cmd_enable_event() with a supplemental
+ * "internal_event" flag which is used to enable internal events which should
+ * be hidden from clients. Such events are used in the agent implementation to
+ * enable the events through which all "agent" events are funeled.
  */
-int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
+static int _cmd_enable_event(struct ltt_session *session,
+		struct lttng_domain *domain,
 		char *channel_name, struct lttng_event *event,
 		char *filter_expression,
 		struct lttng_filter_bytecode *filter,
 		struct lttng_event_exclusion *exclusion,
-		int wpipe)
+		int wpipe, bool internal_event)
 {
 	int ret, channel_created = 0;
 	struct lttng_channel *attr;
@@ -1417,18 +1523,12 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 
 	DBG("Enable event command for event \'%s\'", event->name);
 
-	/* Special handling for kernel domain all events. */
-	if (domain->type == LTTNG_DOMAIN_KERNEL && !strcmp(event->name, "*")) {
-		return enable_kevent_all(session, domain, channel_name, event,
-				filter_expression, filter, wpipe);
-	}
+	rcu_read_lock();
 
 	ret = validate_event_name(event->name);
 	if (ret) {
 		goto error;
 	}
-
-	rcu_read_lock();
 
 	switch (domain->type) {
 	case LTTNG_DOMAIN_KERNEL:
@@ -1478,11 +1578,66 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 
 		switch (event->type) {
 		case LTTNG_EVENT_ALL:
+		{
+			char *filter_expression_a = NULL;
+			struct lttng_filter_bytecode *filter_a = NULL;
+
+			/*
+			 * We need to duplicate filter_expression and filter,
+			 * because ownership is passed to first enable
+			 * event.
+			 */
+			if (filter_expression) {
+				filter_expression_a = strdup(filter_expression);
+				if (!filter_expression_a) {
+					ret = LTTNG_ERR_FATAL;
+					goto error;
+				}
+			}
+			if (filter) {
+				filter_a = zmalloc(sizeof(*filter_a) + filter->len);
+				if (!filter_a) {
+					free(filter_expression_a);
+					ret = LTTNG_ERR_FATAL;
+					goto error;
+				}
+				memcpy(filter_a, filter, sizeof(*filter_a) + filter->len);
+			}
+			event->type = LTTNG_EVENT_TRACEPOINT;	/* Hack */
+			ret = event_kernel_enable_event(kchan, event,
+				filter_expression, filter);
+			/* We have passed ownership */
+			filter_expression = NULL;
+			filter = NULL;
+			if (ret != LTTNG_OK) {
+				if (channel_created) {
+					/* Let's not leak a useless channel. */
+					kernel_destroy_channel(kchan);
+				}
+				free(filter_expression_a);
+				free(filter_a);
+				goto error;
+			}
+			event->type = LTTNG_EVENT_SYSCALL;	/* Hack */
+			ret = event_kernel_enable_event(kchan, event,
+				filter_expression_a, filter_a);
+			/* We have passed ownership */
+			filter_expression_a = NULL;
+			filter_a = NULL;
+			if (ret != LTTNG_OK) {
+				goto error;
+			}
+			break;
+		}
 		case LTTNG_EVENT_PROBE:
 		case LTTNG_EVENT_FUNCTION:
 		case LTTNG_EVENT_FUNCTION_ENTRY:
 		case LTTNG_EVENT_TRACEPOINT:
-			ret = event_kernel_enable_tracepoint(kchan, event);
+			ret = event_kernel_enable_event(kchan, event,
+				filter_expression, filter);
+			/* We have passed ownership */
+			filter_expression = NULL;
+			filter = NULL;
 			if (ret != LTTNG_OK) {
 				if (channel_created) {
 					/* Let's not leak a useless channel. */
@@ -1492,7 +1647,11 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 			}
 			break;
 		case LTTNG_EVENT_SYSCALL:
-			ret = event_kernel_enable_syscall(kchan, event->name);
+			ret = event_kernel_enable_event(kchan, event,
+				filter_expression, filter);
+			/* We have passed ownership */
+			filter_expression = NULL;
+			filter = NULL;
 			if (ret != LTTNG_OK) {
 				goto error;
 			}
@@ -1548,9 +1707,35 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 			assert(uchan);
 		}
 
+		if (uchan->domain != LTTNG_DOMAIN_UST && !internal_event) {
+			/*
+			 * Don't allow users to add UST events to channels which
+			 * are assigned to a userspace subdomain (JUL, Log4J,
+			 * Python, etc.).
+			 */
+			ret = LTTNG_ERR_INVALID_CHANNEL_DOMAIN;
+			goto error;
+		}
+
+		if (!internal_event) {
+			/*
+			 * Ensure the event name is not reserved for internal
+			 * use.
+			 */
+			ret = validate_ust_event_name(event->name);
+			if (ret) {
+			        WARN("Userspace event name %s failed validation.",
+						event->name ?
+						event->name : "NULL");
+				ret = LTTNG_ERR_INVALID_EVENT_NAME;
+				goto error;
+			}
+		}
+
 		/* At this point, the session and channel exist on the tracer */
 		ret = event_ust_enable_tracepoint(usess, uchan, event,
-				filter_expression, filter, exclusion);
+				filter_expression, filter, exclusion,
+				internal_event);
 		/* We have passed ownership */
 		filter_expression = NULL;
 		filter = NULL;
@@ -1562,6 +1747,7 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 	}
 	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_PYTHON:
 	{
 		const char *default_event_name, *default_chan_name;
 		struct agent *agt;
@@ -1575,7 +1761,7 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		if (!agt) {
 			agt = agent_create(domain->type);
 			if (!agt) {
-				ret = -LTTNG_ERR_NOMEM;
+				ret = LTTNG_ERR_NOMEM;
 				goto error;
 			}
 			agent_add(agt, usess->agents);
@@ -1585,9 +1771,10 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		memset(&uevent, 0, sizeof(uevent));
 		uevent.type = LTTNG_EVENT_TRACEPOINT;
 		uevent.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
-		default_event_name = event_get_default_agent_ust_name(domain->type);
+		default_event_name = event_get_default_agent_ust_name(
+				domain->type);
 		if (!default_event_name) {
-			ret = -LTTNG_ERR_FATAL;
+			ret = LTTNG_ERR_FATAL;
 			goto error;
 		}
 		strncpy(uevent.name, default_event_name, sizeof(uevent.name));
@@ -1601,34 +1788,54 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 		memcpy(&tmp_dom, domain, sizeof(tmp_dom));
 		tmp_dom.type = LTTNG_DOMAIN_UST;
 
-		if (domain->type == LTTNG_DOMAIN_LOG4J) {
+		switch (domain->type) {
+		case LTTNG_DOMAIN_LOG4J:
 			default_chan_name = DEFAULT_LOG4J_CHANNEL_NAME;
-		} else {
+			break;
+		case LTTNG_DOMAIN_JUL:
 			default_chan_name = DEFAULT_JUL_CHANNEL_NAME;
+			break;
+		case LTTNG_DOMAIN_PYTHON:
+			default_chan_name = DEFAULT_PYTHON_CHANNEL_NAME;
+			break;
+		default:
+			/* The switch/case we are in should avoid this else big problem */
+			assert(0);
 		}
 
 		{
+			char *filter_expression_copy = NULL;
 			struct lttng_filter_bytecode *filter_copy = NULL;
 
 			if (filter) {
-				filter_copy = zmalloc(
-					sizeof(struct lttng_filter_bytecode)
-					+ filter->len);
+				const size_t filter_size = sizeof(
+						struct lttng_filter_bytecode)
+						+ filter->len;
+
+				filter_copy = zmalloc(filter_size);
 				if (!filter_copy) {
+					ret = LTTNG_ERR_NOMEM;
 					goto error;
 				}
+				memcpy(filter_copy, filter, filter_size);
 
-				memcpy(filter_copy, filter,
-					sizeof(struct lttng_filter_bytecode)
-					+ filter->len);
+				filter_expression_copy =
+						strdup(filter_expression);
+				if (!filter_expression) {
+					ret = LTTNG_ERR_NOMEM;
+				}
+
+				if (!filter_expression_copy || !filter_copy) {
+					free(filter_expression_copy);
+					free(filter_copy);
+					goto error;
+				}
 			}
 
-			ret = cmd_enable_event(session, &tmp_dom,
+			ret = cmd_enable_event_internal(session, &tmp_dom,
 					(char *) default_chan_name,
-					&uevent, filter_expression, filter_copy,
-					NULL, wpipe);
-			/* We have passed ownership */
-			filter_expression = NULL;
+					&uevent, filter_expression_copy,
+					filter_copy, NULL, wpipe);
 		}
 
 		if (ret != LTTNG_OK && ret != LTTNG_ERR_UST_EVENT_ENABLED) {
@@ -1637,23 +1844,20 @@ int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
 
 		/* The wild card * means that everything should be enabled. */
 		if (strncmp(event->name, "*", 1) == 0 && strlen(event->name) == 1) {
-			ret = event_agent_enable_all(usess, agt, event, filter);
-			filter = NULL;
+			ret = event_agent_enable_all(usess, agt, event, filter,
+					filter_expression);
 		} else {
-			ret = event_agent_enable(usess, agt, event, filter);
-			filter = NULL;
+			ret = event_agent_enable(usess, agt, event, filter,
+					filter_expression);
 		}
+		filter = NULL;
+		filter_expression = NULL;
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
 
 		break;
 	}
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
 	default:
 		ret = LTTNG_ERR_UND;
 		goto error;
@@ -1670,113 +1874,36 @@ error:
 }
 
 /*
- * Command LTTNG_ENABLE_EVENT for event "*" processed by the client thread.
+ * Command LTTNG_ENABLE_EVENT processed by the client thread.
+ * We own filter, exclusion, and filter_expression.
  */
-static
-int enable_kevent_all(struct ltt_session *session,
-		struct lttng_domain *domain, char *channel_name,
-		struct lttng_event *event,
+int cmd_enable_event(struct ltt_session *session, struct lttng_domain *domain,
+		char *channel_name, struct lttng_event *event,
 		char *filter_expression,
-		struct lttng_filter_bytecode *filter, int wpipe)
+		struct lttng_filter_bytecode *filter,
+		struct lttng_event_exclusion *exclusion,
+		int wpipe)
 {
-	int ret;
-	struct lttng_channel *attr;
-
-	assert(session);
-	assert(channel_name);
-
-	rcu_read_lock();
-
-	switch (domain->type) {
-	case LTTNG_DOMAIN_KERNEL:
-	{
-		struct ltt_kernel_channel *kchan;
-
-		assert(session->kernel_session);
-
-		/*
-		 * If a non-default channel has been created in the
-		 * session, explicitely require that -c chan_name needs
-		 * to be provided.
-		 */
-		if (session->kernel_session->has_non_default_channel
-				&& channel_name[0] == '\0') {
-			ret = LTTNG_ERR_NEED_CHANNEL_NAME;
-			goto error;
-		}
-
-		kchan = trace_kernel_get_channel_by_name(channel_name,
-				session->kernel_session);
-		if (kchan == NULL) {
-			/* Create default channel */
-			attr = channel_new_default_attr(LTTNG_DOMAIN_KERNEL,
-					LTTNG_BUFFER_GLOBAL);
-			if (attr == NULL) {
-				ret = LTTNG_ERR_FATAL;
-				goto error;
-			}
-			strncpy(attr->name, channel_name, sizeof(attr->name));
-
-			ret = cmd_enable_channel(session, domain, attr, wpipe);
-			if (ret != LTTNG_OK) {
-				free(attr);
-				goto error;
-			}
-			free(attr);
-
-			/* Get the newly created kernel channel pointer */
-			kchan = trace_kernel_get_channel_by_name(channel_name,
-					session->kernel_session);
-			assert(kchan);
-		}
-
-		switch (event->type) {
-		case LTTNG_EVENT_SYSCALL:
-			ret = event_kernel_enable_syscall(kchan, "");
-			if (ret != LTTNG_OK) {
-				goto error;
-			}
-			break;
-		case LTTNG_EVENT_TRACEPOINT:
-			/*
-			 * This call enables all LTTNG_KERNEL_TRACEPOINTS and
-			 * events already registered to the channel.
-			 */
-			ret = event_kernel_enable_all_tracepoints(kchan, kernel_tracer_fd);
-			break;
-		case LTTNG_EVENT_ALL:
-			/* Enable syscalls and tracepoints */
-			ret = event_kernel_enable_all(kchan, kernel_tracer_fd);
-			break;
-		default:
-			ret = LTTNG_ERR_KERN_ENABLE_FAIL;
-			goto error;
-		}
-
-		/* Manage return value */
-		if (ret != LTTNG_OK) {
-			/*
-			 * On error, cmd_enable_channel call will take care of destroying
-			 * the created channel if it was needed.
-			 */
-			goto error;
-		}
-
-		kernel_wait_quiescent(kernel_tracer_fd);
-		break;
-	}
-	default:
-		ret = LTTNG_ERR_UND;
-		goto error;
-	}
-
-	ret = LTTNG_OK;
-
-error:
-	rcu_read_unlock();
-	return ret;
+	return _cmd_enable_event(session, domain, channel_name, event,
+			filter_expression, filter, exclusion, wpipe, false);
 }
 
+/*
+ * Enable an event which is internal to LTTng. An internal should
+ * never be made visible to clients and are immune to checks such as
+ * reserved names.
+ */
+static int cmd_enable_event_internal(struct ltt_session *session,
+		struct lttng_domain *domain,
+		char *channel_name, struct lttng_event *event,
+		char *filter_expression,
+		struct lttng_filter_bytecode *filter,
+		struct lttng_event_exclusion *exclusion,
+		int wpipe)
+{
+	return _cmd_enable_event(session, domain, channel_name, event,
+			filter_expression, filter, exclusion, wpipe, true);
+}
 
 /*
  * Command LTTNG_LIST_TRACEPOINTS processed by the client thread.
@@ -1803,6 +1930,7 @@ ssize_t cmd_list_tracepoints(int domain, struct lttng_event **events)
 		break;
 	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_PYTHON:
 		nb_events = agent_list_events(events, domain);
 		if (nb_events < 0) {
 			ret = LTTNG_ERR_UST_LIST_FAIL;
@@ -1857,7 +1985,60 @@ ssize_t cmd_list_syscalls(struct lttng_event **events)
 }
 
 /*
+ * Command LTTNG_LIST_TRACKER_PIDS processed by the client thread.
+ *
+ * Called with session lock held.
+ */
+ssize_t cmd_list_tracker_pids(struct ltt_session *session,
+		int domain, int32_t **pids)
+{
+	int ret;
+	ssize_t nr_pids = 0;
+
+	switch (domain) {
+	case LTTNG_DOMAIN_KERNEL:
+	{
+		struct ltt_kernel_session *ksess;
+
+		ksess = session->kernel_session;
+		nr_pids = kernel_list_tracker_pids(ksess, pids);
+		if (nr_pids < 0) {
+			ret = LTTNG_ERR_KERN_LIST_FAIL;
+			goto error;
+		}
+		break;
+	}
+	case LTTNG_DOMAIN_UST:
+	{
+		struct ltt_ust_session *usess;
+
+		usess = session->ust_session;
+		nr_pids = trace_ust_list_tracker_pids(usess, pids);
+		if (nr_pids < 0) {
+			ret = LTTNG_ERR_UST_LIST_FAIL;
+			goto error;
+		}
+		break;
+	}
+	case LTTNG_DOMAIN_LOG4J:
+	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_PYTHON:
+	default:
+		ret = LTTNG_ERR_UND;
+		goto error;
+	}
+
+	return nr_pids;
+
+error:
+	/* Return negative value to differentiate return code */
+	return -ret;
+}
+
+/*
  * Command LTTNG_START_TRACE processed by the client thread.
+ *
+ * Called with session mutex held.
  */
 int cmd_start_trace(struct ltt_session *session)
 {
@@ -2167,7 +2348,7 @@ int cmd_create_session_snapshot(char *name, struct lttng_uri *uris,
 	 * Create session in no output mode with URIs set to NULL. The uris we've
 	 * received are for a default snapshot output if one.
 	 */
-	ret = cmd_create_session_uri(name, NULL, 0, creds, -1);
+	ret = cmd_create_session_uri(name, NULL, 0, creds, 0);
 	if (ret != LTTNG_OK) {
 		goto error;
 	}
@@ -2218,6 +2399,8 @@ error:
 
 /*
  * Command LTTNG_DESTROY_SESSION processed by the client thread.
+ *
+ * Called with session lock held.
  */
 int cmd_destroy_session(struct ltt_session *session, int wpipe)
 {
@@ -2428,6 +2611,10 @@ ssize_t cmd_list_domains(struct ltt_session *session,
 		rcu_read_unlock();
 	}
 
+	if (!nb_dom) {
+		goto end;
+	}
+
 	*domains = zmalloc(nb_dom * sizeof(struct lttng_domain));
 	if (*domains == NULL) {
 		ret = LTTNG_ERR_FATAL;
@@ -2436,6 +2623,10 @@ ssize_t cmd_list_domains(struct ltt_session *session,
 
 	if (session->kernel_session != NULL) {
 		(*domains)[index].type = LTTNG_DOMAIN_KERNEL;
+
+		/* Kernel session buffer type is always GLOBAL */
+		(*domains)[index].buf_type = LTTNG_BUFFER_GLOBAL;
+
 		index++;
 	}
 
@@ -2455,7 +2646,7 @@ ssize_t cmd_list_domains(struct ltt_session *session,
 		}
 		rcu_read_unlock();
 	}
-
+end:
 	return nb_dom;
 
 error:
@@ -2544,6 +2735,7 @@ ssize_t cmd_list_events(int domain, struct ltt_session *session,
 	}
 	case LTTNG_DOMAIN_LOG4J:
 	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_PYTHON:
 		if (session->ust_session) {
 			struct lttng_ht_iter iter;
 			struct agent *agt;
@@ -2551,7 +2743,11 @@ ssize_t cmd_list_events(int domain, struct ltt_session *session,
 			rcu_read_lock();
 			cds_lfht_for_each_entry(session->ust_session->agents->ht,
 					&iter.iter, agt, node.node) {
-				nb_event = list_lttng_agent_events(agt, events);
+				if (agt->domain == domain) {
+					nb_event = list_lttng_agent_events(
+							agt, events);
+					break;
+				}
 			}
 			rcu_read_unlock();
 		}
@@ -3134,7 +3330,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 	int ret = LTTNG_OK;
 	unsigned int use_tmp_output = 0;
 	struct snapshot_output tmp_output;
-	unsigned int nb_streams, snapshot_success = 0;
+	unsigned int snapshot_success = 0;
 
 	assert(session);
 	assert(output);
@@ -3313,6 +3509,29 @@ int cmd_snapshot_record(struct ltt_session *session,
 
 error:
 	return ret;
+}
+
+/*
+ * Command LTTNG_SET_SESSION_SHM_PATH processed by the client thread.
+ */
+int cmd_set_session_shm_path(struct ltt_session *session,
+		const char *shm_path)
+{
+	/* Safety net */
+	assert(session);
+
+	/*
+	 * Can only set shm path before session is started.
+	 */
+	if (session->has_been_started) {
+		return LTTNG_ERR_SESSION_STARTED;
+	}
+
+	strncpy(session->shm_path, shm_path,
+		sizeof(session->shm_path));
+	session->shm_path[sizeof(session->shm_path) - 1] = '\0';
+
+	return 0;
 }
 
 /*

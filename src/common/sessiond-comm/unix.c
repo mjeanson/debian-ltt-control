@@ -17,6 +17,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <limits.h>
 #include <stdio.h>
@@ -90,6 +91,16 @@ int lttcomm_accept_unix_sock(int sock)
 	}
 
 	return new_fd;
+}
+
+LTTNG_HIDDEN
+int lttcomm_create_anon_unix_socketpair(int *fds)
+{
+	if (socketpair(PF_UNIX, SOCK_STREAM, 0, fds) < 0) {
+		PERROR("socketpair");
+		return -1;
+	}
+	return 0;
 }
 
 /*
@@ -172,7 +183,7 @@ ssize_t lttcomm_recv_unix_sock(int sock, void *buf, size_t len)
 
 	do {
 		len_last = iov[0].iov_len;
-		ret = recvmsg(sock, &msg, 0);
+		ret = recvmsg(sock, &msg, MSG_NOSIGNAL);
 		if (ret > 0) {
 			iov[0].iov_base += ret;
 			iov[0].iov_len -= ret;
@@ -270,6 +281,9 @@ ssize_t lttcomm_send_fds_unix_sock(int sock, int *fds, size_t nb_fd)
 	msg.msg_controllen = CMSG_LEN(sizeof_fds);
 
 	cmptr = CMSG_FIRSTHDR(&msg);
+	if (!cmptr) {
+		return -1;
+	}
 	cmptr->cmsg_level = SOL_SOCKET;
 	cmptr->cmsg_type = SCM_RIGHTS;
 	cmptr->cmsg_len = CMSG_LEN(sizeof_fds);
@@ -397,6 +411,9 @@ ssize_t lttcomm_send_creds_unix_sock(int sock, void *buf, size_t len)
 	msg.msg_controllen = CMSG_LEN(sizeof_cred);
 
 	cmptr = CMSG_FIRSTHDR(&msg);
+	if (!cmptr) {
+		return -1;
+	}
 	cmptr->cmsg_level = SOL_SOCKET;
 	cmptr->cmsg_type = LTTNG_SOCK_CREDS;
 	cmptr->cmsg_len = CMSG_LEN(sizeof_cred);

@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <inttypes.h>
 
 #include <common/common.h>
@@ -105,7 +106,8 @@ void buffer_reg_init_uid_registry(void)
  * Return 0 on success else a negative value and regp is untouched.
  */
 int buffer_reg_uid_create(uint64_t session_id, uint32_t bits_per_long, uid_t uid,
-		enum lttng_domain_type domain, struct buffer_reg_uid **regp)
+		enum lttng_domain_type domain, struct buffer_reg_uid **regp,
+		const char *root_shm_path, const char *shm_path)
 {
 	int ret = 0;
 	struct buffer_reg_uid *reg = NULL;
@@ -130,7 +132,14 @@ int buffer_reg_uid_create(uint64_t session_id, uint32_t bits_per_long, uid_t uid
 	reg->bits_per_long = bits_per_long;
 	reg->uid = uid;
 	reg->domain = domain;
-
+	if (shm_path[0]) {
+		strncpy(reg->root_shm_path, root_shm_path, sizeof(reg->root_shm_path));
+		reg->root_shm_path[sizeof(reg->root_shm_path) - 1] = '\0';
+		strncpy(reg->shm_path, shm_path, sizeof(reg->shm_path));
+		reg->shm_path[sizeof(reg->shm_path) - 1] = '\0';
+		DBG3("shm path '%s' is assigned to uid buffer registry for session id %" PRIu64,
+			reg->shm_path, session_id);
+	}
 	reg->registry->channels = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
 	if (!reg->registry->channels) {
 		ret = -ENOMEM;
@@ -225,7 +234,8 @@ void buffer_reg_init_pid_registry(void)
  *
  * Return 0 on success else a negative value and regp is untouched.
  */
-int buffer_reg_pid_create(uint64_t session_id, struct buffer_reg_pid **regp)
+int buffer_reg_pid_create(uint64_t session_id, struct buffer_reg_pid **regp,
+		const char *root_shm_path, const char *shm_path)
 {
 	int ret = 0;
 	struct buffer_reg_pid *reg = NULL;
@@ -248,7 +258,14 @@ int buffer_reg_pid_create(uint64_t session_id, struct buffer_reg_pid **regp)
 
 	/* A cast is done here so we can use the session ID as a u64 ht node. */
 	reg->session_id = session_id;
-
+	if (shm_path[0]) {
+		strncpy(reg->root_shm_path, root_shm_path, sizeof(reg->root_shm_path));
+		reg->root_shm_path[sizeof(reg->root_shm_path) - 1] = '\0';
+		strncpy(reg->shm_path, shm_path, sizeof(reg->shm_path));
+		reg->shm_path[sizeof(reg->shm_path) - 1] = '\0';
+		DBG3("shm path '%s' is assigned to pid buffer registry for session id %" PRIu64,
+				reg->shm_path, session_id);
+	}
 	reg->registry->channels = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
 	if (!reg->registry->channels) {
 		ret = -ENOMEM;
@@ -450,7 +467,7 @@ void buffer_reg_stream_destroy(struct buffer_reg_stream *regp,
 	{
 		int ret;
 
-		ret = ust_ctl_release_object(-1, regp->obj.ust);
+		ret = ust_app_release_object(NULL, regp->obj.ust);
 		if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("Buffer reg stream release obj handle %d failed with ret %d",
 					regp->obj.ust->handle, ret);
@@ -510,7 +527,7 @@ void buffer_reg_channel_destroy(struct buffer_reg_channel *regp,
 		}
 
 		if (regp->obj.ust) {
-			ret = ust_ctl_release_object(-1, regp->obj.ust);
+			ret = ust_app_release_object(NULL, regp->obj.ust);
 			if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 				ERR("Buffer reg channel release obj handle %d failed with ret %d",
 						regp->obj.ust->handle, ret);

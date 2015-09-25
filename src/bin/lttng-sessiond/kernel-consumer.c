@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,7 +57,7 @@ static char *create_channel_path(struct consumer_output *consumer,
 		/* Create directory */
 		ret = run_as_mkdir_recursive(pathname, S_IRWXU | S_IRWXG, uid, gid);
 		if (ret < 0) {
-			if (ret != -EEXIST) {
+			if (errno != EEXIST) {
 				ERR("Trace directory creation error");
 				goto error;
 			}

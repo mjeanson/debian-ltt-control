@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <popt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,6 +38,7 @@ static int opt_userspace;
 static int opt_disable_all;
 static int opt_jul;
 static int opt_log4j;
+static int opt_python;
 static int opt_event_type;
 #if 0
 /* Not implemented yet */
@@ -46,8 +48,11 @@ static pid_t opt_pid;
 
 enum {
 	OPT_HELP = 1,
-	OPT_USERSPACE,
-	OPT_SYSCALL,
+	OPT_TYPE_SYSCALL,
+	OPT_TYPE_TRACEPOINT,
+	OPT_TYPE_PROBE,
+	OPT_TYPE_FUNCTION,
+	OPT_TYPE_ALL,
 	OPT_LIST_OPTIONS,
 };
 
@@ -62,15 +67,14 @@ static struct poptOption long_options[] = {
 	{"channel",        'c', POPT_ARG_STRING, &opt_channel_name, 0, 0, 0},
 	{"jul",            'j', POPT_ARG_VAL, &opt_jul, 1, 0, 0},
 	{"log4j",          'l', POPT_ARG_VAL, &opt_log4j, 1, 0, 0},
+	{"python",         'p', POPT_ARG_VAL, &opt_python, 1, 0, 0},
 	{"kernel",         'k', POPT_ARG_VAL, &opt_kernel, 1, 0, 0},
-	{"syscall",        0,   POPT_ARG_NONE, 0, OPT_SYSCALL, 0, 0},
-#if 0
-	/* Not implemented yet */
-	{"userspace",      'u', POPT_ARG_STRING | POPT_ARGFLAG_OPTIONAL, &opt_cmd_name, OPT_USERSPACE, 0, 0},
-	{"pid",            'p', POPT_ARG_INT, &opt_pid, 0, 0, 0},
-#else
-	{"userspace",      'u', POPT_ARG_NONE, 0, OPT_USERSPACE, 0, 0},
-#endif
+	{"userspace",      'u', POPT_ARG_VAL, &opt_userspace, 1, 0, 0},
+	{"syscall",          0, POPT_ARG_NONE, 0, OPT_TYPE_SYSCALL, 0, 0},
+	{"probe",            0, POPT_ARG_NONE, 0, OPT_TYPE_PROBE, 0, 0},
+	{"tracepoint",       0, POPT_ARG_NONE, 0, OPT_TYPE_TRACEPOINT, 0, 0},
+	{"function",         0, POPT_ARG_NONE, 0, OPT_TYPE_FUNCTION, 0, 0},
+	{"all",              0, POPT_ARG_NONE, 0, OPT_TYPE_ALL, 0, 0},
 	{"list-options", 0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{0, 0, 0, 0, 0, 0, 0}
 };
@@ -80,7 +84,7 @@ static struct poptOption long_options[] = {
  */
 static void usage(FILE *ofp)
 {
-	fprintf(ofp, "usage: lttng disable-event NAME[,NAME2,...] (-k | -u) [OPTIONS]\n");
+	fprintf(ofp, "usage: lttng disable-event NAME[,NAME2,...] (-k | -u | -j | -l | -p) [OPTIONS]\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Options:\n");
 	fprintf(ofp, "  -h, --help               Show this help\n");
@@ -88,13 +92,18 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "  -s, --session NAME       Apply to session name\n");
 	fprintf(ofp, "  -c, --channel NAME       Apply to this channel\n");
 	fprintf(ofp, "  -a, --all-events         Disable all tracepoints\n");
-	fprintf(ofp, "  -k, --kernel             Apply for the kernel tracer\n");
+	fprintf(ofp, "  -k, --kernel             Apply to the kernel tracer\n");
 	fprintf(ofp, "  -u, --userspace          Apply to the user-space tracer\n");
-	fprintf(ofp, "  -j, --jul                Apply for Java application using JUL\n");
+	fprintf(ofp, "  -j, --jul                Apply to Java application using JUL\n");
 	fprintf(ofp, "  -l, --log4j              Apply to Java application using LOG4j\n");
+	fprintf(ofp, "  -p, --python             Apply to Python application using logging\n");
 	fprintf(ofp, "\n");
-	fprintf(ofp, "Event options:\n");
+	fprintf(ofp, "Event type options (Only supported with kernel domain):\n");
+	fprintf(ofp, "      --all                All event types (default)\n");
+	fprintf(ofp, "      --tracepoint         Tracepoint event\n");
 	fprintf(ofp, "      --syscall            System call event\n");
+	fprintf(ofp, "      --probe              Probe event\n");
+	fprintf(ofp, "      --function           Function event\n");
 	fprintf(ofp, "\n");
 }
 
@@ -108,6 +117,27 @@ static
 const char *print_raw_channel_name(const char *name)
 {
 	return name ? : "<default>";
+}
+
+static
+const char *print_event_type(const enum lttng_event_type ev_type)
+{
+	switch (ev_type) {
+	case LTTNG_EVENT_ALL:
+		return "any";
+	case LTTNG_EVENT_TRACEPOINT:
+		return "tracepoint";
+	case LTTNG_EVENT_PROBE:
+		return "probe";
+	case LTTNG_EVENT_FUNCTION:
+		return "function";
+	case LTTNG_EVENT_FUNCTION_ENTRY:
+		return "function entry";
+	case LTTNG_EVENT_SYSCALL:
+		return "syscall";
+	default:
+		return "";
+	}
 }
 
 /* Mi print a partial event.
@@ -178,10 +208,11 @@ static int disable_events(char *session_name)
 		dom.type = LTTNG_DOMAIN_JUL;
 	} else if (opt_log4j) {
 		dom.type = LTTNG_DOMAIN_LOG4J;
+	} else if (opt_python) {
+		dom.type = LTTNG_DOMAIN_PYTHON;
 	} else {
-		print_missing_domain();
-		ret = CMD_ERROR;
-		goto error;
+		/* Checked by the caller. */
+		assert(0);
 	}
 
 	channel_name = opt_channel_name;
@@ -219,14 +250,8 @@ static int disable_events(char *session_name)
 	/* Set default loglevel to any/unknown */
 	event.loglevel = -1;
 
-	switch (opt_event_type) {
-	case LTTNG_EVENT_SYSCALL:
-		event.type = LTTNG_EVENT_SYSCALL;
-		break;
-	default:
-		event.type = LTTNG_EVENT_ALL;
-		break;
-	}
+	/* opt_event_type contain the event type to disable at this point */
+	event.type = opt_event_type;
 
 	if (opt_disable_all) {
 		command_ret = lttng_disable_event_ext(handle, &event, channel_name, NULL);
@@ -238,9 +263,9 @@ static int disable_events(char *session_name)
 		} else {
 			enabled = 0;
 			success = 1;
-			MSG("All %s %s are disabled in channel %s",
+			MSG("All %s events of type %s are disabled in channel %s",
 					get_domain_str(dom.type),
-					opt_event_type == LTTNG_EVENT_SYSCALL ? "system calls" : "events",
+					print_event_type(opt_event_type),
 					print_channel_name(channel_name));
 		}
 
@@ -261,9 +286,9 @@ static int disable_events(char *session_name)
 			event.name[sizeof(event.name) - 1] = '\0';
 			command_ret = lttng_disable_event_ext(handle, &event, channel_name, NULL);
 			if (command_ret < 0) {
-				ERR("%s %s: %s (channel %s, session %s)",
-						opt_event_type == LTTNG_EVENT_SYSCALL ? "System call" : "Event",
+				ERR("%s of type %s : %s (channel %s, session %s)",
 						event_name,
+						print_event_type(opt_event_type),
 						lttng_strerror(command_ret),
 						command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
 							? print_raw_channel_name(channel_name)
@@ -277,10 +302,10 @@ static int disable_events(char *session_name)
 				 */
 				enabled = 1;
 			} else {
-				MSG("%s %s %s disabled in channel %s for session %s",
+				MSG("%s %s of type %s disabled in channel %s for session %s",
 						get_domain_str(dom.type),
-						opt_event_type == LTTNG_EVENT_SYSCALL ? "system call" : "event",
 						event_name,
+						print_event_type(opt_event_type),
 						print_channel_name(channel_name),
 						session_name);
 				success = 1;
@@ -344,11 +369,20 @@ int cmd_disable_events(int argc, const char **argv)
 		case OPT_HELP:
 			usage(stdout);
 			goto end;
-		case OPT_USERSPACE:
-			opt_userspace = 1;
-			break;
-		case OPT_SYSCALL:
+		case OPT_TYPE_SYSCALL:
 			opt_event_type = LTTNG_EVENT_SYSCALL;
+			break;
+		case OPT_TYPE_TRACEPOINT:
+			opt_event_type = LTTNG_EVENT_TRACEPOINT;
+			break;
+		case OPT_TYPE_PROBE:
+			opt_event_type = LTTNG_EVENT_PROBE;
+			break;
+		case OPT_TYPE_FUNCTION:
+			opt_event_type = LTTNG_EVENT_FUNCTION;
+			break;
+		case OPT_TYPE_ALL:
+			opt_event_type = LTTNG_EVENT_ALL;
 			break;
 		case OPT_LIST_OPTIONS:
 			list_cmd_options(stdout, long_options);
@@ -369,6 +403,22 @@ int cmd_disable_events(int argc, const char **argv)
 				goto end;
 			}
 		}
+	}
+
+	ret = print_missing_or_multiple_domains(
+		opt_kernel + opt_userspace + opt_jul + opt_log4j + opt_python);
+	if (ret) {
+		ret = CMD_ERROR;
+		goto end;
+	}
+
+	/* Ust and agent only support ALL event type */
+	if ((opt_userspace || opt_jul || opt_log4j || opt_python)
+			&& opt_event_type != LTTNG_EVENT_ALL) {
+		ERR("Disabling userspace and agent (-j | -l | -p) event(s) based on instrumentation type is not supported.\n");
+		usage(stderr);
+		ret = CMD_ERROR;
+		goto end;
 	}
 
 	opt_event_list = (char*) poptGetArg(pc);

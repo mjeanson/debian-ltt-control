@@ -19,7 +19,7 @@
 #ifndef _LTT_KERNEL_IOCTL_H
 #define _LTT_KERNEL_IOCTL_H
 
-#define LTTNG_MODULES_ABI_MAJOR_VERSION		1
+#define LTTNG_MODULES_ABI_MAJOR_VERSION		2
 #define LTTNG_MODULES_ABI_MINOR_VERSION		0
 
 /* Get a snapshot of the current ring buffer producer and consumer positions */
@@ -117,6 +117,11 @@
 	_IOW(0xF6, 0x55, struct lttng_kernel_channel)
 #define LTTNG_KERNEL_SESSION_START		_IO(0xF6, 0x56)
 #define LTTNG_KERNEL_SESSION_STOP		_IO(0xF6, 0x57)
+#define LTTNG_KERNEL_SESSION_TRACK_PID		\
+	_IOR(0xF6, 0x58, int32_t)
+#define LTTNG_KERNEL_SESSION_UNTRACK_PID	\
+	_IOR(0xF6, 0x59, int32_t)
+#define LTTNG_KERNEL_SESSION_LIST_TRACKER_PIDS	_IO(0xF6, 0x58)
 
 /* Channel FD ioctl */
 #define LTTNG_KERNEL_STREAM			_IO(0xF6, 0x62)
@@ -132,5 +137,8 @@
 /* Event, Channel and Session ioctl */
 #define LTTNG_KERNEL_ENABLE			_IO(0xF6, 0x82)
 #define LTTNG_KERNEL_DISABLE			_IO(0xF6, 0x83)
+
+/* Event FD ioctl */
+#define LTTNG_KERNEL_FILTER			_IO(0xF6, 0x90)
 
 #endif /* _LTT_KERNEL_IOCTL_H */

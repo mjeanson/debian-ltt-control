@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -37,14 +38,10 @@ static const char *str_kernel = "Kernel";
 static const char *str_ust = "UST";
 static const char *str_jul = "JUL";
 static const char *str_log4j = "LOG4J";
+static const char *str_python = "Python";
 
-/*
- *  get_session_name
- *
- *  Return allocated string with the session name found in the config
- *  directory.
- */
-char *get_session_name(void)
+static
+char *_get_session_name(int quiet)
 {
 	char *path, *session_name = NULL;
 
@@ -55,7 +52,8 @@ char *get_session_name(void)
 	}
 
 	/* Get session name from config */
-	session_name = config_read_session_name(path);
+	session_name = quiet ? config_read_session_name_quiet(path) :
+		config_read_session_name(path);
 	if (session_name == NULL) {
 		goto error;
 	}
@@ -66,6 +64,28 @@ char *get_session_name(void)
 
 error:
 	return NULL;
+}
+
+/*
+ *  get_session_name
+ *
+ *  Return allocated string with the session name found in the config
+ *  directory.
+ */
+char *get_session_name(void)
+{
+	return _get_session_name(0);
+}
+
+/*
+ *  get_session_name_quiet (no warnings/errors emitted)
+ *
+ *  Return allocated string with the session name found in the config
+ *  directory.
+ */
+char *get_session_name_quiet(void)
+{
+	return _get_session_name(1);
 }
 
 /*
@@ -278,6 +298,9 @@ const char *get_domain_str(enum lttng_domain_type domain)
 	case LTTNG_DOMAIN_LOG4J:
 		str_dom = str_log4j;
 		break;
+	case LTTNG_DOMAIN_PYTHON:
+		str_dom = str_python;
+		break;
 	default:
 		/* Should not have an unknown domain or else define it. */
 		assert(0);
@@ -316,14 +339,14 @@ int spawn_relayd(const char *pathname, int port)
 		if (errno == ENOENT) {
 			ERR("No relayd found. Use --relayd-path.");
 		} else {
-			perror("execlp");
+			PERROR("execlp");
 		}
 		kill(getppid(), SIGTERM);	/* wake parent */
 		exit(EXIT_FAILURE);
 	} else if (pid > 0) {
 		goto end;
 	} else {
-		perror("fork");
+		PERROR("fork");
 		ret = -1;
 		goto end;
 	}
@@ -344,7 +367,7 @@ int check_relayd(void)
 
 	fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0) {
-		perror("socket check relayd");
+		PERROR("socket check relayd");
 		ret = -1;
 		goto error_socket;
 	}
@@ -353,7 +376,7 @@ int check_relayd(void)
 	sin.sin_port = htons(DEFAULT_NETWORK_VIEWER_PORT);
 	ret = inet_pton(sin.sin_family, "127.0.0.1", &sin.sin_addr);
 	if (ret < 1) {
-		perror("inet_pton check relayd");
+		PERROR("inet_pton check relayd");
 		ret = -1;
 		goto error;
 	}
@@ -373,8 +396,23 @@ int check_relayd(void)
 
 error:
 	if (close(fd) < 0) {
-		perror("close relayd fd");
+		PERROR("close relayd fd");
 	}
 error_socket:
+	return ret;
+}
+
+int print_missing_or_multiple_domains(unsigned int sum)
+{
+	int ret = 0;
+
+	if (sum == 0) {
+		ERR("Please specify a domain (-k/-u/-j).");
+		ret = -1;
+	} else if (sum > 1) {
+		ERR("Multiple domains specified.");
+		ret = -1;
+	}
+
 	return ret;
 }

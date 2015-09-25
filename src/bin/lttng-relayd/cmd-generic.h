@@ -1,6 +1,10 @@
+#ifndef RELAYD_CMD_GENERIC_H
+#define RELAYD_CMD_GENERIC_H
+
 /*
  * Copyright (C) 2013 - Julien Desfossez <jdesfossez@efficios.com>
  *                      David Goulet <dgoulet@efficios.com>
+ *               2015 - Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License, version 2 only, as
@@ -15,9 +19,6 @@
  * this program; if not, write to the Free Software Foundation, Inc., 51
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-
-#ifndef RELAYD_CMD_GENERIC_H
-#define RELAYD_CMD_GENERIC_H
 
 #include <common/sessiond-comm/sessiond-comm.h>
 

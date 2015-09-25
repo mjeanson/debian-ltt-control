@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <inttypes.h>
 
@@ -156,7 +157,7 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_NO_CHANNEL) ] = "No channel found in the session",
 	[ ERROR_INDEX(LTTNG_ERR_SESSION_INVALID_CHAR) ] = "Invalid character found in session name",
 	[ ERROR_INDEX(LTTNG_ERR_SAVE_FILE_EXIST) ] = "Session file already exists",
-	[ ERROR_INDEX(LTTNG_ERR_SAVE_IO_FAIL) ] = "IO error while writting session configuration",
+	[ ERROR_INDEX(LTTNG_ERR_SAVE_IO_FAIL) ] = "IO error while writing session configuration",
 	[ ERROR_INDEX(LTTNG_ERR_LOAD_INVALID_CONFIG) ] = "Invalid session configuration",
 	[ ERROR_INDEX(LTTNG_ERR_LOAD_IO_FAIL) ] = "IO error while reading a session configuration",
 	[ ERROR_INDEX(LTTNG_ERR_LOAD_SESSION_NOENT) ] = "Session file not found",
@@ -166,6 +167,9 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_MI_NOT_IMPLEMENTED) ] = "Mi feature not implemented",
 	[ ERROR_INDEX(LTTNG_ERR_INVALID_EVENT_NAME) ] = "Invalid event name",
 	[ ERROR_INDEX(LTTNG_ERR_INVALID_CHANNEL_NAME) ] = "Invalid channel name",
+	[ ERROR_INDEX(LTTNG_ERR_PID_TRACKED) ] = "PID already tracked",
+	[ ERROR_INDEX(LTTNG_ERR_PID_NOT_TRACKED) ] = "PID not tracked",
+	[ ERROR_INDEX(LTTNG_ERR_INVALID_CHANNEL_DOMAIN) ] = "Invalid channel domain",
 
 	/* Last element */
 	[ ERROR_INDEX(LTTNG_ERR_NR) ] = "Unknown error code"

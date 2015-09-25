@@ -51,8 +51,11 @@ struct ltt_kernel_context {
 struct ltt_kernel_event {
 	int fd;
 	int enabled;
+	enum lttng_event_type type;
 	struct lttng_kernel_event *event;
 	struct cds_list_head list;
+	char *filter_expression;
+	struct lttng_filter_bytecode *filter;
 };
 
 /* Kernel channel */
@@ -100,14 +103,7 @@ struct ltt_kernel_session {
 	/* UID/GID of the user owning the session */
 	uid_t uid;
 	gid_t gid;
-	/*
-	 * Two consumer_output object are needed where one is needed for the
-	 * current output object and the second one is the temporary object used to
-	 * store URI being set by the lttng_set_consumer_uri call. Once
-	 * lttng_enable_consumer is called, the two pointers are swapped.
-	 */
 	struct consumer_output *consumer;
-	struct consumer_output *tmp_consumer;
 	/* Tracing session id */
 	uint64_t id;
 	/* Session is active or not meaning it has been started or stopped. */
@@ -122,7 +118,12 @@ struct ltt_kernel_session {
  * Lookup functions. NULL is returned if not found.
  */
 struct ltt_kernel_event *trace_kernel_get_event_by_name(
-		char *name, struct ltt_kernel_channel *channel);
+		char *name, struct ltt_kernel_channel *channel,
+		enum lttng_event_type type);
+struct ltt_kernel_event *trace_kernel_find_event(
+		char *name, struct ltt_kernel_channel *channel,
+		enum lttng_event_type type,
+		struct lttng_filter_bytecode *filter);
 struct ltt_kernel_channel *trace_kernel_get_channel_by_name(
 		char *name, struct ltt_kernel_session *session);
 
@@ -132,7 +133,8 @@ struct ltt_kernel_channel *trace_kernel_get_channel_by_name(
 struct ltt_kernel_session *trace_kernel_create_session(void);
 struct ltt_kernel_channel *trace_kernel_create_channel(
 		struct lttng_channel *chan);
-struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev);
+struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
+		char *filter_expression, struct lttng_filter_bytecode *filter);
 struct ltt_kernel_metadata *trace_kernel_create_metadata(void);
 struct ltt_kernel_stream *trace_kernel_create_stream(const char *name,
 		unsigned int count);

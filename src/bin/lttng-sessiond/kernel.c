@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -176,7 +177,9 @@ error:
  * We own filter_expression and filter.
  */
 int kernel_create_event(struct lttng_event *ev,
-		struct ltt_kernel_channel *channel)
+		struct ltt_kernel_channel *channel,
+		char *filter_expression,
+		struct lttng_filter_bytecode *filter)
 {
 	int ret;
 	struct ltt_kernel_event *event;
@@ -184,7 +187,9 @@ int kernel_create_event(struct lttng_event *ev,
 	assert(ev);
 	assert(channel);
 
-	event = trace_kernel_create_event(ev);
+	/* We pass ownership of filter_expression and filter */
+	event = trace_kernel_create_event(ev, filter_expression,
+			filter);
 	if (event == NULL) {
 		ret = -1;
 		goto error;
@@ -208,19 +213,7 @@ int kernel_create_event(struct lttng_event *ev,
 		goto free_event;
 	}
 
-	/*
-	 * LTTNG_KERNEL_SYSCALL event creation will return 0 on success.
-	 */
-	if (ret == 0 && event->event->instrumentation == LTTNG_KERNEL_SYSCALL) {
-		DBG2("Kernel event syscall creation success");
-		/*
-		 * We use fd == -1 to ensure that we never trigger a close of fd
-		 * 0.
-		 */
-		event->fd = -1;
-		goto add_list;
-	}
-
+	event->type = ev->type;
 	event->fd = ret;
 	/* Prevent fd duplication after execlp() */
 	ret = fcntl(event->fd, F_SETFD, FD_CLOEXEC);
@@ -228,7 +221,26 @@ int kernel_create_event(struct lttng_event *ev,
 		PERROR("fcntl session fd");
 	}
 
-add_list:
+	if (filter) {
+		ret = kernctl_filter(event->fd, filter);
+		if (ret) {
+			goto filter_error;
+		}
+	}
+
+	ret = kernctl_enable(event->fd);
+	if (ret < 0) {
+		switch (errno) {
+		case EEXIST:
+			ret = LTTNG_ERR_KERN_EVENT_EXIST;
+			break;
+		default:
+			PERROR("enable kernel event");
+			break;
+		}
+		goto enable_error;
+	}
+
 	/* Add event to event list */
 	cds_list_add(&event->list, &channel->events_list.head);
 	channel->event_count++;
@@ -237,6 +249,16 @@ add_list:
 
 	return 0;
 
+enable_error:
+filter_error:
+	{
+		int closeret;
+
+		closeret = close(event->fd);
+		if (closeret) {
+			PERROR("close event fd");
+		}
+	}
 free_event:
 	free(event);
 error:
@@ -354,16 +376,120 @@ error:
 	return ret;
 }
 
-int kernel_enable_syscall(const char *syscall_name,
-		struct ltt_kernel_channel *channel)
+
+int kernel_track_pid(struct ltt_kernel_session *session, int pid)
 {
-	return kernctl_enable_syscall(channel->fd, syscall_name);
+	int ret;
+
+	DBG("Kernel track PID %d for session id %" PRIu64 ".",
+			pid, session->id);
+	ret = kernctl_track_pid(session->fd, pid);
+	if (!ret) {
+		return LTTNG_OK;
+	}
+	switch (errno) {
+	case EINVAL:
+		return LTTNG_ERR_INVALID;
+	case ENOMEM:
+		return LTTNG_ERR_NOMEM;
+	case EEXIST:
+		return LTTNG_ERR_PID_TRACKED;
+	default:
+		return LTTNG_ERR_UNK;
+	}
 }
 
-int kernel_disable_syscall(const char *syscall_name,
-		struct ltt_kernel_channel *channel)
+int kernel_untrack_pid(struct ltt_kernel_session *session, int pid)
 {
-	return kernctl_disable_syscall(channel->fd, syscall_name);
+	int ret;
+
+	DBG("Kernel untrack PID %d for session id %" PRIu64 ".",
+			pid, session->id);
+	ret = kernctl_untrack_pid(session->fd, pid);
+	if (!ret) {
+		return LTTNG_OK;
+	}
+	switch (errno) {
+	case EINVAL:
+		return LTTNG_ERR_INVALID;
+	case ENOMEM:
+		return LTTNG_ERR_NOMEM;
+	case ENOENT:
+		return LTTNG_ERR_PID_NOT_TRACKED;
+	default:
+		return LTTNG_ERR_UNK;
+	}
+}
+
+ssize_t kernel_list_tracker_pids(struct ltt_kernel_session *session,
+		int **_pids)
+{
+	int fd, ret;
+	int pid;
+	ssize_t nbmem, count = 0;
+	FILE *fp;
+	int *pids;
+
+	fd = kernctl_list_tracker_pids(session->fd);
+	if (fd < 0) {
+		PERROR("kernel tracker pids list");
+		goto error;
+	}
+
+	fp = fdopen(fd, "r");
+	if (fp == NULL) {
+		PERROR("kernel tracker pids list fdopen");
+		goto error_fp;
+	}
+
+	nbmem = KERNEL_TRACKER_PIDS_INIT_LIST_SIZE;
+	pids = zmalloc(sizeof(*pids) * nbmem);
+	if (pids == NULL) {
+		PERROR("alloc list pids");
+		count = -ENOMEM;
+		goto end;
+	}
+
+	while (fscanf(fp, "process { pid = %u; };\n", &pid) == 1) {
+		if (count >= nbmem) {
+			int *new_pids;
+			size_t new_nbmem;
+
+			new_nbmem = nbmem << 1;
+			DBG("Reallocating pids list from %zu to %zu entries",
+					nbmem, new_nbmem);
+			new_pids = realloc(pids, new_nbmem * sizeof(*new_pids));
+			if (new_pids == NULL) {
+				PERROR("realloc list events");
+				free(pids);
+				count = -ENOMEM;
+				goto end;
+			}
+			/* Zero the new memory */
+			memset(new_pids + nbmem, 0,
+				(new_nbmem - nbmem) * sizeof(*new_pids));
+			nbmem = new_nbmem;
+			pids = new_pids;
+		}
+		pids[count++] = pid;
+	}
+
+	*_pids = pids;
+	DBG("Kernel list tracker pids done (%zd pids)", count);
+end:
+	ret = fclose(fp);	/* closes both fp and fd */
+	if (ret) {
+		PERROR("fclose");
+	}
+	return count;
+
+error_fp:
+	ret = close(fd);
+	if (ret) {
+		PERROR("close");
+	}
+error:
+	return -1;
 }
 
 /*

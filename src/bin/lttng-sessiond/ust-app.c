@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <errno.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -100,12 +101,14 @@ static int ht_match_ust_app_event(struct cds_lfht_node *node, const void *_key)
 {
 	struct ust_app_event *event;
 	const struct ust_app_ht_key *key;
+	int ev_loglevel_value;
 
 	assert(node);
 	assert(_key);
 
 	event = caa_container_of(node, struct ust_app_event, node.node);
 	key = _key;
+	ev_loglevel_value = event->attr.loglevel;
 
 	/* Match the 4 elements of the key: name, filter, loglevel, exclusions */
 
@@ -115,9 +118,10 @@ static int ht_match_ust_app_event(struct cds_lfht_node *node, const void *_key)
 	}
 
 	/* Event loglevel. */
-	if (event->attr.loglevel != key->loglevel) {
+	if (ev_loglevel_value != key->loglevel_type) {
 		if (event->attr.loglevel_type == LTTNG_UST_LOGLEVEL_ALL
-				&& key->loglevel == 0 && event->attr.loglevel == -1) {
+				&& key->loglevel_type == 0 &&
+				ev_loglevel_value == -1) {
 			/*
 			 * Match is accepted. This is because on event creation, the
 			 * loglevel is set to -1 if the event loglevel type is ALL so 0 and
@@ -183,7 +187,7 @@ static void add_unique_ust_app_event(struct ust_app_channel *ua_chan,
 	ht = ua_chan->events;
 	key.name = event->attr.name;
 	key.filter = event->filter;
-	key.loglevel = event->attr.loglevel;
+	key.loglevel_type = event->attr.loglevel;
 	key.exclusion = event->exclusion;
 
 	node_ptr = cds_lfht_add_unique(ht->ht,
@@ -261,14 +265,17 @@ error:
  * this function.
  */
 static
-void delete_ust_app_ctx(int sock, struct ust_app_ctx *ua_ctx)
+void delete_ust_app_ctx(int sock, struct ust_app_ctx *ua_ctx,
+		struct ust_app *app)
 {
 	int ret;
 
 	assert(ua_ctx);
 
 	if (ua_ctx->obj) {
+		pthread_mutex_lock(&app->sock_lock);
 		ret = ustctl_release_object(sock, ua_ctx->obj);
+		pthread_mutex_unlock(&app->sock_lock);
 		if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app sock %d release ctx obj handle %d failed with ret %d",
 					sock, ua_ctx->obj->handle, ret);
@@ -283,7 +290,8 @@ void delete_ust_app_ctx(int sock, struct ust_app_ctx *ua_ctx)
  * this function.
  */
 static
-void delete_ust_app_event(int sock, struct ust_app_event *ua_event)
+void delete_ust_app_event(int sock, struct ust_app_event *ua_event,
+		struct ust_app *app)
 {
 	int ret;
 
@@ -293,7 +301,9 @@ void delete_ust_app_event(int sock, struct ust_app_event *ua_event)
 	if (ua_event->exclusion != NULL)
 		free(ua_event->exclusion);
 	if (ua_event->obj != NULL) {
+		pthread_mutex_lock(&app->sock_lock);
 		ret = ustctl_release_object(sock, ua_event->obj);
+		pthread_mutex_unlock(&app->sock_lock);
 		if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app sock %d release event obj failed with ret %d",
 					sock, ret);
@@ -308,14 +318,17 @@ void delete_ust_app_event(int sock, struct ust_app_event *ua_event)
  *
  * Return 0 on success or else a negative value.
  */
-static int release_ust_app_stream(int sock, struct ust_app_stream *stream)
+static int release_ust_app_stream(int sock, struct ust_app_stream *stream,
+		struct ust_app *app)
 {
 	int ret = 0;
 
 	assert(stream);
 
 	if (stream->obj) {
+		pthread_mutex_lock(&app->sock_lock);
 		ret = ustctl_release_object(sock, stream->obj);
+		pthread_mutex_unlock(&app->sock_lock);
 		if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app sock %d release stream obj failed with ret %d",
 					sock, ret);
@@ -332,11 +345,12 @@ static int release_ust_app_stream(int sock, struct ust_app_stream *stream)
  * this function.
  */
 static
-void delete_ust_app_stream(int sock, struct ust_app_stream *stream)
+void delete_ust_app_stream(int sock, struct ust_app_stream *stream,
+		struct ust_app *app)
 {
 	assert(stream);
 
-	(void) release_ust_app_stream(sock, stream);
+	(void) release_ust_app_stream(sock, stream, app);
 	free(stream);
 }
 
@@ -379,7 +393,7 @@ void delete_ust_app_channel(int sock, struct ust_app_channel *ua_chan,
 	/* Wipe stream */
 	cds_list_for_each_entry_safe(stream, stmp, &ua_chan->streams.head, list) {
 		cds_list_del(&stream->list);
-		delete_ust_app_stream(sock, stream);
+		delete_ust_app_stream(sock, stream, app);
 	}
 
 	/* Wipe context */
@@ -387,7 +401,7 @@ void delete_ust_app_channel(int sock, struct ust_app_channel *ua_chan,
 		cds_list_del(&ua_ctx->list);
 		ret = lttng_ht_del(ua_chan->ctx, &iter);
 		assert(!ret);
-		delete_ust_app_ctx(sock, ua_ctx);
+		delete_ust_app_ctx(sock, ua_ctx, app);
 	}
 
 	/* Wipe events */
@@ -395,7 +409,7 @@ void delete_ust_app_channel(int sock, struct ust_app_channel *ua_chan,
 			node.node) {
 		ret = lttng_ht_del(ua_chan->events, &iter);
 		assert(!ret);
-		delete_ust_app_event(sock, ua_event);
+		delete_ust_app_event(sock, ua_event, app);
 	}
 
 	if (ua_chan->session->buffer_type == LTTNG_BUFFER_PER_PID) {
@@ -411,7 +425,9 @@ void delete_ust_app_channel(int sock, struct ust_app_channel *ua_chan,
 		iter.iter.node = &ua_chan->ust_objd_node.node;
 		ret = lttng_ht_del(app->ust_objd, &iter);
 		assert(!ret);
+		pthread_mutex_lock(&app->sock_lock);
 		ret = ustctl_release_object(sock, ua_chan->obj);
+		pthread_mutex_unlock(&app->sock_lock);
 		if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app sock %d release channel obj failed with ret %d",
 					sock, ret);
@@ -422,6 +438,33 @@ void delete_ust_app_channel(int sock, struct ust_app_channel *ua_chan,
 	call_rcu(&ua_chan->rcu_head, delete_ust_app_channel_rcu);
 }
 
+int ust_app_register_done(struct ust_app *app)
+{
+	int ret;
+
+	pthread_mutex_lock(&app->sock_lock);
+	ret = ustctl_register_done(app->sock);
+	pthread_mutex_unlock(&app->sock_lock);
+	return ret;
+}
+
+int ust_app_release_object(struct ust_app *app, struct lttng_ust_object_data *data)
+{
+	int ret, sock;
+
+	if (app) {
+		pthread_mutex_lock(&app->sock_lock);
+		sock = app->sock;
+	} else {
+		sock = -1;
+	}
+	ret = ustctl_release_object(sock, data);
+	if (app) {
+		pthread_mutex_unlock(&app->sock_lock);
+	}
+	return ret;
+}
+
 /*
  * Push metadata to consumer socket.
  *
@@ -430,32 +473,39 @@ void delete_ust_app_channel(int sock, struct ust_app_channel *ua_chan,
  * Must be called with the registry lock held.
  *
  * On success, return the len of metadata pushed or else a negative value.
+ * Returning a -EPIPE return value means we could not send the metadata,
+ * but it can be caused by recoverable errors (e.g. the application has
+ * terminated concurrently).
  */
 ssize_t ust_app_push_metadata(struct ust_registry_session *registry,
 		struct consumer_socket *socket, int send_zero_data)
 {
 	int ret;
 	char *metadata_str = NULL;
-	size_t len, offset;
+	size_t len, offset, new_metadata_len_sent;
 	ssize_t ret_val;
+	uint64_t metadata_key;
 
 	assert(registry);
 	assert(socket);
+
+	metadata_key = registry->metadata_key;
 
 	/*
 	 * Means that no metadata was assigned to the session. This can
 	 * happens if no start has been done previously.
 	 */
-	if (!registry->metadata_key) {
+	if (!metadata_key) {
 		return 0;
 	}
 
 	/*
 	 * On a push metadata error either the consumer is dead or the
 	 * metadata channel has been destroyed because its endpoint
-	 * might have died (e.g: relayd). If so, the metadata closed
-	 * flag is set to 1 so we deny pushing metadata again which is
-	 * not valid anymore on the consumer side.
+	 * might have died (e.g: relayd), or because the application has
+	 * exited. If so, the metadata closed flag is set to 1 so we
+	 * deny pushing metadata again which is not valid anymore on the
+	 * consumer side.
 	 */
 	if (registry->metadata_closed) {
 		return -EPIPE;
@@ -463,6 +513,7 @@ ssize_t ust_app_push_metadata(struct ust_registry_session *registry,
 
 	offset = registry->metadata_len_sent;
 	len = registry->metadata_len - registry->metadata_len_sent;
+	new_metadata_len_sent = registry->metadata_len;
 	if (len == 0) {
 		DBG3("No metadata to push for metadata key %" PRIu64,
 				registry->metadata_key);
@@ -481,13 +532,26 @@ ssize_t ust_app_push_metadata(struct ust_registry_session *registry,
 		ret_val = -ENOMEM;
 		goto error;
 	}
-	/* Copy what we haven't send out. */
+	/* Copy what we haven't sent out. */
 	memcpy(metadata_str, registry->metadata + offset, len);
-	registry->metadata_len_sent += len;
 
 push_data:
-	ret = consumer_push_metadata(socket, registry->metadata_key,
+	pthread_mutex_unlock(&registry->lock);
+	/*
+	 * We need to unlock the registry while we push metadata to
+	 * break a circular dependency between the consumerd metadata
+	 * lock and the sessiond registry lock. Indeed, pushing metadata
+	 * to the consumerd awaits that it gets pushed all the way to
+	 * relayd, but doing so requires grabbing the metadata lock. If
+	 * a concurrent metadata request is being performed by
+	 * consumerd, this can try to grab the registry lock on the
+	 * sessiond while holding the metadata lock on the consumer
+	 * daemon. Those push and pull schemes are performed on two
+	 * different bidirectionnal communication sockets.
+	 */
+	ret = consumer_push_metadata(socket, metadata_key,
 			metadata_str, len, offset);
+	pthread_mutex_lock(&registry->lock);
 	if (ret < 0) {
 		/*
 		 * There is an acceptable race here between the registry
@@ -505,17 +569,29 @@ push_data:
 		 */
 		if (ret == -LTTCOMM_CONSUMERD_CHANNEL_FAIL) {
 			ret = 0;
+		} else {
+			ERR("Error pushing metadata to consumer");
 		}
-
-		/*
-		 * Update back the actual metadata len sent since it
-		 * failed here.
-		 */
-		registry->metadata_len_sent -= len;
 		ret_val = ret;
 		goto error_push;
+	} else {
+		/*
+		 * Metadata may have been concurrently pushed, since
+		 * we're not holding the registry lock while pushing to
+		 * consumer.  This is handled by the fact that we send
+		 * the metadata content, size, and the offset at which
+		 * that metadata belongs. This may arrive out of order
+		 * on the consumer side, and the consumer is able to
+		 * deal with overlapping fragments. The consumer
+		 * supports overlapping fragments, which must be
+		 * contiguous starting from offset 0. We keep the
+		 * largest metadata_len_sent value of the concurrent
+		 * send.
+		 */
+		registry->metadata_len_sent =
+			max_t(size_t, registry->metadata_len_sent,
+				new_metadata_len_sent);
 	}
-
 	free(metadata_str);
 	return len;
 
@@ -546,6 +622,9 @@ error_push:
  * of socket throughout this function.
  *
  * Return 0 on success else a negative error.
+ * Returning a -EPIPE return value means we could not send the metadata,
+ * but it can be caused by recoverable errors (e.g. the application has
+ * terminated concurrently).
  */
 static int push_metadata(struct ust_registry_session *registry,
 		struct consumer_output *consumer)
@@ -580,7 +659,6 @@ static int push_metadata(struct ust_registry_session *registry,
 	return 0;
 
 error:
-end:
 	pthread_mutex_unlock(&registry->lock);
 	return ret_val;
 }
@@ -670,6 +748,9 @@ void delete_ust_app_session(int sock, struct ust_app_session *ua_sess,
 
 	pthread_mutex_lock(&ua_sess->lock);
 
+	assert(!ua_sess->deleted);
+	ua_sess->deleted = true;
+
 	registry = get_session_registry(ua_sess);
 	if (registry) {
 		/* Push metadata for application before freeing the application. */
@@ -704,13 +785,17 @@ void delete_ust_app_session(int sock, struct ust_app_session *ua_sess,
 	}
 
 	if (ua_sess->handle != -1) {
+		pthread_mutex_lock(&app->sock_lock);
 		ret = ustctl_release_handle(sock, ua_sess->handle);
+		pthread_mutex_unlock(&app->sock_lock);
 		if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app sock %d release session handle failed with ret %d",
 					sock, ret);
 		}
 	}
 	pthread_mutex_unlock(&ua_sess->lock);
+
+	consumer_output_put(ua_sess->consumer);
 
 	call_rcu(&ua_sess->rcu_head, delete_ust_app_session_rcu);
 }
@@ -973,20 +1058,44 @@ error:
  *
  * Return allocated filter or NULL on error.
  */
-static struct lttng_ust_filter_bytecode *alloc_copy_ust_app_filter(
-		struct lttng_ust_filter_bytecode *orig_f)
+static struct lttng_filter_bytecode *copy_filter_bytecode(
+		struct lttng_filter_bytecode *orig_f)
+{
+	struct lttng_filter_bytecode *filter = NULL;
+
+	/* Copy filter bytecode */
+	filter = zmalloc(sizeof(*filter) + orig_f->len);
+	if (!filter) {
+		PERROR("zmalloc alloc filter bytecode");
+		goto error;
+	}
+
+	memcpy(filter, orig_f, sizeof(*filter) + orig_f->len);
+
+error:
+	return filter;
+}
+
+/*
+ * Create a liblttng-ust filter bytecode from given bytecode.
+ *
+ * Return allocated filter or NULL on error.
+ */
+static struct lttng_ust_filter_bytecode *create_ust_bytecode_from_bytecode(
+		struct lttng_filter_bytecode *orig_f)
 {
 	struct lttng_ust_filter_bytecode *filter = NULL;
 
 	/* Copy filter bytecode */
 	filter = zmalloc(sizeof(*filter) + orig_f->len);
 	if (!filter) {
-		PERROR("zmalloc alloc ust app filter");
+		PERROR("zmalloc alloc ust filter bytecode");
 		goto error;
 	}
 
+	assert(sizeof(struct lttng_filter_bytecode) ==
+			sizeof(struct lttng_ust_filter_bytecode));
 	memcpy(filter, orig_f, sizeof(*filter) + orig_f->len);
-
 error:
 	return filter;
 }
@@ -1043,7 +1152,8 @@ error:
  * Return an ust_app_event object or NULL on error.
  */
 static struct ust_app_event *find_ust_app_event(struct lttng_ht *ht,
-		char *name, struct lttng_ust_filter_bytecode *filter, int loglevel,
+		char *name, struct lttng_filter_bytecode *filter,
+		int loglevel_value,
 		const struct lttng_event_exclusion *exclusion)
 {
 	struct lttng_ht_iter iter;
@@ -1057,9 +1167,9 @@ static struct ust_app_event *find_ust_app_event(struct lttng_ht *ht,
 	/* Setup key for event lookup. */
 	key.name = name;
 	key.filter = filter;
-	key.loglevel = loglevel;
+	key.loglevel_type = loglevel_value;
 	/* lttng_event_exclusion and lttng_ust_event_exclusion structures are similar */
-	key.exclusion = (struct lttng_ust_event_exclusion *)exclusion;
+	key.exclusion = exclusion;
 
 	/* Lookup using the event name as hash and a custom match fct. */
 	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
@@ -1088,8 +1198,10 @@ int create_ust_channel_context(struct ust_app_channel *ua_chan,
 
 	health_code_update();
 
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_add_context(app->sock, &ua_ctx->ctx,
 			ua_chan->obj, &ua_ctx->obj);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app create channel context failed for app (pid: %d) "
@@ -1124,6 +1236,7 @@ int set_ust_event_filter(struct ust_app_event *ua_event,
 		struct ust_app *app)
 {
 	int ret;
+	struct lttng_ust_filter_bytecode *ust_bytecode = NULL;
 
 	health_code_update();
 
@@ -1132,8 +1245,15 @@ int set_ust_event_filter(struct ust_app_event *ua_event,
 		goto error;
 	}
 
-	ret = ustctl_set_filter(app->sock, ua_event->filter,
+	ust_bytecode = create_ust_bytecode_from_bytecode(ua_event->filter);
+	if (!ust_bytecode) {
+		ret = -LTTNG_ERR_NOMEM;
+		goto error;
+	}
+	pthread_mutex_lock(&app->sock_lock);
+	ret = ustctl_set_filter(app->sock, ust_bytecode,
 			ua_event->obj);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app event %s filter failed for app (pid: %d) "
@@ -1154,7 +1274,29 @@ int set_ust_event_filter(struct ust_app_event *ua_event,
 
 error:
 	health_code_update();
+	free(ust_bytecode);
 	return ret;
+}
+
+static
+struct lttng_ust_event_exclusion *create_ust_exclusion_from_exclusion(
+		struct lttng_event_exclusion *exclusion)
+{
+	struct lttng_ust_event_exclusion *ust_exclusion = NULL;
+	size_t exclusion_alloc_size = sizeof(struct lttng_ust_event_exclusion) +
+		LTTNG_UST_SYM_NAME_LEN * exclusion->count;
+
+	ust_exclusion = zmalloc(exclusion_alloc_size);
+	if (!ust_exclusion) {
+		PERROR("malloc");
+		goto end;
+	}
+
+	assert(sizeof(struct lttng_event_exclusion) ==
+			sizeof(struct lttng_ust_event_exclusion));
+	memcpy(ust_exclusion, exclusion, exclusion_alloc_size);
+end:
+	return ust_exclusion;
 }
 
 /*
@@ -1165,6 +1307,7 @@ int set_ust_event_exclusion(struct ust_app_event *ua_event,
 		struct ust_app *app)
 {
 	int ret;
+	struct lttng_ust_event_exclusion *ust_exclusion = NULL;
 
 	health_code_update();
 
@@ -1173,8 +1316,15 @@ int set_ust_event_exclusion(struct ust_app_event *ua_event,
 		goto error;
 	}
 
-	ret = ustctl_set_exclusion(app->sock, ua_event->exclusion,
-			ua_event->obj);
+	ust_exclusion = create_ust_exclusion_from_exclusion(
+			ua_event->exclusion);
+	if (!ust_exclusion) {
+		ret = -LTTNG_ERR_NOMEM;
+		goto error;
+	}
+	pthread_mutex_lock(&app->sock_lock);
+	ret = ustctl_set_exclusion(app->sock, ust_exclusion, ua_event->obj);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app event %s exclusions failed for app (pid: %d) "
@@ -1195,6 +1345,7 @@ int set_ust_event_exclusion(struct ust_app_event *ua_event,
 
 error:
 	health_code_update();
+	free(ust_exclusion);
 	return ret;
 }
 
@@ -1208,7 +1359,9 @@ static int disable_ust_event(struct ust_app *app,
 
 	health_code_update();
 
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_disable(app->sock, ua_event->obj);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app event %s disable failed for app (pid: %d) "
@@ -1244,7 +1397,9 @@ static int disable_ust_channel(struct ust_app *app,
 
 	health_code_update();
 
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_disable(app->sock, ua_chan->obj);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app channel %s disable failed for app (pid: %d) "
@@ -1280,7 +1435,9 @@ static int enable_ust_channel(struct ust_app *app,
 
 	health_code_update();
 
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_enable(app->sock, ua_chan->obj);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app channel %s enable failed for app (pid: %d) "
@@ -1318,7 +1475,9 @@ static int enable_ust_event(struct ust_app *app,
 
 	health_code_update();
 
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_enable(app->sock, ua_event->obj);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("UST app event %s enable failed for app (pid: %d) "
@@ -1366,7 +1525,10 @@ static int send_channel_pid_to_ust(struct ust_app *app,
 
 	/* Send channel to the application. */
 	ret = ust_consumer_send_channel_to_ust(app, ua_sess, ua_chan);
-	if (ret < 0) {
+	if (ret == -EPIPE || ret == -LTTNG_UST_ERR_EXITING) {
+		ret = -ENOTCONN;	/* Caused by app exiting. */
+		goto error;
+	} else if (ret < 0) {
 		goto error;
 	}
 
@@ -1375,12 +1537,15 @@ static int send_channel_pid_to_ust(struct ust_app *app,
 	/* Send all streams to application. */
 	cds_list_for_each_entry_safe(stream, stmp, &ua_chan->streams.head, list) {
 		ret = ust_consumer_send_stream_to_ust(app, ua_chan, stream);
-		if (ret < 0) {
+		if (ret == -EPIPE || ret == -LTTNG_UST_ERR_EXITING) {
+			ret = -ENOTCONN;	/* Caused by app exiting. */
+			goto error;
+		} else if (ret < 0) {
 			goto error;
 		}
 		/* We don't need the stream anymore once sent to the tracer. */
 		cds_list_del(&stream->list);
-		delete_ust_app_stream(-1, stream);
+		delete_ust_app_stream(-1, stream, app);
 	}
 	/* Flag the channel that it is sent to the application. */
 	ua_chan->is_sent = 1;
@@ -1404,8 +1569,10 @@ int create_ust_event(struct ust_app *app, struct ust_app_session *ua_sess,
 	health_code_update();
 
 	/* Create UST event on tracer */
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_create_event(app->sock, &ua_event->attr, ua_chan->obj,
 			&ua_event->obj);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("Error ustctl create event %s for app pid: %d with ret %d",
@@ -1471,27 +1638,6 @@ int create_ust_event(struct ust_app *app, struct ust_app_session *ua_sess,
 			}
 			goto error;
 		}
-	} else {
-		ret = disable_ust_event(app, ua_sess, ua_event);
-		if (ret < 0) {
-			/*
-			 * If we hit an EPERM, something is wrong with our disable call. If
-			 * we get an EEXIST, there is a problem on the tracer side since we
-			 * just created it.
-			 */
-			switch (ret) {
-			case -LTTNG_UST_ERR_PERM:
-				/* Code flow problem */
-				assert(0);
-			case -LTTNG_UST_ERR_EXIST:
-				/* It's OK for our use case. */
-				ret = 0;
-				break;
-			default:
-				break;
-			}
-			goto error;
-		}
 	}
 
 error:
@@ -1517,13 +1663,13 @@ static void shadow_copy_event(struct ust_app_event *ua_event,
 
 	/* Copy filter bytecode */
 	if (uevent->filter) {
-		ua_event->filter = alloc_copy_ust_app_filter(uevent->filter);
+		ua_event->filter = copy_filter_bytecode(uevent->filter);
 		/* Filter might be NULL here in case of ENONEM. */
 	}
 
 	/* Copy exclusion data */
 	if (uevent->exclusion) {
-		exclusion_alloc_size = sizeof(struct lttng_ust_event_exclusion) +
+		exclusion_alloc_size = sizeof(struct lttng_event_exclusion) +
 				LTTNG_UST_SYM_NAME_LEN * uevent->exclusion->count;
 		ua_event->exclusion = zmalloc(exclusion_alloc_size);
 		if (ua_event->exclusion == NULL) {
@@ -1614,6 +1760,7 @@ static void shadow_copy_session(struct ust_app_session *ua_sess,
 	struct tm *timeinfo;
 	char datetime[16];
 	int ret;
+	char tmp_shm_path[PATH_MAX];
 
 	/* Get date and time for unique app path */
 	time(&rawtime);
@@ -1630,8 +1777,11 @@ static void shadow_copy_session(struct ust_app_session *ua_sess,
 	ua_sess->egid = usess->gid;
 	ua_sess->buffer_type = usess->buffer_type;
 	ua_sess->bits_per_long = app->bits_per_long;
+
 	/* There is only one consumer object per session possible. */
+	consumer_output_get(usess->consumer);
 	ua_sess->consumer = usess->consumer;
+
 	ua_sess->output_traces = usess->output_traces;
 	ua_sess->live_timer_interval = usess->live_timer_interval;
 	copy_channel_attr_to_ustctl(&ua_sess->metadata_attr,
@@ -1655,6 +1805,38 @@ static void shadow_copy_session(struct ust_app_session *ua_sess,
 		PERROR("asprintf UST shadow copy session");
 		assert(0);
 		goto error;
+	}
+
+	strncpy(ua_sess->root_shm_path, usess->root_shm_path,
+		sizeof(ua_sess->root_shm_path));
+	ua_sess->root_shm_path[sizeof(ua_sess->root_shm_path) - 1] = '\0';
+	strncpy(ua_sess->shm_path, usess->shm_path,
+		sizeof(ua_sess->shm_path));
+	ua_sess->shm_path[sizeof(ua_sess->shm_path) - 1] = '\0';
+	if (ua_sess->shm_path[0]) {
+		switch (ua_sess->buffer_type) {
+		case LTTNG_BUFFER_PER_PID:
+			ret = snprintf(tmp_shm_path, sizeof(tmp_shm_path),
+					DEFAULT_UST_TRACE_PID_PATH "/%s-%d-%s",
+					app->name, app->pid, datetime);
+			break;
+		case LTTNG_BUFFER_PER_UID:
+			ret = snprintf(tmp_shm_path, sizeof(tmp_shm_path),
+					DEFAULT_UST_TRACE_UID_PATH,
+					app->uid, app->bits_per_long);
+			break;
+		default:
+			assert(0);
+			goto error;
+		}
+		if (ret < 0) {
+			PERROR("sprintf UST shadow copy session");
+			assert(0);
+			goto error;
+		}
+		strncat(ua_sess->shm_path, tmp_shm_path,
+			sizeof(ua_sess->shm_path) - strlen(ua_sess->shm_path) - 1);
+		ua_sess->shm_path[sizeof(ua_sess->shm_path) - 1] = '\0';
 	}
 
 	/* Iterate over all channels in global domain. */
@@ -1686,9 +1868,10 @@ static void shadow_copy_session(struct ust_app_session *ua_sess,
 
 		lttng_ht_add_unique_str(ua_sess->channels, &ua_chan->node);
 	}
+	return;
 
 error:
-	return;
+	consumer_output_put(ua_sess->consumer);
 }
 
 /*
@@ -1748,11 +1931,11 @@ static int setup_buffer_reg_pid(struct ust_app_session *ua_sess,
 		 * This is the create channel path meaning that if there is NO
 		 * registry available, we have to create one for this session.
 		 */
-		ret = buffer_reg_pid_create(ua_sess->id, &reg_pid);
+		ret = buffer_reg_pid_create(ua_sess->id, &reg_pid,
+			ua_sess->root_shm_path, ua_sess->shm_path);
 		if (ret < 0) {
 			goto error;
 		}
-		buffer_reg_pid_add(reg_pid);
 	} else {
 		goto end;
 	}
@@ -1763,10 +1946,21 @@ static int setup_buffer_reg_pid(struct ust_app_session *ua_sess,
 			app->uint16_t_alignment, app->uint32_t_alignment,
 			app->uint64_t_alignment, app->long_alignment,
 			app->byte_order, app->version.major,
-			app->version.minor);
+			app->version.minor, reg_pid->root_shm_path,
+			reg_pid->shm_path,
+			ua_sess->euid, ua_sess->egid);
 	if (ret < 0) {
+		/*
+		 * reg_pid->registry->reg.ust is NULL upon error, so we need to
+		 * destroy the buffer registry, because it is always expected
+		 * that if the buffer registry can be found, its ust registry is
+		 * non-NULL.
+		 */
+		buffer_reg_pid_destroy(reg_pid);
 		goto error;
 	}
+
+	buffer_reg_pid_add(reg_pid);
 
 	DBG3("UST app buffer registry per PID created successfully");
 
@@ -1787,6 +1981,7 @@ error:
  * Return 0 on success or else a negative value.
  */
 static int setup_buffer_reg_uid(struct ltt_ust_session *usess,
+		struct ust_app_session *ua_sess,
 		struct ust_app *app, struct buffer_reg_uid **regp)
 {
 	int ret = 0;
@@ -1804,11 +1999,11 @@ static int setup_buffer_reg_uid(struct ltt_ust_session *usess,
 		 * registry available, we have to create one for this session.
 		 */
 		ret = buffer_reg_uid_create(usess->id, app->bits_per_long, app->uid,
-				LTTNG_DOMAIN_UST, &reg_uid);
+				LTTNG_DOMAIN_UST, &reg_uid,
+				ua_sess->root_shm_path, ua_sess->shm_path);
 		if (ret < 0) {
 			goto error;
 		}
-		buffer_reg_uid_add(reg_uid);
 	} else {
 		goto end;
 	}
@@ -1819,15 +2014,24 @@ static int setup_buffer_reg_uid(struct ltt_ust_session *usess,
 			app->uint16_t_alignment, app->uint32_t_alignment,
 			app->uint64_t_alignment, app->long_alignment,
 			app->byte_order, app->version.major,
-			app->version.minor);
+			app->version.minor, reg_uid->root_shm_path,
+			reg_uid->shm_path, usess->uid, usess->gid);
 	if (ret < 0) {
+		/*
+		 * reg_uid->registry->reg.ust is NULL upon error, so we need to
+		 * destroy the buffer registry, because it is always expected
+		 * that if the buffer registry can be found, its ust registry is
+		 * non-NULL.
+		 */
+		buffer_reg_uid_destroy(reg_uid, NULL);
 		goto error;
 	}
 	/* Add node to teardown list of the session. */
 	cds_list_add(&reg_uid->lnode, &usess->buffer_reg_uid_list);
 
-	DBG3("UST app buffer registry per UID created successfully");
+	buffer_reg_uid_add(reg_uid);
 
+	DBG3("UST app buffer registry per UID created successfully");
 end:
 	if (regp) {
 		*regp = reg_uid;
@@ -1880,13 +2084,15 @@ static int create_ust_app_session(struct ltt_ust_session *usess,
 		/* Init local registry. */
 		ret = setup_buffer_reg_pid(ua_sess, app, NULL);
 		if (ret < 0) {
+			delete_ust_app_session(-1, ua_sess, app);
 			goto error;
 		}
 		break;
 	case LTTNG_BUFFER_PER_UID:
 		/* Look for a global registry. If none exists, create one. */
-		ret = setup_buffer_reg_uid(usess, app, NULL);
+		ret = setup_buffer_reg_uid(usess, ua_sess, app, NULL);
 		if (ret < 0) {
+			delete_ust_app_session(-1, ua_sess, app);
 			goto error;
 		}
 		break;
@@ -1899,7 +2105,9 @@ static int create_ust_app_session(struct ltt_ust_session *usess,
 	health_code_update();
 
 	if (ua_sess->handle == -1) {
+		pthread_mutex_lock(&app->sock_lock);
 		ret = ustctl_create_session(app->sock);
+		pthread_mutex_unlock(&app->sock_lock);
 		if (ret < 0) {
 			if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 				ERR("Creating session for app pid %d with ret %d",
@@ -2325,7 +2533,8 @@ error_fd_get:
  * Return 0 on success or else a negative value.
  */
 static int setup_buffer_reg_streams(struct buffer_reg_channel *reg_chan,
-		struct ust_app_channel *ua_chan)
+		struct ust_app_channel *ua_chan,
+		struct ust_app *app)
 {
 	int ret = 0;
 	struct ust_app_stream *stream, *stmp;
@@ -2354,7 +2563,7 @@ static int setup_buffer_reg_streams(struct buffer_reg_channel *reg_chan,
 
 		/* We don't need the streams anymore. */
 		cds_list_del(&stream->list);
-		delete_ust_app_stream(-1, stream);
+		delete_ust_app_stream(-1, stream, app);
 	}
 
 error:
@@ -2418,7 +2627,8 @@ error_create:
  * Return 0 on success else a negative value.
  */
 static int setup_buffer_reg_channel(struct buffer_reg_session *reg_sess,
-		struct ust_app_channel *ua_chan, struct buffer_reg_channel *reg_chan)
+		struct ust_app_channel *ua_chan, struct buffer_reg_channel *reg_chan,
+		struct ust_app *app)
 {
 	int ret;
 
@@ -2430,7 +2640,7 @@ static int setup_buffer_reg_channel(struct buffer_reg_session *reg_sess,
 	DBG2("UST app setup buffer registry channel for %s", ua_chan->name);
 
 	/* Setup all streams for the registry. */
-	ret = setup_buffer_reg_streams(reg_chan, ua_chan);
+	ret = setup_buffer_reg_streams(reg_chan, ua_chan, app);
 	if (ret < 0) {
 		goto error;
 	}
@@ -2472,7 +2682,10 @@ static int send_channel_uid_to_ust(struct buffer_reg_channel *reg_chan,
 
 	/* Send channel to the application. */
 	ret = ust_consumer_send_channel_to_ust(app, ua_sess, ua_chan);
-	if (ret < 0) {
+	if (ret == -EPIPE || ret == -LTTNG_UST_ERR_EXITING) {
+		ret = -ENOTCONN;	/* Caused by app exiting. */
+		goto error;
+	} else if (ret < 0) {
 		goto error;
 	}
 
@@ -2490,7 +2703,13 @@ static int send_channel_uid_to_ust(struct buffer_reg_channel *reg_chan,
 
 		ret = ust_consumer_send_stream_to_ust(app, ua_chan, &stream);
 		if (ret < 0) {
-			(void) release_ust_app_stream(-1, &stream);
+			(void) release_ust_app_stream(-1, &stream, app);
+			if (ret == -EPIPE || ret == -LTTNG_UST_ERR_EXITING) {
+				ret = -ENOTCONN; /* Caused by app exiting. */
+				goto error_stream_unlock;
+			} else if (ret < 0) {
+				goto error_stream_unlock;
+			}
 			goto error_stream_unlock;
 		}
 
@@ -2498,7 +2717,7 @@ static int send_channel_uid_to_ust(struct buffer_reg_channel *reg_chan,
 		 * The return value is not important here. This function will output an
 		 * error if needed.
 		 */
-		(void) release_ust_app_stream(-1, &stream);
+		(void) release_ust_app_stream(-1, &stream, app);
 	}
 	ua_chan->is_sent = 1;
 
@@ -2572,7 +2791,8 @@ static int create_channel_per_uid(struct ust_app *app,
 		/*
 		 * Setup the streams and add it to the session registry.
 		 */
-		ret = setup_buffer_reg_channel(reg_uid->registry, ua_chan, reg_chan);
+		ret = setup_buffer_reg_channel(reg_uid->registry,
+				ua_chan, reg_chan, app);
 		if (ret < 0) {
 			ERR("Error setting up UST channel \"%s\"",
 				ua_chan->name);
@@ -2584,10 +2804,9 @@ static int create_channel_per_uid(struct ust_app *app,
 	/* Send buffers to the application. */
 	ret = send_channel_uid_to_ust(reg_chan, app, ua_sess, ua_chan);
 	if (ret < 0) {
-		/*
-		 * Don't report error to the console, since it may be
-		 * caused by application concurrently exiting.
-		 */
+		if (ret != -ENOTCONN) {
+			ERR("Error sending channel to application");
+		}
 		goto error;
 	}
 
@@ -2638,10 +2857,9 @@ static int create_channel_per_pid(struct ust_app *app,
 
 	ret = send_channel_pid_to_ust(app, ua_sess, ua_chan);
 	if (ret < 0) {
-		/*
-		 * Don't report error to the console, since it may be
-		 * caused by application concurrently exiting.
-		 */
+		if (ret != -ENOTCONN) {
+			ERR("Error sending channel to application");
+		}
 		goto error;
 	}
 
@@ -2655,7 +2873,8 @@ error:
  * need and send it to the application. This MUST be called with a RCU read
  * side lock acquired.
  *
- * Return 0 on success or else a negative value.
+ * Return 0 on success or else a negative value. Returns -ENOTCONN if
+ * the application exited concurrently.
  */
 static int do_create_channel(struct ust_app *app,
 		struct ltt_ust_session *usess, struct ust_app_session *ua_sess,
@@ -2714,7 +2933,8 @@ error:
  *
  * Called with UST app session lock and RCU read-side lock held.
  *
- * Return 0 on success or else a negative value.
+ * Return 0 on success or else a negative value. Returns -ENOTCONN if
+ * the application exited concurrently.
  */
 static int create_ust_app_channel(struct ust_app_session *ua_sess,
 		struct ltt_ust_channel *uchan, struct ust_app *app,
@@ -2818,7 +3038,7 @@ end:
 
 error:
 	/* Valid. Calling here is already in a read side lock */
-	delete_ust_app_event(-1, ua_event);
+	delete_ust_app_event(-1, ua_event, app);
 	return ret;
 }
 
@@ -3009,10 +3229,10 @@ struct ust_app *ust_app_create(struct ust_register_msg *msg, int sock)
 	lta->pid = msg->pid;
 	lttng_ht_node_init_ulong(&lta->pid_n, (unsigned long) lta->pid);
 	lta->sock = sock;
+	pthread_mutex_init(&lta->sock_lock, NULL);
 	lttng_ht_node_init_ulong(&lta->sock_n, (unsigned long) lta->sock);
 
 	CDS_INIT_LIST_HEAD(&lta->teardown_head);
-
 error:
 	return lta;
 }
@@ -3064,7 +3284,9 @@ int ust_app_version(struct ust_app *app)
 
 	assert(app);
 
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_tracer_version(app->sock, &app->version);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -LTTNG_UST_ERR_EXITING && ret != -EPIPE) {
 			ERR("UST app %d version failed with ret %d", app->sock, ret);
@@ -3126,6 +3348,11 @@ void ust_app_unregister(int sock)
 		 * are the only one using this list.
 		 */
 		pthread_mutex_lock(&ua_sess->lock);
+
+		if (ua_sess->deleted) {
+			pthread_mutex_unlock(&ua_sess->lock);
+			continue;
+		}
 
 		/*
 		 * Normally, this is done in the delete session process which is
@@ -3224,12 +3451,14 @@ int ust_app_list_events(struct lttng_event **events)
 			 */
 			continue;
 		}
+		pthread_mutex_lock(&app->sock_lock);
 		handle = ustctl_tracepoint_list(app->sock);
 		if (handle < 0) {
 			if (handle != -EPIPE && handle != -LTTNG_UST_ERR_EXITING) {
 				ERR("UST app list events getting handle failed for app pid %d",
 						app->pid);
 			}
+			pthread_mutex_unlock(&app->sock_lock);
 			continue;
 		}
 
@@ -3237,6 +3466,8 @@ int ust_app_list_events(struct lttng_event **events)
 					&uiter)) != -LTTNG_UST_ERR_NOENT) {
 			/* Handle ustctl error. */
 			if (ret < 0) {
+				int release_ret;
+
 				if (ret != -LTTNG_UST_ERR_EXITING && ret != -EPIPE) {
 					ERR("UST app tp list get failed for app %d with ret %d",
 							app->sock, ret);
@@ -3250,6 +3481,13 @@ int ust_app_list_events(struct lttng_event **events)
 					break;
 				}
 				free(tmp_event);
+				release_ret = ustctl_release_handle(app->sock, handle);
+				if (release_ret < 0 &&
+						release_ret != -LTTNG_UST_ERR_EXITING &&
+						release_ret != -EPIPE) {
+					ERR("Error releasing app handle for app %d with ret %d", app->sock, release_ret);
+				}
+				pthread_mutex_unlock(&app->sock_lock);
 				goto rcu_error;
 			}
 
@@ -3265,9 +3503,18 @@ int ust_app_list_events(struct lttng_event **events)
 				new_tmp_event = realloc(tmp_event,
 					new_nbmem * sizeof(struct lttng_event));
 				if (new_tmp_event == NULL) {
+					int release_ret;
+
 					PERROR("realloc ust app events");
 					free(tmp_event);
 					ret = -ENOMEM;
+					release_ret = ustctl_release_handle(app->sock, handle);
+					if (release_ret < 0 &&
+							release_ret != -LTTNG_UST_ERR_EXITING &&
+							release_ret != -EPIPE) {
+						ERR("Error releasing app handle for app %d with ret %d", app->sock, release_ret);
+					}
+					pthread_mutex_unlock(&app->sock_lock);
 					goto rcu_error;
 				}
 				/* Zero the new memory */
@@ -3282,6 +3529,11 @@ int ust_app_list_events(struct lttng_event **events)
 			tmp_event[count].pid = app->pid;
 			tmp_event[count].enabled = -1;
 			count++;
+		}
+		ret = ustctl_release_handle(app->sock, handle);
+		pthread_mutex_unlock(&app->sock_lock);
+		if (ret < 0 && ret != -LTTNG_UST_ERR_EXITING && ret != -EPIPE) {
+			ERR("Error releasing app handle for app %d with ret %d", app->sock, ret);
 		}
 	}
 
@@ -3330,12 +3582,14 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 			 */
 			continue;
 		}
+		pthread_mutex_lock(&app->sock_lock);
 		handle = ustctl_tracepoint_field_list(app->sock);
 		if (handle < 0) {
 			if (handle != -EPIPE && handle != -LTTNG_UST_ERR_EXITING) {
 				ERR("UST app list field getting handle failed for app pid %d",
 						app->pid);
 			}
+			pthread_mutex_unlock(&app->sock_lock);
 			continue;
 		}
 
@@ -3343,6 +3597,8 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 					&uiter)) != -LTTNG_UST_ERR_NOENT) {
 			/* Handle ustctl error. */
 			if (ret < 0) {
+				int release_ret;
+
 				if (ret != -LTTNG_UST_ERR_EXITING && ret != -EPIPE) {
 					ERR("UST app tp list field failed for app %d with ret %d",
 							app->sock, ret);
@@ -3356,6 +3612,13 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 					break;
 				}
 				free(tmp_event);
+				release_ret = ustctl_release_handle(app->sock, handle);
+				pthread_mutex_unlock(&app->sock_lock);
+				if (release_ret < 0 &&
+						release_ret != -LTTNG_UST_ERR_EXITING &&
+						release_ret != -EPIPE) {
+					ERR("Error releasing app handle for app %d with ret %d", app->sock, release_ret);
+				}
 				goto rcu_error;
 			}
 
@@ -3371,9 +3634,18 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 				new_tmp_event = realloc(tmp_event,
 					new_nbmem * sizeof(struct lttng_event_field));
 				if (new_tmp_event == NULL) {
+					int release_ret;
+
 					PERROR("realloc ust app event fields");
 					free(tmp_event);
 					ret = -ENOMEM;
+					release_ret = ustctl_release_handle(app->sock, handle);
+					pthread_mutex_unlock(&app->sock_lock);
+					if (release_ret &&
+							release_ret != -LTTNG_UST_ERR_EXITING &&
+							release_ret != -EPIPE) {
+						ERR("Error releasing app handle for app %d with ret %d", app->sock, release_ret);
+					}
 					goto rcu_error;
 				}
 				/* Zero the new memory */
@@ -3394,6 +3666,13 @@ int ust_app_list_event_fields(struct lttng_event_field **fields)
 			tmp_event[count].event.pid = app->pid;
 			tmp_event[count].event.enabled = -1;
 			count++;
+		}
+		ret = ustctl_release_handle(app->sock, handle);
+		pthread_mutex_unlock(&app->sock_lock);
+		if (ret < 0 &&
+				ret != -LTTNG_UST_ERR_EXITING &&
+				ret != -EPIPE) {
+			ERR("Error releasing app handle for app %d with ret %d", app->sock, ret);
 		}
 	}
 
@@ -3424,41 +3703,63 @@ void ust_app_clean_list(void)
 
 	rcu_read_lock();
 
-	cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, app, pid_n.node) {
-		ret = lttng_ht_del(ust_app_ht, &iter);
-		assert(!ret);
-		call_rcu(&app->pid_n.head, delete_ust_app_rcu);
+	if (ust_app_ht) {
+		cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, app, pid_n.node) {
+			ret = lttng_ht_del(ust_app_ht, &iter);
+			assert(!ret);
+			call_rcu(&app->pid_n.head, delete_ust_app_rcu);
+		}
 	}
 
 	/* Cleanup socket hash table */
-	cds_lfht_for_each_entry(ust_app_ht_by_sock->ht, &iter.iter, app,
-			sock_n.node) {
-		ret = lttng_ht_del(ust_app_ht_by_sock, &iter);
-		assert(!ret);
+	if (ust_app_ht_by_sock) {
+		cds_lfht_for_each_entry(ust_app_ht_by_sock->ht, &iter.iter, app,
+				sock_n.node) {
+			ret = lttng_ht_del(ust_app_ht_by_sock, &iter);
+			assert(!ret);
+		}
 	}
 
 	/* Cleanup notify socket hash table */
-	cds_lfht_for_each_entry(ust_app_ht_by_notify_sock->ht, &iter.iter, app,
-			notify_sock_n.node) {
-		ret = lttng_ht_del(ust_app_ht_by_notify_sock, &iter);
-		assert(!ret);
+	if (ust_app_ht_by_notify_sock) {
+		cds_lfht_for_each_entry(ust_app_ht_by_notify_sock->ht, &iter.iter, app,
+				notify_sock_n.node) {
+			ret = lttng_ht_del(ust_app_ht_by_notify_sock, &iter);
+			assert(!ret);
+		}
 	}
 	rcu_read_unlock();
 
 	/* Destroy is done only when the ht is empty */
-	ht_cleanup_push(ust_app_ht);
-	ht_cleanup_push(ust_app_ht_by_sock);
-	ht_cleanup_push(ust_app_ht_by_notify_sock);
+	if (ust_app_ht) {
+		ht_cleanup_push(ust_app_ht);
+	}
+	if (ust_app_ht_by_sock) {
+		ht_cleanup_push(ust_app_ht_by_sock);
+	}
+	if (ust_app_ht_by_notify_sock) {
+		ht_cleanup_push(ust_app_ht_by_notify_sock);
+	}
 }
 
 /*
  * Init UST app hash table.
  */
-void ust_app_ht_alloc(void)
+int ust_app_ht_alloc(void)
 {
 	ust_app_ht = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
+	if (!ust_app_ht) {
+		return -1;
+	}
 	ust_app_ht_by_sock = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
+	if (!ust_app_ht_by_sock) {
+		return -1;
+	}
 	ust_app_ht_by_notify_sock = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
+	if (!ust_app_ht_by_notify_sock) {
+		return -1;
+	}
+	return 0;
 }
 
 /*
@@ -3582,7 +3883,7 @@ int ust_app_disable_event_glb(struct ltt_ust_session *usess,
 {
 	int ret = 0;
 	struct lttng_ht_iter iter, uiter;
-	struct lttng_ht_node_str *ua_chan_node, *ua_event_node;
+	struct lttng_ht_node_str *ua_chan_node;
 	struct ust_app *app;
 	struct ust_app_session *ua_sess;
 	struct ust_app_channel *ua_chan;
@@ -3619,14 +3920,14 @@ int ust_app_disable_event_glb(struct ltt_ust_session *usess,
 		}
 		ua_chan = caa_container_of(ua_chan_node, struct ust_app_channel, node);
 
-		lttng_ht_lookup(ua_chan->events, (void *)uevent->attr.name, &uiter);
-		ua_event_node = lttng_ht_iter_get_node_str(&uiter);
-		if (ua_event_node == NULL) {
+		ua_event = find_ust_app_event(ua_chan->events, uevent->attr.name,
+				uevent->filter, uevent->attr.loglevel,
+				uevent->exclusion);
+		if (ua_event == NULL) {
 			DBG2("Event %s not found in channel %s for app pid %d."
 					"Skipping", uevent->attr.name, uchan->name, app->pid);
 			continue;
 		}
-		ua_event = caa_container_of(ua_event_node, struct ust_app_event, node);
 
 		ret = disable_ust_app_event(ua_sess, ua_event, app);
 		if (ret < 0) {
@@ -3669,6 +3970,11 @@ int ust_app_create_channel_glb(struct ltt_ust_session *usess,
 			 */
 			continue;
 		}
+		if (!trace_ust_pid_tracker_lookup(usess, app->pid)) {
+			/* Skip. */
+			continue;
+		}
+
 		/*
 		 * Create session on the tracer side and add it to app session HT. Note
 		 * that if session exist, it will simply return a pointer to the ust
@@ -3683,6 +3989,7 @@ int ust_app_create_channel_glb(struct ltt_ust_session *usess,
 				 * or a timeout on it. We can't inform the caller that for a
 				 * specific app, the session failed so lets continue here.
 				 */
+				ret = 0;	/* Not an error. */
 				continue;
 			case -ENOMEM:
 			default:
@@ -3692,6 +3999,12 @@ int ust_app_create_channel_glb(struct ltt_ust_session *usess,
 		assert(ua_sess);
 
 		pthread_mutex_lock(&ua_sess->lock);
+
+		if (ua_sess->deleted) {
+			pthread_mutex_unlock(&ua_sess->lock);
+			continue;
+		}
+
 		if (!strncmp(uchan->name, DEFAULT_METADATA_NAME,
 					sizeof(uchan->name))) {
 			copy_channel_attr_to_ustctl(&ua_sess->metadata_attr, &uchan->attr);
@@ -3703,13 +4016,22 @@ int ust_app_create_channel_glb(struct ltt_ust_session *usess,
 		}
 		pthread_mutex_unlock(&ua_sess->lock);
 		if (ret < 0) {
-			if (ret == -ENOMEM) {
-				/* No more memory is a fatal error. Stop right now. */
-				goto error_rcu_unlock;
-			}
 			/* Cleanup the created session if it's the case. */
 			if (created) {
 				destroy_app_session(app, ua_sess);
+			}
+			switch (ret) {
+			case -ENOTCONN:
+				/*
+				 * The application's socket is not valid. Either a bad socket
+				 * or a timeout on it. We can't inform the caller that for a
+				 * specific app, the session failed so lets continue here.
+				 */
+				ret = 0;	/* Not an error. */
+				continue;
+			case -ENOMEM:
+			default:
+				goto error_rcu_unlock;
 			}
 		}
 	}
@@ -3761,11 +4083,23 @@ int ust_app_enable_event_glb(struct ltt_ust_session *usess,
 
 		pthread_mutex_lock(&ua_sess->lock);
 
+		if (ua_sess->deleted) {
+			pthread_mutex_unlock(&ua_sess->lock);
+			continue;
+		}
+
 		/* Lookup channel in the ust app session */
 		lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &uiter);
 		ua_chan_node = lttng_ht_iter_get_node_str(&uiter);
-		/* If the channel is not found, there is a code flow error */
-		assert(ua_chan_node);
+		/*
+		 * It is possible that the channel cannot be found is
+		 * the channel/event creation occurs concurrently with
+		 * an application exit.
+		 */
+		if (!ua_chan_node) {
+			pthread_mutex_unlock(&ua_sess->lock);
+			continue;
+		}
 
 		ua_chan = caa_container_of(ua_chan_node, struct ust_app_channel, node);
 
@@ -3827,6 +4161,12 @@ int ust_app_create_event_glb(struct ltt_ust_session *usess,
 		}
 
 		pthread_mutex_lock(&ua_sess->lock);
+
+		if (ua_sess->deleted) {
+			pthread_mutex_unlock(&ua_sess->lock);
+			continue;
+		}
+
 		/* Lookup channel in the ust app session */
 		lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &uiter);
 		ua_chan_node = lttng_ht_iter_get_node_str(&uiter);
@@ -3878,6 +4218,11 @@ int ust_app_start_trace(struct ltt_ust_session *usess, struct ust_app *app)
 
 	pthread_mutex_lock(&ua_sess->lock);
 
+	if (ua_sess->deleted) {
+		pthread_mutex_unlock(&ua_sess->lock);
+		goto end;
+	}
+
 	/* Upon restart, we skip the setup, already done */
 	if (ua_sess->started) {
 		goto skip_setup;
@@ -3889,7 +4234,7 @@ int ust_app_start_trace(struct ltt_ust_session *usess, struct ust_app *app)
 		ret = run_as_mkdir_recursive(usess->consumer->dst.trace_path,
 				S_IRWXU | S_IRWXG, ua_sess->euid, ua_sess->egid);
 		if (ret < 0) {
-			if (ret != -EEXIST) {
+			if (errno != EEXIST) {
 				ERR("Trace directory creation error");
 				goto error_unlock;
 			}
@@ -3909,7 +4254,9 @@ int ust_app_start_trace(struct ltt_ust_session *usess, struct ust_app *app)
 
 skip_setup:
 	/* This start the UST tracing */
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_start_session(app->sock, ua_sess->handle);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("Error starting tracing for app pid: %d (ret: %d)",
@@ -3935,7 +4282,9 @@ skip_setup:
 	health_code_update();
 
 	/* Quiescent wait after starting trace */
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_wait_quiescent(app->sock);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 		ERR("UST app wait quiescent failed for app pid %d ret %d",
 				app->pid, ret);
@@ -3978,6 +4327,11 @@ int ust_app_stop_trace(struct ltt_ust_session *usess, struct ust_app *app)
 
 	pthread_mutex_lock(&ua_sess->lock);
 
+	if (ua_sess->deleted) {
+		pthread_mutex_unlock(&ua_sess->lock);
+		goto end_no_session;
+	}
+
 	/*
 	 * If started = 0, it means that stop trace has been called for a session
 	 * that was never started. It's possible since we can have a fail start
@@ -3991,7 +4345,9 @@ int ust_app_stop_trace(struct ltt_ust_session *usess, struct ust_app *app)
 	health_code_update();
 
 	/* This inhibits UST tracing */
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_stop_session(app->sock, ua_sess->handle);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("Error stopping tracing for app pid: %d (ret: %d)",
@@ -4011,7 +4367,9 @@ int ust_app_stop_trace(struct ltt_ust_session *usess, struct ust_app *app)
 	health_code_update();
 
 	/* Quiescent wait after stopping trace */
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_wait_quiescent(app->sock);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 		ERR("UST app wait quiescent failed for app pid %d ret %d",
 				app->pid, ret);
@@ -4058,6 +4416,10 @@ int ust_app_flush_app_session(struct ust_app *app,
 
 	pthread_mutex_lock(&ua_sess->lock);
 
+	if (ua_sess->deleted) {
+		goto end_deleted;
+	}
+
 	health_code_update();
 
 	/* Flushing buffers */
@@ -4087,6 +4449,7 @@ int ust_app_flush_app_session(struct ust_app *app,
 
 	health_code_update();
 
+end_deleted:
 	pthread_mutex_unlock(&ua_sess->lock);
 
 end_not_compatible:
@@ -4167,7 +4530,6 @@ int ust_app_flush_session(struct ltt_ust_session *usess)
 		break;
 	}
 
-end_no_session:
 	rcu_read_unlock();
 	health_code_update();
 	return ret;
@@ -4205,7 +4567,9 @@ static int destroy_trace(struct ltt_ust_session *usess, struct ust_app *app)
 	health_code_update();
 
 	/* Quiescent wait after stopping trace */
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_wait_quiescent(app->sock);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0 && ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 		ERR("UST app wait quiescent failed for app pid %d ret %d",
 				app->pid, ret);
@@ -4297,49 +4661,34 @@ int ust_app_destroy_trace_all(struct ltt_ust_session *usess)
 	return 0;
 }
 
-/*
- * Add channels/events from UST global domain to registered apps at sock.
- */
-void ust_app_global_update(struct ltt_ust_session *usess, int sock)
+static
+void ust_app_global_create(struct ltt_ust_session *usess, struct ust_app *app)
 {
 	int ret = 0;
 	struct lttng_ht_iter iter, uiter;
-	struct ust_app *app;
 	struct ust_app_session *ua_sess = NULL;
 	struct ust_app_channel *ua_chan;
 	struct ust_app_event *ua_event;
 	struct ust_app_ctx *ua_ctx;
+	int is_created = 0;
 
-	assert(usess);
-	assert(sock >= 0);
-
-	DBG2("UST app global update for app sock %d for session id %" PRIu64, sock,
-			usess->id);
-
-	rcu_read_lock();
-
-	app = ust_app_find_by_sock(sock);
-	if (app == NULL) {
-		/*
-		 * Application can be unregistered before so this is possible hence
-		 * simply stopping the update.
-		 */
-		DBG3("UST app update failed to find app sock %d", sock);
-		goto error;
-	}
-
-	if (!app->compatible) {
-		goto error;
-	}
-
-	ret = create_ust_app_session(usess, app, &ua_sess, NULL);
+	ret = create_ust_app_session(usess, app, &ua_sess, &is_created);
 	if (ret < 0) {
 		/* Tracer is probably gone or ENOMEM. */
 		goto error;
 	}
+	if (!is_created) {
+		/* App session already created. */
+		goto end;
+	}
 	assert(ua_sess);
 
 	pthread_mutex_lock(&ua_sess->lock);
+
+	if (ua_sess->deleted) {
+		pthread_mutex_unlock(&ua_sess->lock);
+		goto end;
+	}
 
 	/*
 	 * We can iterate safely here over all UST app session since the create ust
@@ -4349,11 +4698,14 @@ void ust_app_global_update(struct ltt_ust_session *usess, int sock)
 	cds_lfht_for_each_entry(ua_sess->channels->ht, &iter.iter, ua_chan,
 			node.node) {
 		ret = do_create_channel(app, usess, ua_sess, ua_chan);
-		if (ret < 0) {
+		if (ret < 0 && ret != -ENOTCONN) {
 			/*
-			 * Stop everything. On error, the application failed, no more
-			 * file descriptor are available or ENOMEM so stopping here is
-			 * the only thing we can do for now.
+			 * Stop everything. On error, the application
+			 * failed, no more file descriptor are available
+			 * or ENOMEM so stopping here is the only thing
+			 * we can do for now. The only exception is
+			 * -ENOTCONN, which indicates that the application
+			 * has exit.
 			 */
 			goto error_unlock;
 		}
@@ -4390,9 +4742,8 @@ void ust_app_global_update(struct ltt_ust_session *usess, int sock)
 
 		DBG2("UST trace started for app pid %d", app->pid);
 	}
-
+end:
 	/* Everything went well at this point. */
-	rcu_read_unlock();
 	return;
 
 error_unlock:
@@ -4401,8 +4752,58 @@ error:
 	if (ua_sess) {
 		destroy_app_session(app, ua_sess);
 	}
-	rcu_read_unlock();
 	return;
+}
+
+static
+void ust_app_global_destroy(struct ltt_ust_session *usess, struct ust_app *app)
+{
+	struct ust_app_session *ua_sess;
+
+	ua_sess = lookup_session_by_app(usess, app);
+	if (ua_sess == NULL) {
+		return;
+	}
+	destroy_app_session(app, ua_sess);
+}
+
+/*
+ * Add channels/events from UST global domain to registered apps at sock.
+ *
+ * Called with session lock held.
+ * Called with RCU read-side lock held.
+ */
+void ust_app_global_update(struct ltt_ust_session *usess, struct ust_app *app)
+{
+	assert(usess);
+
+	DBG2("UST app global update for app sock %d for session id %" PRIu64,
+			app->sock, usess->id);
+
+	if (!app->compatible) {
+		return;
+	}
+
+	if (trace_ust_pid_tracker_lookup(usess, app->pid)) {
+		ust_app_global_create(usess, app);
+	} else {
+		ust_app_global_destroy(usess, app);
+	}
+}
+
+/*
+ * Called with session lock held.
+ */
+void ust_app_global_update_all(struct ltt_ust_session *usess)
+{
+	struct lttng_ht_iter iter;
+	struct ust_app *app;
+
+	rcu_read_lock();
+	cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, app, pid_n.node) {
+		ust_app_global_update(usess, app);
+	}
+	rcu_read_unlock();
 }
 
 /*
@@ -4434,6 +4835,12 @@ int ust_app_add_ctx_channel_glb(struct ltt_ust_session *usess,
 		}
 
 		pthread_mutex_lock(&ua_sess->lock);
+
+		if (ua_sess->deleted) {
+			pthread_mutex_unlock(&ua_sess->lock);
+			continue;
+		}
+
 		/* Lookup channel in the ust app session */
 		lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &uiter);
 		ua_chan_node = lttng_ht_iter_get_node_str(&uiter);
@@ -4492,6 +4899,12 @@ int ust_app_enable_event_pid(struct ltt_ust_session *usess,
 	}
 
 	pthread_mutex_lock(&ua_sess->lock);
+
+	if (ua_sess->deleted) {
+		ret = 0;
+		goto end_unlock;
+	}
+
 	/* Lookup channel in the ust app session */
 	lttng_ht_lookup(ua_sess->channels, (void *)uchan->name, &iter);
 	ua_chan_node = lttng_ht_iter_get_node_str(&iter);
@@ -4543,7 +4956,9 @@ int ust_app_calibrate_glb(struct lttng_ust_calibrate *calibrate)
 
 		health_code_update();
 
+		pthread_mutex_lock(&app->sock_lock);
 		ret = ustctl_calibrate(app->sock, calibrate);
+		pthread_mutex_unlock(&app->sock_lock);
 		if (ret < 0) {
 			switch (ret) {
 			case -ENOSYS:
@@ -4772,8 +5187,8 @@ error_rcu_unlock:
  * On success 0 is returned else a negative value.
  */
 static int add_event_ust_registry(int sock, int sobjd, int cobjd, char *name,
-		char *sig, size_t nr_fields, struct ustctl_field *fields, int loglevel,
-		char *model_emf_uri)
+		char *sig, size_t nr_fields, struct ustctl_field *fields,
+		int loglevel_value, char *model_emf_uri)
 {
 	int ret, ret_code;
 	uint32_t event_id = 0;
@@ -4828,9 +5243,9 @@ static int add_event_ust_registry(int sock, int sobjd, int cobjd, char *name,
 	 * three variables MUST NOT be read/write after this.
 	 */
 	ret_code = ust_registry_create_event(registry, chan_reg_key,
-			sobjd, cobjd, name, sig, nr_fields, fields, loglevel,
-			model_emf_uri, ua_sess->buffer_type, &event_id,
-			app);
+			sobjd, cobjd, name, sig, nr_fields, fields,
+			loglevel_value, model_emf_uri, ua_sess->buffer_type,
+			&event_id, app);
 
 	/*
 	 * The return value is returned to ustctl so in case of an error, the
@@ -4886,15 +5301,16 @@ int ust_app_recv_notify(int sock)
 	switch (cmd) {
 	case USTCTL_NOTIFY_CMD_EVENT:
 	{
-		int sobjd, cobjd, loglevel;
+		int sobjd, cobjd, loglevel_value;
 		char name[LTTNG_UST_SYM_NAME_LEN], *sig, *model_emf_uri;
 		size_t nr_fields;
 		struct ustctl_field *fields;
 
 		DBG2("UST app ustctl register event received");
 
-		ret = ustctl_recv_register_event(sock, &sobjd, &cobjd, name, &loglevel,
-				&sig, &nr_fields, &fields, &model_emf_uri);
+		ret = ustctl_recv_register_event(sock, &sobjd, &cobjd, name,
+				&loglevel_value, &sig, &nr_fields, &fields,
+				&model_emf_uri);
 		if (ret < 0) {
 			if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 				ERR("UST app recv event failed with ret %d", ret);
@@ -4911,7 +5327,7 @@ int ust_app_recv_notify(int sock)
 		 * to the this function.
 		 */
 		ret = add_event_ust_registry(sock, sobjd, cobjd, name, sig, nr_fields,
-				fields, loglevel, model_emf_uri);
+				fields, loglevel_value, model_emf_uri);
 		if (ret < 0) {
 			goto error;
 		}

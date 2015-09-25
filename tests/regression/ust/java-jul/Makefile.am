@@ -1,24 +1,15 @@
-if BUILD_JAVA_AGENT
+JAVAROOT = .
 
 noinst_SCRIPTS = test_java_jul JTestLTTng.java
 EXTRA_DIST = test_java_jul JTestLTTng.java
 
-if HAVE_JAVA_JDK
-JCC=$(JAVA_JDK)/bin/javac
-else
-JCC=javac
-endif
+if TEST_JAVA_JUL_AGENT
+dist_noinst_JAVA = JTestLTTng.java
+endif # TEST_JAVA_JUL_AGENT
 
-AGENT_JAR_FILE=$(java_agent_jar_path)
+all-local: static_file
 
-all-local: JTestLTTng.class
-
-%.class: %.java
-	$(JCC) -d "$(builddir)" -cp "$(AGENT_JAR_FILE):." $<
-
-JTestLTTng.class: JTestLTTng.java
-
-all-local:
+static_file:
 	@if [ x"$(srcdir)" != x"$(builddir)" ]; then \
 		for script in $(EXTRA_DIST); do \
 			cp -f $(srcdir)/$$script $(builddir); \
@@ -33,4 +24,3 @@ clean-local:
 		done; \
 	fi
 
-endif # BUILD_JAVA_AGENT
