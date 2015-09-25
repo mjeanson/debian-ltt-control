@@ -3,7 +3,7 @@ Section: libs
 Priority: extra
 Maintainer: Jon Bernard <jbernard@debian.org>
 Build-Depends: debhelper (>= 9), libpopt-dev, libxml2-dev,
-  bison, dh-autoreconf, bash-completion,
+  bison, dh-autoreconf, bash-completion, python3-all-dev, swig (>= 2.0),
   liburcu-dev (>= 0.8.4),
   liblttng-ust-dev (>= 2.7.0~),
   liblttng-ust-dev (<< 2.8.0~)
@@ -11,6 +11,7 @@ Standards-Version: 3.9.6
 Vcs-Git: git://anonscm.debian.org/collab-maint/ltt-control.git
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=collab-maint/ltt-control.git;a=summary
 Homepage: http://lttng.org/
+X-Python3-Version: >= 3.0
 
 Package: lttng-tools
 Section: utils
@@ -54,3 +55,14 @@ Description: LTTng control and utility library (development files)
  .
  This package provides the development files for liblttng-ctl. This allows
  implementing trace control in external applications.
+
+Package: python3-lttng
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ${python3:Depends}
+Description: LTTng control and utility python bindings
+ The LTTng project aims at providing highly efficient tracing tools for Linux.
+ Its tracers help tracking down performance issues and debugging problems
+ involving multiple concurrent processes and threads. Tracing across multiple
+ systems is also possible.
+ .
+ This package provides the Python bindings to lttng.

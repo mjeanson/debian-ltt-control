@@ -7,13 +7,31 @@ ifneq ($(DEB_BUILD_ARCH), armel)
     export DEB_BUILD_MAINT_OPTIONS := hardening=+all
 endif
 
+PY3V := $(shell py3versions -vr)
+
 %:
-	dh $@ --with autoreconf,bash-completion
+	dh $@ --with autoreconf,bash-completion,python3
 
 override_dh_auto_build:
 	dh_auto_build -- V=1
 
 override_dh_auto_test:
+
+override_dh_auto_install:
+	dh_auto_install
+	for pv in $(PY3V); do \
+	  PYTHON=python$${pv} PYTHON_CONFIG=python$${pv}-config \
+	    dh_auto_configure -- --enable-python-bindings; \
+	  cd extras/bindings/swig/python; \
+	  make clean; \
+	  make install DESTDIR="$(CURDIR)/debian/tmp"; \
+	  mv "$(CURDIR)/debian/tmp/usr/lib/python$${pv}/site-packages" \
+	     "$(CURDIR)/debian/tmp/usr/lib/python$${pv}/dist-packages"; \
+	  find "$(CURDIR)/debian/tmp/usr/lib/python$${pv}" -type l -delete; \
+	  mv "$(CURDIR)/debian/tmp/usr/lib/python$${pv}/dist-packages/_lttng.so.0.0.0" \
+	     "$(CURDIR)/debian/tmp/usr/lib/python$${pv}/dist-packages/_lttng.so"; \
+	  cd $(CURDIR); \
+	done
 
 override_dh_installinit:
 	dh_installinit --name=lttng-sessiond
