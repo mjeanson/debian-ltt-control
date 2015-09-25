@@ -1,14 +1,12 @@
 liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  _lttng_create_session_ext@Base 2.3.0
- cds_lfht_mm_chunk@Base 2.3.0
- cds_lfht_mm_mmap@Base 2.3.0
- cds_lfht_mm_order@Base 2.3.0
  config_buffer_type_global@Base 2.5.0
  config_buffer_type_per_pid@Base 2.5.0
  config_buffer_type_per_uid@Base 2.5.0
  config_domain_type_jul@Base 2.5.0
  config_domain_type_kernel@Base 2.5.0
  config_domain_type_log4j@Base 2.6.0
+ config_domain_type_python@Base 2.7.0
  config_domain_type_ust@Base 2.5.0
  config_element_address@Base 2.5.0
  config_element_attributes@Base 2.5.0
@@ -44,18 +42,25 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  config_element_overwrite_mode@Base 2.5.0
  config_element_path@Base 2.5.0
  config_element_perf@Base 2.5.0
+ config_element_pid@Base 2.7.0
+ config_element_pid_tracker@Base 2.7.0
+ config_element_pids@Base 2.7.0
  config_element_probe_attributes@Base 2.5.0
  config_element_read_timer_interval@Base 2.5.0
  config_element_session@Base 2.5.0
  config_element_sessions@Base 2.5.0
+ config_element_shared_memory_path@Base 2.7.0
  config_element_snapshot_mode@Base 2.5.0
  config_element_snapshot_outputs@Base 2.5.0
  config_element_started@Base 2.5.0
  config_element_subbuf_size@Base 2.5.0
  config_element_switch_timer_interval@Base 2.5.0
  config_element_symbol_name@Base 2.5.0
+ config_element_target_pid@Base 2.7.0
+ config_element_targets@Base 2.7.0
  config_element_tracefile_count@Base 2.5.0
  config_element_tracefile_size@Base 2.5.0
+ config_element_trackers@Base 2.7.0
  config_element_type@Base 2.5.0
  config_event_context_hostname@Base 2.5.0
  config_event_context_ip@Base 2.5.0
@@ -104,31 +109,13 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  default_ust_uid_channel_subbuf_size@Base 2.3.0
  error_log_time@Base 2.5.0
  lttcomm_inet_tcp_timeout@Base 2.3.0
- lttng__cds_lfht_new@Base 2.3.0
  lttng_add_context@Base 2.3.0
  lttng_calibrate@Base 2.3.0
- lttng_cds_lfht_add@Base 2.3.0
- lttng_cds_lfht_add_replace@Base 2.3.0
- lttng_cds_lfht_add_unique@Base 2.3.0
- lttng_cds_lfht_count_nodes@Base 2.3.0
- lttng_cds_lfht_del@Base 2.3.0
- lttng_cds_lfht_destroy@Base 2.3.0
- lttng_cds_lfht_first@Base 2.3.0
- lttng_cds_lfht_fls_ulong@Base 2.3.0
- lttng_cds_lfht_get_count_order_u32@Base 2.3.0
- lttng_cds_lfht_get_count_order_ulong@Base 2.3.0
- lttng_cds_lfht_is_node_deleted@Base 2.3.0
- lttng_cds_lfht_lookup@Base 2.3.0
- lttng_cds_lfht_next@Base 2.3.0
- lttng_cds_lfht_next_duplicate@Base 2.3.0
- lttng_cds_lfht_replace@Base 2.3.0
- lttng_cds_lfht_resize@Base 2.3.0
  lttng_channel_set_default_attr@Base 2.3.0
  lttng_create_handle@Base 2.3.0
  lttng_create_session@Base 2.3.0
  lttng_create_session_live@Base 2.4.0~rc4
  lttng_create_session_snapshot@Base 2.3.0
- lttng_daemonize@Base 2.4.0~rc4
  lttng_data_pending@Base 2.3.0
  lttng_destroy_handle@Base 2.3.0
  lttng_destroy_session@Base 2.3.0
@@ -151,36 +138,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_health_state@Base 2.4.0~rc4
  lttng_health_thread_name@Base 2.4.0~rc4
  lttng_health_thread_state@Base 2.4.0~rc4
- lttng_ht_add_replace_u64@Base 2.3.0
- lttng_ht_add_replace_ulong@Base 2.3.0
- lttng_ht_add_str@Base 2.4.0~rc4
- lttng_ht_add_u64@Base 2.3.0
- lttng_ht_add_ulong@Base 2.3.0
- lttng_ht_add_unique_str@Base 2.3.0
- lttng_ht_add_unique_two_u64@Base 2.4.0~rc4
- lttng_ht_add_unique_u64@Base 2.3.0
- lttng_ht_add_unique_ulong@Base 2.3.0
- lttng_ht_del@Base 2.3.0
- lttng_ht_destroy@Base 2.3.0
- lttng_ht_get_count@Base 2.3.0
- lttng_ht_get_first@Base 2.3.0
- lttng_ht_get_next@Base 2.3.0
- lttng_ht_iter_get_node_str@Base 2.3.0
- lttng_ht_iter_get_node_two_u64@Base 2.4.0~rc4
- lttng_ht_iter_get_node_u64@Base 2.3.0
- lttng_ht_iter_get_node_ulong@Base 2.3.0
- lttng_ht_lookup@Base 2.3.0
- lttng_ht_new@Base 2.3.0
- lttng_ht_node_free_str@Base 2.3.0
- lttng_ht_node_free_two_u64@Base 2.4.0~rc4
- lttng_ht_node_free_u64@Base 2.3.0
- lttng_ht_node_free_ulong@Base 2.3.0
- lttng_ht_node_init_str@Base 2.3.0
- lttng_ht_node_init_two_u64@Base 2.4.0~rc4
- lttng_ht_node_init_u64@Base 2.3.0
- lttng_ht_node_init_ulong@Base 2.3.0
  lttng_ht_seed@Base 2.3.0
- lttng_libc_state_lock@Base 2.3.0
  lttng_list_channels@Base 2.3.0
  lttng_list_domains@Base 2.3.0
  lttng_list_events@Base 2.3.0
@@ -188,6 +146,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_list_syscalls@Base 2.6.0
  lttng_list_tracepoint_fields@Base 2.3.0
  lttng_list_tracepoints@Base 2.3.0
+ lttng_list_tracker_pids@Base 2.7.0
  lttng_load_session@Base 2.5.0
  lttng_load_session_attr_create@Base 2.5.0
  lttng_load_session_attr_destroy@Base 2.5.0
@@ -200,14 +159,6 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_opt_mi@Base 2.6.0
  lttng_opt_quiet@Base 2.3.0
  lttng_opt_verbose@Base 2.3.0
- lttng_pipe_close@Base 2.3.0
- lttng_pipe_destroy@Base 2.3.0
- lttng_pipe_open@Base 2.3.0
- lttng_pipe_read@Base 2.3.0
- lttng_pipe_read_close@Base 2.3.0
- lttng_pipe_write@Base 2.3.0
- lttng_pipe_write_close@Base 2.3.0
- lttng_read@Base 2.4.0~rc4
  lttng_register_consumer@Base 2.3.0
  lttng_save_session@Base 2.5.0
  lttng_save_session_attr_create@Base 2.5.0
@@ -220,6 +171,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_save_session_attr_set_session_name@Base 2.5.0
  lttng_session_daemon_alive@Base 2.3.0
  lttng_set_consumer_url@Base 2.3.0
+ lttng_set_session_shm_path@Base 2.7.0
  lttng_set_tracing_group@Base 2.3.0
  lttng_snapshot_add_output@Base 2.3.0
  lttng_snapshot_del_output@Base 2.3.0
@@ -243,7 +195,8 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_stop_tracing@Base 2.3.0
  lttng_stop_tracing_no_wait@Base 2.3.0
  lttng_strerror@Base 2.3.0
- lttng_write@Base 2.4.0~rc4
+ lttng_track_pid@Base 2.7.0
+ lttng_untrack_pid@Base 2.7.0
  lttng_yy_create_buffer@Base 2.3.0
  lttng_yy_delete_buffer@Base 2.3.0
  lttng_yy_flush_buffer@Base 2.3.0
@@ -302,6 +255,8 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  mi_lttng_element_command_start@Base 2.6.0
  mi_lttng_element_command_stop@Base 2.6.0
  mi_lttng_element_command_success@Base 2.6.0
+ mi_lttng_element_command_track@Base 2.7.0
+ mi_lttng_element_command_untrack@Base 2.7.0
  mi_lttng_element_command_version@Base 2.6.0
  mi_lttng_element_empty@Base 2.6.0
  mi_lttng_element_event_field@Base 2.6.0
@@ -310,9 +265,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  mi_lttng_element_load@Base 2.6.0
  mi_lttng_element_nowrite@Base 2.6.0
  mi_lttng_element_perf_counter_context@Base 2.6.0
- mi_lttng_element_pid@Base 2.6.0
  mi_lttng_element_pid_id@Base 2.6.0
- mi_lttng_element_pids@Base 2.6.0
  mi_lttng_element_save@Base 2.6.0
  mi_lttng_element_snapshot_ctrl_url@Base 2.6.0
  mi_lttng_element_snapshot_data_url@Base 2.6.0
@@ -321,6 +274,9 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  mi_lttng_element_snapshot_session_name@Base 2.6.0
  mi_lttng_element_snapshots@Base 2.6.0
  mi_lttng_element_success@Base 2.6.0
+ mi_lttng_element_track_untrack_all_wildcard@Base 2.7.0
+ mi_lttng_element_track_untrack_pid_target@Base 2.7.0
+ mi_lttng_element_track_untrack_targets@Base 2.7.0
  mi_lttng_element_type_enum@Base 2.6.0
  mi_lttng_element_type_float@Base 2.6.0
  mi_lttng_element_type_integer@Base 2.6.0
@@ -366,6 +322,12 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  mi_lttng_loglevel_str_log4j_trace@Base 2.6.0
  mi_lttng_loglevel_str_log4j_warn@Base 2.6.0
  mi_lttng_loglevel_str_notice@Base 2.6.0
+ mi_lttng_loglevel_str_python_critical@Base 2.7.0
+ mi_lttng_loglevel_str_python_debug@Base 2.7.0
+ mi_lttng_loglevel_str_python_error@Base 2.7.0
+ mi_lttng_loglevel_str_python_info@Base 2.7.0
+ mi_lttng_loglevel_str_python_notset@Base 2.7.0
+ mi_lttng_loglevel_str_python_warning@Base 2.7.0
  mi_lttng_loglevel_str_unknown@Base 2.6.0
  mi_lttng_loglevel_str_warning@Base 2.6.0
  mi_lttng_loglevel_type_all@Base 2.6.0
