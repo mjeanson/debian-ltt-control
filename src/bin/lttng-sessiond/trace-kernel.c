@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,25 +59,78 @@ struct ltt_kernel_channel *trace_kernel_get_channel_by_name(
 }
 
 /*
- * Find the event name for the given channel.
+ * Find the event for the given channel.
  */
-struct ltt_kernel_event *trace_kernel_get_event_by_name(
-		char *name, struct ltt_kernel_channel *channel)
+struct ltt_kernel_event *trace_kernel_find_event(
+		char *name, struct ltt_kernel_channel *channel,
+		enum lttng_event_type type,
+		struct lttng_filter_bytecode *filter)
 {
 	struct ltt_kernel_event *ev;
+	int found = 0;
 
 	assert(name);
 	assert(channel);
 
 	cds_list_for_each_entry(ev, &channel->events_list.head, list) {
-		if (strcmp(name, ev->event->name) == 0) {
-			DBG("Found event by name %s for channel %s", name,
-					channel->channel->name);
-			return ev;
+		if (type != LTTNG_EVENT_ALL && ev->type != type) {
+			continue;
 		}
+		if (strcmp(name, ev->event->name)) {
+			continue;
+		}
+		if ((ev->filter && !filter) || (!ev->filter && filter)) {
+			continue;
+		}
+		if (ev->filter && filter) {
+			if (ev->filter->len != filter->len ||
+					memcmp(ev->filter->data, filter->data,
+						filter->len) != 0) {
+				continue;
+			}
+		}
+		found = 1;
+		break;
 	}
+	if (found) {
+		DBG("Found event %s for channel %s", name,
+			channel->channel->name);
+		return ev;
+	} else {
+		return NULL;
+	}
+}
 
-	return NULL;
+/*
+ * Find the event name for the given channel.
+ */
+struct ltt_kernel_event *trace_kernel_get_event_by_name(
+		char *name, struct ltt_kernel_channel *channel,
+		enum lttng_event_type type)
+{
+	struct ltt_kernel_event *ev;
+	int found = 0;
+
+	assert(name);
+	assert(channel);
+
+	cds_list_for_each_entry(ev, &channel->events_list.head, list) {
+		if (type != LTTNG_EVENT_ALL && ev->type != type) {
+			continue;
+		}
+		if (strcmp(name, ev->event->name)) {
+			continue;
+		}
+		found = 1;
+		break;
+	}
+	if (found) {
+		DBG("Found event %s for channel %s", name,
+			channel->channel->name);
+		return ev;
+	} else {
+		return NULL;
+	}
 }
 
 /*
@@ -107,14 +161,6 @@ struct ltt_kernel_session *trace_kernel_create_session(void)
 	if (lks->consumer == NULL) {
 		goto error;
 	}
-
-	/*
-	 * The tmp_consumer stays NULL until a set_consumer_uri command is
-	 * executed. At this point, the consumer should be nullify until an
-	 * enable_consumer command. This assignment is symbolic since we've zmalloc
-	 * the struct.
-	 */
-	lks->tmp_consumer = NULL;
 
 	return lks;
 
@@ -204,10 +250,12 @@ error:
 
 /*
  * Allocate and initialize a kernel event. Set name and event type.
+ * We own filter_expression, and filter.
  *
  * Return pointer to structure or NULL.
  */
-struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev)
+struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
+		char *filter_expression, struct lttng_filter_bytecode *filter)
 {
 	struct ltt_kernel_event *lke;
 	struct lttng_kernel_event *attr;
@@ -266,10 +314,14 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev)
 	lke->fd = -1;
 	lke->event = attr;
 	lke->enabled = 1;
+	lke->filter_expression = filter_expression;
+	lke->filter = filter;
 
 	return lke;
 
 error:
+	free(filter_expression);
+	free(filter);
 	free(lke);
 	free(attr);
 	return NULL;
@@ -397,6 +449,9 @@ void trace_kernel_destroy_event(struct ltt_kernel_event *event)
 	/* Remove from event list */
 	cds_list_del(&event->list);
 
+	free(event->filter_expression);
+	free(event->filter);
+
 	free(event->event);
 	free(event);
 }
@@ -515,8 +570,7 @@ void trace_kernel_destroy_session(struct ltt_kernel_session *session)
 	}
 
 	/* Wipe consumer output object */
-	consumer_destroy_output(session->consumer);
-	consumer_destroy_output(session->tmp_consumer);
+	consumer_output_put(session->consumer);
 
 	free(session);
 }

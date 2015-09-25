@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <popt.h>
 #include <stdio.h>
@@ -47,25 +48,19 @@ static char *opt_session_name;
 static int opt_userspace;
 static int opt_jul;
 static int opt_log4j;
+static int opt_python;
 static int opt_enable_all;
 static char *opt_probe;
 static char *opt_function;
-static char *opt_function_entry_symbol;
 static char *opt_channel_name;
 static char *opt_filter;
 static char *opt_exclude;
-#if 0
-/* Not implemented yet */
-static char *opt_cmd_name;
-static pid_t opt_pid;
-#endif
 
 enum {
 	OPT_HELP = 1,
 	OPT_TRACEPOINT,
 	OPT_PROBE,
 	OPT_FUNCTION,
-	OPT_FUNCTION_ENTRY,
 	OPT_SYSCALL,
 	OPT_USERSPACE,
 	OPT_LOGLEVEL,
@@ -88,16 +83,10 @@ static struct poptOption long_options[] = {
 	{"userspace",      'u', POPT_ARG_NONE, 0, OPT_USERSPACE, 0, 0},
 	{"jul",            'j', POPT_ARG_VAL, &opt_jul, 1, 0, 0},
 	{"log4j",          'l', POPT_ARG_VAL, &opt_log4j, 1, 0, 0},
+	{"python",         'p', POPT_ARG_VAL, &opt_python, 1, 0, 0},
 	{"tracepoint",     0,   POPT_ARG_NONE, 0, OPT_TRACEPOINT, 0, 0},
 	{"probe",          0,   POPT_ARG_STRING, &opt_probe, OPT_PROBE, 0, 0},
 	{"function",       0,   POPT_ARG_STRING, &opt_function, OPT_FUNCTION, 0, 0},
-#if 0
-	/*
-	 * Currently removed from lttng kernel tracer. Removed from
-	 * lttng UI to discourage its use.
-	 */
-	{"function:entry", 0,   POPT_ARG_STRING, &opt_function_entry_symbol, OPT_FUNCTION_ENTRY, 0, 0},
-#endif
 	{"syscall",        0,   POPT_ARG_NONE, 0, OPT_SYSCALL, 0, 0},
 	{"loglevel",       0,     POPT_ARG_STRING, 0, OPT_LOGLEVEL, 0, 0},
 	{"loglevel-only",  0,     POPT_ARG_STRING, 0, OPT_LOGLEVEL_ONLY, 0, 0},
@@ -112,7 +101,7 @@ static struct poptOption long_options[] = {
  */
 static void usage(FILE *ofp)
 {
-	fprintf(ofp, "usage: lttng enable-event NAME[,NAME2,...] [-k|-u] [OPTIONS] \n");
+	fprintf(ofp, "usage: lttng enable-event NAME[,NAME2,...] (-k | -u | -j | -l | -p) [OPTIONS] \n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Options:\n");
 	fprintf(ofp, "  -h, --help               Show this help\n");
@@ -120,10 +109,11 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "  -s, --session NAME       Apply to session name\n");
 	fprintf(ofp, "  -c, --channel NAME       Apply to this channel\n");
 	fprintf(ofp, "  -a, --all                Enable all tracepoints and syscalls\n");
-	fprintf(ofp, "  -k, --kernel             Apply for the kernel tracer\n");
+	fprintf(ofp, "  -k, --kernel             Apply to the kernel tracer\n");
 	fprintf(ofp, "  -u, --userspace          Apply to the user-space tracer\n");
-	fprintf(ofp, "  -j, --jul                Apply for Java application using JUL\n");
+	fprintf(ofp, "  -j, --jul                Apply to Java application using JUL\n");
 	fprintf(ofp, "  -l, --log4j              Apply for Java application using LOG4j\n");
+	fprintf(ofp, "  -p, --python             Apply for Python application\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Event options:\n");
 	fprintf(ofp, "    --tracepoint           Tracepoint event (default)\n");
@@ -140,15 +130,11 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "                           Dynamic function entry/return probe.\n");
 	fprintf(ofp, "                           Addr and offset can be octal (0NNN...),\n");
 	fprintf(ofp, "                           decimal (NNN...) or hexadecimal (0xNNN...)\n");
-#if 0
-	fprintf(ofp, "    --function:entry symbol\n");
-	fprintf(ofp, "                           Function tracer event\n");
-#endif
 	fprintf(ofp, "    --syscall              System call event\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "    --loglevel name\n");
 	fprintf(ofp, "                           Tracepoint loglevel range from 0 to loglevel.\n");
-	fprintf(ofp, "                           For JUL/LOG4j domain, see the table below for the range values.\n");
+	fprintf(ofp, "                           For JUL/LOG4j/Python domains, see the table below for the range values.\n");
 	fprintf(ofp, "    --loglevel-only name\n");
 	fprintf(ofp, "                           Tracepoint loglevel (only this loglevel)\n");
 	fprintf(ofp, "\n");
@@ -196,6 +182,15 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "                               LOG4J_TRACE          = %d\n", LTTNG_LOGLEVEL_LOG4J_TRACE);
 	fprintf(ofp, "                               LOG4J_ALL            = INT32_MIN\n");
 	fprintf(ofp, "                               (shortcuts such as \"severe\" are allowed)\n");
+	fprintf(ofp, "\n");
+	fprintf(ofp, "                           Available Python domain loglevels:\n");
+	fprintf(ofp, "                               PYTHON_CRITICAL      = %d\n", LTTNG_LOGLEVEL_PYTHON_CRITICAL);
+	fprintf(ofp, "                               PYTHON_ERROR         = %d\n", LTTNG_LOGLEVEL_PYTHON_ERROR);
+	fprintf(ofp, "                               PYTHON_WARNING       = %d\n", LTTNG_LOGLEVEL_PYTHON_WARNING);
+	fprintf(ofp, "                               PYTHON_INFO          = %d\n", LTTNG_LOGLEVEL_PYTHON_INFO);
+	fprintf(ofp, "                               PYTHON_DEBUG         = %d\n", LTTNG_LOGLEVEL_PYTHON_DEBUG);
+	fprintf(ofp, "                               PYTHON_NOTSET        = %d\n", LTTNG_LOGLEVEL_PYTHON_NOTSET);
+	fprintf(ofp, "                               (shortcuts such as \"critical\" are allowed)\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "  -f, --filter \'expression\'\n");
 	fprintf(ofp, "                           Filter expression on event fields and context.\n");
@@ -321,6 +316,10 @@ static int loglevel_log4j_str_to_value(const char *inputstr)
 	int i = 0;
 	char str[LTTNG_SYMBOL_NAME_LEN];
 
+	if (!inputstr || strlen(inputstr) == 0) {
+		return -1;
+	}
+
 	/*
 	 * Loop up to LTTNG_SYMBOL_NAME_LEN minus one because the NULL bytes is
 	 * added at the end of the loop so a the upper bound we avoid the overflow.
@@ -360,6 +359,10 @@ static int loglevel_jul_str_to_value(const char *inputstr)
 	int i = 0;
 	char str[LTTNG_SYMBOL_NAME_LEN];
 
+	if (!inputstr || strlen(inputstr) == 0) {
+		return -1;
+	}
+
 	/*
 	 * Loop up to LTTNG_SYMBOL_NAME_LEN minus one because the NULL bytes is
 	 * added at the end of the loop so a the upper bound we avoid the overflow.
@@ -394,6 +397,45 @@ static int loglevel_jul_str_to_value(const char *inputstr)
 }
 
 /*
+ * Maps Python loglevel from string to value
+ */
+static int loglevel_python_str_to_value(const char *inputstr)
+{
+	int i = 0;
+	char str[LTTNG_SYMBOL_NAME_LEN];
+
+	if (!inputstr || strlen(inputstr) == 0) {
+		return -1;
+	}
+
+	/*
+	 * Loop up to LTTNG_SYMBOL_NAME_LEN minus one because the NULL bytes is
+	 * added at the end of the loop so a the upper bound we avoid the overflow.
+	 */
+	while (i < (LTTNG_SYMBOL_NAME_LEN - 1) && inputstr[i] != '\0') {
+		str[i] = toupper(inputstr[i]);
+		i++;
+	}
+	str[i] = '\0';
+
+	if (!strcmp(str, "PYTHON_CRITICAL") || !strcmp(str, "CRITICAL")) {
+		return LTTNG_LOGLEVEL_PYTHON_CRITICAL;
+	} else if (!strcmp(str, "PYTHON_ERROR") || !strcmp(str, "ERROR")) {
+		return LTTNG_LOGLEVEL_PYTHON_ERROR;
+	} else if (!strcmp(str, "PYTHON_WARNING") || !strcmp(str, "WARNING")) {
+		return LTTNG_LOGLEVEL_PYTHON_WARNING;
+	} else if (!strcmp(str, "PYTHON_INFO") || !strcmp(str, "INFO")) {
+		return LTTNG_LOGLEVEL_PYTHON_INFO;
+	} else if (!strcmp(str, "PYTNON_DEBUG") || !strcmp(str, "DEBUG")) {
+		return LTTNG_LOGLEVEL_PYTHON_DEBUG;
+	} else if (!strcmp(str, "PYTHON_NOTSET") || !strcmp(str, "NOTSET")) {
+		return LTTNG_LOGLEVEL_PYTHON_NOTSET;
+	} else {
+		return -1;
+	}
+}
+
+/*
  * Maps loglevel from string to value
  */
 static
@@ -401,6 +443,10 @@ int loglevel_str_to_value(const char *inputstr)
 {
 	int i = 0;
 	char str[LTTNG_SYMBOL_NAME_LEN];
+
+	if (!inputstr || strlen(inputstr) == 0) {
+		return -1;
+	}
 
 	/*
 	 * Loop up to LTTNG_SYMBOL_NAME_LEN minus one because the NULL bytes is
@@ -586,7 +632,7 @@ int check_exclusion_subsets(const char *event_name,
 					goto error;
 				}
 				new_exclusion_list = realloc(exclusion_list,
-					sizeof(char **) * (exclusion_count + 1));
+					sizeof(char *) * (exclusion_count + 1));
 				if (!new_exclusion_list) {
 					PERROR("realloc");
 					free(string);
@@ -649,11 +695,6 @@ static int enable_events(char *session_name)
 	memset(&dom, 0, sizeof(dom));
 
 	if (opt_kernel) {
-		if (opt_filter) {
-			ERR("Filter not implement for kernel tracing yet");
-			ret = CMD_ERROR;
-			goto error;
-		}
 		if (opt_loglevel) {
 			WARN("Kernel loglevels are not supported.");
 		}
@@ -675,16 +716,31 @@ static int enable_events(char *session_name)
 		dom.type = LTTNG_DOMAIN_LOG4J;
 		/* Default. */
 		dom.buf_type = LTTNG_BUFFER_PER_UID;
+	} else if (opt_python) {
+		dom.type = LTTNG_DOMAIN_PYTHON;
+		/* Default. */
+		dom.buf_type = LTTNG_BUFFER_PER_UID;
 	} else {
-		print_missing_domain();
-		ret = CMD_ERROR;
-		goto error;
+		/* Checked by the caller. */
+		assert(0);
 	}
 
-	if (opt_kernel && opt_exclude) {
-		ERR("Event name exclusions are not yet implemented for kernel events");
-		ret = CMD_ERROR;
-		goto error;
+	if (opt_exclude) {
+		switch (dom.type) {
+		case LTTNG_DOMAIN_KERNEL:
+		case LTTNG_DOMAIN_JUL:
+		case LTTNG_DOMAIN_LOG4J:
+		case LTTNG_DOMAIN_PYTHON:
+			ERR("Event name exclusions are not yet implemented for %s events",
+					get_domain_str(dom.type));
+			ret = CMD_ERROR;
+			goto error;
+		case LTTNG_DOMAIN_UST:
+			/* Exclusions supported */
+			break;
+		default:
+			assert(0);
+		}
 	}
 
 	channel_name = opt_channel_name;
@@ -709,7 +765,7 @@ static int enable_events(char *session_name)
 		/* Default setup for enable all */
 		if (opt_kernel) {
 			ev.type = opt_event_type;
-			ev.name[0] = '\0';
+			strcpy(ev.name, "*");
 			/* kernel loglevels not implemented */
 			ev.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
 		} else {
@@ -717,13 +773,15 @@ static int enable_events(char *session_name)
 			strcpy(ev.name, "*");
 			ev.loglevel_type = opt_loglevel_type;
 			if (opt_loglevel) {
-				assert(opt_userspace || opt_jul || opt_log4j);
+				assert(opt_userspace || opt_jul || opt_log4j || opt_python);
 				if (opt_userspace) {
 					ev.loglevel = loglevel_str_to_value(opt_loglevel);
 				} else if (opt_jul) {
 					ev.loglevel = loglevel_jul_str_to_value(opt_loglevel);
 				} else if (opt_log4j) {
 					ev.loglevel = loglevel_log4j_str_to_value(opt_loglevel);
+				} else if (opt_python) {
+					ev.loglevel = loglevel_python_str_to_value(opt_loglevel);
 				}
 				if (ev.loglevel == -1) {
 					ERR("Unknown loglevel %s", opt_loglevel);
@@ -731,11 +789,15 @@ static int enable_events(char *session_name)
 					goto error;
 				}
 			} else {
-				assert(opt_userspace || opt_jul || opt_log4j);
+				assert(opt_userspace || opt_jul || opt_log4j || opt_python);
 				if (opt_userspace) {
 					ev.loglevel = -1;
-				} else if (opt_jul || opt_log4j) {
+				} else if (opt_jul) {
 					ev.loglevel = LTTNG_LOGLEVEL_JUL_ALL;
+				} else if (opt_log4j) {
+					ev.loglevel = LTTNG_LOGLEVEL_LOG4J_ALL;
+				} else if (opt_python) {
+					ev.loglevel = LTTNG_LOGLEVEL_PYTHON_DEBUG;
 				}
 			}
 		}
@@ -962,9 +1024,12 @@ static int enable_events(char *session_name)
 					print_channel_name(channel_name));
 
 			switch (opt_event_type) {
-			case LTTNG_EVENT_ALL:	/* Default behavior is tracepoint */
-				ev.type = LTTNG_EVENT_TRACEPOINT;
-				/* Fall-through */
+			case LTTNG_EVENT_ALL:	/* Enable tracepoints and syscalls */
+				/* If event name differs from *, select tracepoint. */
+				if (strcmp(ev.name, "*")) {
+					ev.type = LTTNG_EVENT_TRACEPOINT;
+				}
+				break;
 			case LTTNG_EVENT_TRACEPOINT:
 				break;
 			case LTTNG_EVENT_PROBE:
@@ -983,11 +1048,6 @@ static int enable_events(char *session_name)
 					goto error;
 				}
 				break;
-			case LTTNG_EVENT_FUNCTION_ENTRY:
-				strncpy(ev.attr.ftrace.symbol_name, opt_function_entry_symbol,
-						LTTNG_SYMBOL_NAME_LEN);
-				ev.attr.ftrace.symbol_name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
-				break;
 			case LTTNG_EVENT_SYSCALL:
 				ev.type = LTTNG_EVENT_SYSCALL;
 				break;
@@ -999,14 +1059,6 @@ static int enable_events(char *session_name)
 			/* kernel loglevels not implemented */
 			ev.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
 		} else if (opt_userspace) {		/* User-space tracer action */
-#if 0
-			if (opt_cmd_name != NULL || opt_pid) {
-				MSG("Only supporting tracing all UST processes (-u) for now.");
-				ret = CMD_UNDEFINED;
-				goto error;
-			}
-#endif
-
 			DBG("Enabling UST event %s for channel %s, loglevel %s", event_name,
 					print_channel_name(channel_name), opt_loglevel ? : "<all>");
 
@@ -1021,7 +1073,6 @@ static int enable_events(char *session_name)
 				break;
 			case LTTNG_EVENT_PROBE:
 			case LTTNG_EVENT_FUNCTION:
-			case LTTNG_EVENT_FUNCTION_ENTRY:
 			case LTTNG_EVENT_SYSCALL:
 			default:
 				ERR("Event type not available for user-space tracing");
@@ -1063,7 +1114,7 @@ static int enable_events(char *session_name)
 			} else {
 				ev.loglevel = -1;
 			}
-		} else if (opt_jul || opt_log4j) {
+		} else if (opt_jul || opt_log4j || opt_python) {
 			if (opt_event_type != LTTNG_EVENT_ALL &&
 					opt_event_type != LTTNG_EVENT_TRACEPOINT) {
 				ERR("Event type not supported for domain.");
@@ -1077,6 +1128,8 @@ static int enable_events(char *session_name)
 					ev.loglevel = loglevel_jul_str_to_value(opt_loglevel);
 				} else if (opt_log4j) {
 					ev.loglevel = loglevel_log4j_str_to_value(opt_loglevel);
+				} else if (opt_python) {
+					ev.loglevel = loglevel_python_str_to_value(opt_loglevel);
 				}
 				if (ev.loglevel == -1) {
 					ERR("Unknown loglevel %s", opt_loglevel);
@@ -1088,15 +1141,15 @@ static int enable_events(char *session_name)
 					ev.loglevel = LTTNG_LOGLEVEL_JUL_ALL;
 				} else if (opt_log4j) {
 					ev.loglevel = LTTNG_LOGLEVEL_LOG4J_ALL;
+				} else if (opt_python) {
+					ev.loglevel = LTTNG_LOGLEVEL_PYTHON_DEBUG;
 				}
 			}
 			ev.type = LTTNG_EVENT_TRACEPOINT;
 			strncpy(ev.name, event_name, LTTNG_SYMBOL_NAME_LEN);
 			ev.name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
 		} else {
-			print_missing_domain();
-			ret = CMD_ERROR;
-			goto error;
+			assert(0);
 		}
 
 		if (!opt_filter) {
@@ -1145,17 +1198,29 @@ static int enable_events(char *session_name)
 				}
 				error_holder = command_ret;
 			} else {
-				/* So we don't print the default channel name for agent domain. */
-				if (dom.type == LTTNG_DOMAIN_JUL ||
-						dom.type == LTTNG_DOMAIN_LOG4J) {
-					MSG("%s event %s%s enabled.",
-							get_domain_str(dom.type), event_name,
-							exclusion_string);
-				} else {
+				switch (dom.type) {
+				case LTTNG_DOMAIN_KERNEL:
+				case LTTNG_DOMAIN_UST:
 					MSG("%s event %s%s created in channel %s",
-							get_domain_str(dom.type), event_name,
-							exclusion_string,
-							print_channel_name(channel_name));
+						get_domain_str(dom.type),
+						event_name,
+						exclusion_string,
+						print_channel_name(channel_name));
+					break;
+				case LTTNG_DOMAIN_JUL:
+				case LTTNG_DOMAIN_LOG4J:
+				case LTTNG_DOMAIN_PYTHON:
+					/*
+					 * Don't print the default channel
+					 * name for agent domains.
+					 */
+					MSG("%s event %s%s enabled",
+						get_domain_str(dom.type),
+						event_name,
+						exclusion_string);
+					break;
+				default:
+					assert(0);
 				}
 			}
 			free(exclusion_string);
@@ -1324,9 +1389,6 @@ int cmd_enable_events(int argc, const char **argv)
 		case OPT_FUNCTION:
 			opt_event_type = LTTNG_EVENT_FUNCTION;
 			break;
-		case OPT_FUNCTION_ENTRY:
-			opt_event_type = LTTNG_EVENT_FUNCTION_ENTRY;
-			break;
 		case OPT_SYSCALL:
 			opt_event_type = LTTNG_EVENT_SYSCALL;
 			break;
@@ -1364,6 +1426,13 @@ int cmd_enable_events(int argc, const char **argv)
 				goto end;
 			}
 		}
+	}
+
+	ret = print_missing_or_multiple_domains(
+		opt_kernel + opt_userspace + opt_jul + opt_log4j + opt_python);
+	if (ret) {
+		ret = CMD_ERROR;
+		goto end;
 	}
 
 	/* Mi check */

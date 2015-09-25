@@ -1,56 +1,385 @@
-2015-01-26 lttng-tools 2.6.0 (Paul the Octopus is born)
+2015-09-24 lttng-tools 2.7.0 (National Punctuation Day)
+	* Fix: Handle EINTR of waipid in run-as worker
+	* Fix: Handle EINTR of waitpid when spawning a session daemon
+	* Add a LOG() macro which handles dynamic severity levels
+	* Fix: tests: support systems where PAGE_SIZE is not 4096
+	* Test: jul/log4j: use -a instead of '*' to disable all events
+	* Reword warning on event disable
+	* Clean-up: Remove unused test launchers
+	* Help: add -j -l -p option to help string
+	* man: update disable-event section
+	* Use empty event name on disable -a for ust and agent domain
+	* Fix: disable kernel event based on name and event type
+	* Tests: Clean-up test-crash on SIGTERM and SIGINT
+	* Fix: Possible dereference of null pointers
+	* Fix: Break out of loop when searching for a domain's agent
+	* Fix: int printed as uint
+	* Fix: add subdir-objects to Makefile.am
+	* Fix: tests: skip UST perf tests if not root
+
+2015-09-18 lttng-tools 2.7.0-rc2
+	* Fix: Check use_clone() instead of worker in run_as
+	* Fix: Perform rcu barrier before tearing down the run-as worker
+	* Fix: Handle hang-up gracefully in run-as
+	* Fix: Only log app handle release on failure
+	* Fix: shm-path: handling of snprintf return value
+	* Fix: Wrong format specifier used in debug statement
+	* Tests: Swap usages of pidof for pgrep --full
+	* Tests: indefinitely wait for shm buffers to be unlinked
+	* Fix: Hide run-as functions
+	* Fix: Hide sessiond-comm functions
+	* Cleanup: remove duplicated implementation of rculfhash
+	* Fix: relayd: don't call lttng_ht_destroy in RCU read-side C.S.
+	* Fix: libc internal mutex races with run_as
+	* Fix: Hide readwrite symbols in common lib
+	* Fix: Hide pipe symbols in common lib
+	* Fix: Hide daemonize symbols in common lib
+	* Fix: Hide RCU hashtable wrapper symbols
+	* Fix: prevent dangling pointer in utils_partial_realpath
+	* Fix: rcu_read_unlock without parentheses has no side-effect
+	* Fix: add missing test file to EXTRA_DIST
+	* Format utils.sh messages
+	* Tests: use functions from utils.sh
+	* Report error if any disable action fails
+	* Fix: disable all ust events
+	* Bring back event_ust_disable_all_tracepoints
+	* Fix: sessiond: disable: match app event by name
+	* lttng-crash: support symlink
+	* Test: lttng-crash and ust shm path
+	* Fix: dereferencing null index pointer
+	* Fix: leaking memory from strdup in lttng-crash
+	* Fix: memleak in utils_partial_realpath
+	* Fix: double free on enable-event
+	* Fix: error on no/multiple domain options
+	* Fix: lttng-crash: segfault when parsing options
+	* Print relayd stream indexes
+	* Enhance relayd error reporting
+	* Fix: relayd: handle consumerd crashes without leak
+	* Fix: LPOLLHUP and LPOLLERR when there is still data in pipe/socket
+	* Fix: Use 2.7 java JAR and class names
+	* Fix: double RCU unlock on event_agent_disable_all
+	* Fix: unbalanced RCU read-side lock in enable event command
+	* Add rcu_read_ongoing() assertions around process_client_msg
+	* Clean-up and simplify event_agent_disable_all
+	* Fix: disable agent events by name
+	* sessiond: add loglevels_match()
+	* Fix: include loglevel type in agent event's primary key
+	* Fix: include loglevel type in UST event's primary key
+	* sessiond: use `loglevel_value` and `loglevel_type` names
+	* Tests: kernel wildcards
+	* Tests: fix wildcard test path
+	* doc: document untrack command in lttng(1)
+	* doc: document track command in lttng(1)
+	* Remove dot after enable-event message
+	* Fix: don't print the default channel name when enabling agent events
+	* Fix: fail gracefully on --exclude on unsupported domains
+	* Fix: initialize live_timer to 0 for snapshot session
+	* Fix: correct mismatched function signatures
+	* Clearer error reporting when failing to launch session daemon
+	* Daemonize sessiond on `lttng create`
+	* Fix: consumer signal handling race
+	* Fix: list_ust_events(): dangling pointer
+	* Fix: MI: close domain when listing multiple agent domains
+	* Tests: expand UST wildcard tests, move to regression/tools
+	* Tests: kernel filtering
+	* Fix: use pid element instead of process element
+	* Fix: race between kconsumerd and sessiond on tear down
+	* Fix: Buggy string comparison in ust registry ht_match_event
+	* Fix: Bad cast of lttng_kernel_instrumentation to lttng_event_type
+	* Fix: Implicit cast from lttng_loglevel_type to lttng_ust_loglevel_type
+	* Fix: lttng-crash: remove tmp working directory
+	* Fix: lttng-crash: DIR leak in delete_trace() on error
+	* Fix: Possible passing of NULL pointer to memcpy()
+	* Fix: Overwrite of ret in relay_recv_metadata
+	* Fix: Wait for in-flight data before closing a stream
+	* Fix: unpublish stream on close
+	* Fix: lttng-crash: fd leak
+	* Fix: Invalid parameter error reported when untracking PID
+	* Fix: kernel track/untrack error handling
+	* Fix: Python agent tests are always skipped
+	* Tests: Java agent: Add configure switches to enable tests
+	* Tests: Java agent: update after Java agent refactoring
+	* Tests: Fix flaky live test client
+	* Fix: Announce empty streams on live attach
+	* Fix: relayd: file rotation and live read
+	* Fix: relay: viewer_get_next_index handle null vstream
+	* Fix: relayd: make viewer streams consider metadata sent
+	* Fix: don't expose empty streams
+	* Fix: relayd: don't check new metadata on get packet
+	* Fix: relayd: don't check for new streams in get packet
+	* Fix: ask new streams HUP
+	* Fix: reply error if get packet vstream fails
+	* Fix: relayd reply error to client if cannot find viewer stream
+	* Fix: relayd reply with error if cannot find metadata
+	* Fix: ust-app: protect app socket protocol with lock
+	* Fix: add missing rcu_barrier at end of sessiond main
+	* Fix: add missing rcu_barrier at end of consumer main
+	* Fix: app cmd leak on sessiond exit
+	* Fix: relayd live don't send incomplete stream list
+	* Fix: consumer timer misses RCU thread registration
+	* Fix: sessiond consumer thread should register as RCU thread
+	* Fix: don't chain RCU free
+	* Fix: free metadata cache after grace period in consumer
+	* Fix: sessiond vs consumerd push/get metadata deadlock
+	* Fix: streamline ret/errno of run_as()
+	* Fix: Double unlock on error path
+	* Fix: Relay daemon ownership and reference counting
+	* Accept uid and gid parameters in utils_mkdir()/utils_mkdir_recursive()
+	* Fix: reference counting of consumer output
+	* Fix: sessiond add missing socket close
+	* Fix: sessiond should not error on channel creation vs app exit
+	* Fix: sessiond ust-app session teardown race
+	* Only display agent loglevel if the loglevel type is not ALL
+	* Initialize default log level of events on load
+	* Don't assume that Log4j and JUL share the same log level mappings
+	* Allow the creation of JUL, Log4j and Python channels
+	* Fix: Save tracker as part of UST and Kernel domains only
+	* Fix: Memory leak of agent
+	* Fix: Memory leak of agent event internals
+	* Save filter expression as part of agent events and save them
+	* Fix: UTF-8 characters may be stored on up to 4 bytes
+	* Prevent the addition of UST events to agent channels
+	* Don't save log level in session configuration when unneeded
+	* Fix: Propagate filter status of kernel events to client
+	* Fix: Save kernel event filter when saving session configuration
+	* Fix: Mention Python as part of enable-event's usage()
+	* Fix: typo in error message
+	* Add agent domains to lttng enable-event usage()
+	* Report memory allocation failure when copying filter bytecode
+	* Fix: cmd_enable_event must return positive error codes
+	* Save filter expressions as part of agent events
+	* Add agent domains to the enable-event section of LTTNG(1)
+	* Prevent disable event on internal UST events
+	* Skip internal events when saving a session configuration
+	* Hide internal events from session daemon clients
+	* Prevent the use of reserved UST event names
+	* Tag events created as side-effect of agent events as internal
+	* Fix: assert(0) when listing Python events with MI
+	* Fix: set GLOBAL buffer type for kernel domain in list
+	* Fix: take RCU read-side lock within hash table functions
+	* Tests: Adapt MI test to change in track/untrack behaviour
+	* Fix: Improve the error reporting of the track/untrack command
+	* Tests: Fix flacky clock-plugin test
+	* Build: look for python >= 3.0 when building python bindings
+	* Build: rename use_python to python_binding
+	* Fix: regression tests
+	* Fix: tests: stderr not correctly redirected
+	* Fix: TimeoutExpired in Python tests not defined globally
+	* Tests: ust: clock override plugin
+	* Test: save/load: pid_tracker basic test
+	* Save/load: pid_tracker feature.
+	* Test: mi: track/untrack feature
+	* Util: xml_extract: add node_exist option
+	* Mi: track/untrack: validation
+	* Docs: Grammar fixes in mi_lttng.xsd
+	* Fix: Ensure a valid command error code is returned by track/untrack
+	* Mi: track/untrack/listing
+	* Fix: intialization of ust_metadata_poll_pipe to garbage value
+	* Fix "allocator sizeof operand mismatch" warning
+	* Fix: incorrect script name in python logging test
+	* Tests: Python agent: update after Python agent refactoring
+	* Fix: Discard disable event command filter payload
+	* Fix: Use MSG_NOSIGNAL when calling sendmsg()
+	* Fix: test_mi test
+	* Set registration done Agent command version back to 0
+	* Fix: Don't send agent disable event command twice
+	* Fix: incorrect variable being checked in libc-wrapper test
+	* Fix: Initialize global agent_apps_ht_by_sock on session daemon launch
+	* Fix: pids should be numbers only
+	* Fix: Mishandled NULL short options in lttng-sessiond
+	* Use popt "required_argument" and "no_argument" constants
+	* Fix: Mishandled NULL short options in utils_generate_optstring()
+	* Fix: only launch a new session daemon for the "create" command
+	* Fix 'daemon' typo in lttng-ctl-pc.in description
+	* Fix: clean-up agent app hash table from the main sessiond thread
+	* Fix: Remove undocumented session daemon short options
+	* Log userspace application hash table allocation failure
+	* Fix: RCU read-side lock released too early in destroy_agent_app
+	* Fix: misleading logging statement in agent_find_event
+	* Fix: Unhandled domain option condition in list_agent_events
+	* Fix: Crash on lttng list -j/-l/-p when no events are present
+	* Document relay_add_stream RCU locking
+	* Fix: Unbalanced rcu_read_unlock() on stream file creation failure
+	* Fix: Unbalanced rcu_read_unlock() on directory creation failure
+	* Fix: Document the locking assumptions of ctf_trace_find_by_path()
+	* Fix: Memory leak in relay_add_stream error path
+	* Fix: set session should not set non-existent session
+	* Rename Python agent event name to omit "user"
+
+2015-07-15 lttng-tools 2.7.0-rc1 (Pet Fire Safety Day)
+	* Update version to v2.7.0-rc1
+	* Tests: lttng-ust-getcpu-override-test cache and error-check sysconf()
+	* Tests: lttng-ust-getcpu-override coding-style adjustments
+	* Add CPU_ID LTTng-UST context to enum lttng_ust_context_type
+	* Bump LTTNG_UST_ABI_MAJOR_VERSION to 6
+	* Tests: Ust getcpu override plugin
+	* Fix: Follow struct dirent allocation guidelines of READDIR(3)
+	* Update comments regarding the power of 2 constraint on sub-buffer sizes
+	* Build: add Flex version check
+	* Build: add Bison version check
+	* Fix: handle sys_futex() FUTEX_WAIT interrupted by signal
+	* Fix: metadata push -EPIPE should be recoverable
+	* Fix: destroy session removes the default config file
+	* Build: bump autoconf version requirement to 2.64
+	* Fix: Memory leak in setup of relayd_path
+	* Fix: update liburcu URL
+	* Fix: test: use "$@" to pass and quote argument
+	* Refactor: test: wrapper for lttng_snapshot_del_output
+	* Refactor: test: wrapper for lttng_snapshot_add_output
+	* Refactor: test: wrapper for destroy_lttng_session
+	* Refactor: test: wrapper for stop_lttng_tracing
+	* Refactor: test: wrapper for start_lttng_tracing
+	* Refactor: test: wrapper for enable_ust_lttng_event
+	* Refactor: test: wrapper for enable_ust_lttng_channel
+	* Refactor: test: wrapper for create_lttng_session
+	* Fix: Memory allocated by xmlNodeGetContent() must be freed by xmlFree()
+	* Save/load: add support for shared memory path
+	* Fix: get_cmdline_by_pid path length assumes a max pid of 65535
+	* Clean-up: Remove ifdef-ed out lttng list options
+	* Test: mi: test for greater or equal to a minimum of events on ust listing.
+	* Fix: update regression tests involving UST
+	* Clean-up: Remove ifdef-ed out function:entry feature
+	* Fix: Mark MI and Config string declarations as extern
+	* Clean-up append_list_to_probes()
+	* Fix: modprobe.c: fix tmp_list memory leak
+	* Fix: append_list_to_probes(): increment index
+	* Docs: LTTNG(1) filtering is now supported by the kernel tracer
+	* Fix: live_test regression on large number of cpus
+	* Fix: set UST register timeout to -1 as test default
+	* Man page: reference lttng-crash under --shm-path option
+	* Tests: Don't rely on implicit scalar expression dereference
+	* man pages: use standard NAME format
+	* Fix python bindings' Makefile for out-of-tree builds
+	* Fix: use LIBS instead of AM_LDFLAGS for dl and c linking
+	* Fix: Add missing -ldl when checking for lttng-ust
+	* clock plugin: increase offset measurement accuracy
+	* Implement UST clock override plugin support
+	* Fix: ownership of filter and filter_expression
+	* Fix: zero memory passed to create channel kernel ioctl
+	* Fix: Check that lttng create --live's time is not zero
+	* Fix: Validate lttng_create_session_live's timer is > 0
+	* UI: Only show live timer when the session is in live mode
+	* UI: Only show tracker PID state when enabled
+	* Implement kernel filter support
+	* syscall tracing: update tests
+	* Support lttng-modules syscall wildcards
+	* Implement lttng-modules tracepoint wildcard support
+	* Fix build when configuring with --disable-lttng-ust
+	* Fix: add missing function prototype to trace-ust.h header
+	* Implement PID tracker content listing
+	* Implement UST PID tracker
+	* Cleanup: Remove unimplemented UST domains
+	* Implement PID tracking for kernel tracing
+	* Fix: leak on error in lttng-crash
+	* Man page fixes: missing --version option and typo
+	* Docs: add lttng-crash(1) man page
+	* Docs: lttng-crash refers to "lttng"
+	* Fix: possible use of uninitialized data in loglevel conversion funcs
+	* Fix: possible evaluation of garbage values in fini_validation_ctx()
+	* Cleanup: Remove stale #ifdef-ed-out code from spawn_viewer()
+	* Fix: Possible call to execvp with NULL argument on allocation failure
+	* Fix: Possible call to strtoul() with NULL argument
+	* Docs: clarify lttng.1 shm-path section
+	* Fix: Missing return value check in extract_trace_recursive()
+	* Fix: recursive_rmdir: empty all empty subdir
+	* Move file creation/unlink from liblttng-ust-ctl to consumerd
+	* lttng-crash: support recursive traces
+	* shm-path: remove directory hierarchy on destroy
+	* Implement --shm-path option for UST sessions (per-uid channels)
+	* Cleanup: Reduce scope of connections in main relayd thread
+	* Cleanup: Reduce scope of relayd connections in live thread
+	* Docs: connection_find_by_sock() must be called with rcu_read_lock
+	* Rename current release as 2.7.0-pre
+	* Docs: grammar fix in Makefile
+	* Change release name to master
+	* configure: add type availability checking
+	* configure: add check for compiler inline keyword support
+	* configure: missing check for needed header
+	* configure: missing check of functions
+	* Fix: test: log4j: missing static test files for dist and out of tree build
+	* Fix: test: java-jul:missing static test files for dist and out of tree build
+	* Fix: out-of-tree build: missing xsd file for mi test execution
+	* Fix: out-of-tree build: missing xsd file for save-load test execution
+	* Cleanup: remove unused end_no_session label in ust_app_flush_session()
+	* Cleanup: Remove unused "end" label in push_metadata()
 	* Tests: Run health check test_thread_ok as part of root_regression
 	* Fix: deadlock between UST registry lock and consumer lock
 	* Fix: uninitialized return value
 	* Fix: build failure using disable-lttng-ust configure option
+	* Cleanup: Remove unused variable
+	* Fix: setuid/setgid daemons should not get sensitive env. var./args
 	* Fix: grab more than one packet for snapshots
 	* Fix: per-uid flush and ust registry locking
-	* Fix: add missing synchronization point for before app test case
-	* Fix: tests: wait output hide Terminate errors
-	* Fix: tests: remove killall, add missing SIGTERM handlers
-	* Fix: high throughput test: reset bw limit on sigterm
-	* Fix: tests: add missing wait, document missing synchro
-	* Document test anti-patterns
-	* Fix: test flaky sleep and wait patterns
-	* Fix: tests: don't use pidof to wait for test apps
+	* Docs: Missing optional dependency on lttng-ust in README.md
 	* Docs: Grammar fixes in the lttng manpage
 	* Fix: add missing UST perf counter support check
 	* Fix: tests: integer too large for long type
 	* Fix: undefined operation on last_relay_viewer_session_id
 	* Fix: print format type mismatch
 	* Fix: print format type mismatch
-	* Fix: Remove unused argument in debug statement
+	* Fix: Remove structurally dead code from relayd
+	* Cleanup: Remove logically dead code
 	* Cleanup: Remove unused label
+	* Fix: Remove unused argument in debug statement
 	* Fix: exit threads not only on goto restart
 	* Fix: poll: show the correct number of fds
+	* Fix: call lttng_poll_set_max_size before start threads
 	* Fix: compat poll: add missing empty revents checks
 	* Fix: various compat poll/epoll issues
+	* Add debugging output to ht-cleanup thread
 	* Fix: mi: snapshot: missing error handling for session name
 	* Fix: ust-app: per-PID app unregister vs tracing stop races
 	* Fix: data pending: allow empty streams
 	* Fix: ust snapshot: cleanup after error
+	* Fix: Mismatching return type in ust_app_ht_alloc() stub
+	* Cleanup: lock file already taken is error, not warning
+	* Fix: ust-app null pointer check needed for main refactoring
+	* Cleanup: relayd: centralize thread stopping function
+	* Cleanup: Replace all perror() uses by the PERROR macro
+	* Refactor relayd main/set_options/cleanup
+	* Refactor consumerd main/cleanup
+	* Refactor sessiond main/cleanup/ht-cleanup
+	* Missing error handling: consumer_signal_init should return its error status
+	* Cleanup: consumerd: lines over 80 columns
+	* Cleanup: consumerd: use PERROR rather than perror
+	* Cleanup: lttng-consumerd: remove stale TODO comment
+	* Misleading error handling: utils_create_pid_file() should return 0 on success
+	* Missing error handling: consumerd parse_args should return errors to caller
+	* Missing error handling: ust_app_ht_alloc should return error status
+	* Fix: ust app leak on UST buffer creation error
+	* Fix: leak on UST buffer registry creation error
+	* Fix: agents ht leaks on destroy session
 	* Fix: add missing RCU read unlock
-
-2014-12-12 lttng-tools 2.6.0-rc4 (International Day Of Heavy Metal)
+	* Fix: help message for Python agent mentions Java
 	* Fix: don't destroy the sockets if the snapshot was successful
 	* Fix: Missing RCU read locks in syscall_list_channel()
 	* Fix: Missing RCU read lock in kernel_destroy_session()
 	* Fix: channel names are not validated
+	* Cleanup: Missing whitespace
 	* Fix: Apply consumer URI changes to all domains
+	* Cleanup: Fix a typo in the MI tests
 	* Test fix: Don't invoke the system's lttng client
 	* Tests: Add a test to check disabled events are loaded in the correct state
 	* Fix: Don't leave events enabled if they were saved in a disabled state
 	* Fix: "Any" loglevel's value is -1 and not 0
 	* Test fix: LTTNG_SESSION_CONFIG_XSD_PATH expects an absolute path
 	* Fix: Memory leak on error in alloc_argv_from_user_opts()
+	* Cleanup: Unchecked close() return value in utils_create_lock_file()
+	* Cleanup: No check of the return value of lttng_ht_del()
+	* Cleanup: Mixed enums used for return code in send_sessiond_channel()
+	* Cleanup: Cast poll() return value to void
 	* Fix: Unreachable error logging in set_option()
 	* Fix: OOM leaks in sessiond modprobe.c
+	* Cleanup: sessiond modprobe.c: coding style
+	* Cleanup: test_utils_expand_path.c prototypes
 	* Fix: test_utils_expand_path.c: out of memory error handling
 	* Fix: test test_ust_data.c: check OOM
 	* Fix: test libc-wrapper: check malloc OOM
+	* Cleanup: test libc-wrapper: main parameters
 	* Fix: lttng-ctl: use zmalloc(), missing OOM check
 	* Fix: filter-parser.y: use zmalloc(), missing OOM check
 	* Fix: utils.c: check str*dup OOM
+	* Cleanup: implement zmalloc as static inline
 	* Fix: rculfhash: use zmalloc()
 	* Fix: ini.c: use zmalloc()
 	* Fix: lttng lttng.c: check strdup OOM
@@ -62,16 +391,29 @@
 	* Fix: use zmalloc in lttng enable_events.c
 	* Fix: missing strdup oom check in lttng create.c
 	* Fix: lttng add_context.c: use zmalloc
+	* Cleanup: add missing static to function modprobe_remove_lttng()
 	* Fix: add missing str*dup oom check in sessiond main.c
 	* Fix: add missing sessiond kernel-consumer missing str*dup oom checks
 	* Fix: add missing strdup OOM check
+	* Fix: add missing synchronization point for before app test case
+	* Fix: tests: wait output hide Terminate errors
+	* Fix: tests: remove killall, add missing SIGTERM handlers
+	* Fix: high throughput test: reset bw limit on sigterm
+	* Fix: tests: add missing wait, document missing synchro
+	* Document test anti-patterns
+	* Fix: test flaky sleep and wait patterns
+	* Fix: tests: don't use pidof to wait for test apps
 	* Fix: Live tracing does not honor live timer after first tracefile with tracefile rotation
 	* Fix: Handle empty daemon configuration file lines
 	* Docs: Add -f/--config option to lttng-sessiond man page
+	* Cleanup: spaghetti function return path
 	* Fix: relayd: unbalanced RCU read-side lock/unlock
 	* Fix: relayd: unbalanced RCU read lock/unlock
 	* Fix: lttng-relayd: unhandled out of memory error
 	* Fix: relayd viewer stream: unhandled out of memory error
+	* Build fix: Apps defining _LGPL_SOURCE must link to urcu-bp
+	* Define _LGPL_SOURCE in test apps' tracepoint provider files
+	* Define _LGPL_SOURCE in test applications
 	* Fix: Missing rcu_read_lock in cmd_list_events()
 	* Fix: Missing rcu_read_lock in list_lttng_agent_events()
 	* Fix: Missing rcu_read_lock in cmd_list_channels()
@@ -82,40 +424,58 @@
 	* Fix: UST subbuffers silently dropped on moderate trace traffic
 	* Fix: Missing rcu_read_lock in get_session_max_subbuf_size()
 	* Fix: create/destroy a splice_pipe per stream
-	* Fix: return EINVAL if agent registration fails
 	* Note find_ust_app_context must be called with RCU read lock
-	* Fix: check userspace perf counter name when looking up contexts
 	* Fix: empty indexes_ht before destroying it.
 	* Fix: removed useless key from relay_index
 	* Fix: Ambiguous agent event filter bytecode ownership
 	* Fix: filter bytecode and string memory leak on error
+	* Fix: define _LGPL_SOURCE in C files
 	* Fix: HT must not be destroyed with a rcu_read_lock held
 	* Fix: agent events HT should be destroyed from the cleanup thread
 	* Fix: missing rcu_read_lock in trace_ust_destroy_session()
 	* Fix: missing rcu_read_lock when calling trace_ust_find_agent()
 	* Fix: missing rcu_read_lock in cmd_start_trace()
+	* Cleanup: remove "disabled" flag for new release cycle
 	* Fix: filter attach vs event enable race
 	* Fix: Mark libxml2 as a mandatory dependency
 	* Fix: Warn the user when enabling an event in a new domain
 	* Fix: Don't report an error when listing a session with no channels
+	* Bypass 0 byte allocation when no domains are enabled
 	* Fix: Add missing URCU_TLS access to error_log_time
+	* Fix: check userspace perf counter name when looking up contexts
 	* Update maintainer section of the man pages
 	* Update maintainer section of README.md
-
-2014-11-04 lttng-tools 2.6.0-rc3
 	* Fix: add README.md to documentation files
 	* Fix: UST consumer sync all available metadata
 	* Test: remove bogus argument from prove invocation
-
-2014-10-21 lttng-tools 2.6.0-rc2
+	* Fix: typo in pythong test Makefile
+	* Fix: memory leak in libconfig
+	* Add Python agent support
+	* Fix: return EINVAL if agent registration fails
 	* Use lttng-modules ABI version ioctl
 	* Fix: syscall list ioctl number conflict
+	* Update master ChangeLog with 2.5.1 release
 
 2014-10-20 lttng-tools 2.6.0-rc1 (Harry Belafonte records Banana Boat Song)
 	* Machine Interface added to lttng command line (--mi)
 	* Java Log4j agent support (--log4j)
 	* Kernel per syscall tracing
 	* Multiple fixes.
+
+2014-10-20 lttng-tools 2.5.1
+	* Fix: handle sysconf possible negative returned value
+	* Fix: channel deref. after NULL check in kernel consumer
+	* Fix: check for kernel session metadata during init
+	* Fix: incorrect cast in ust consumer assert
+	* Fix: bad handling of incoming data in consumer thread
+	* Fix: disable event for JUL domain
+	* Fix: send disable ALL command code if event is *
+	* Fix: make sure no index is in flight before using inactivity beacons
+	* Fix: Parenthesize previous statement when adding conditions to a filter
+	* Fix: parse_prob_opts return the actual success of the function
+	* Fix: Man page typos
+	* Fix: disable JUL event on destroy
+	* Fix: unbalanced ustconsumer32_data.pid_mutex lock
 
 2014-07-16 lttng-tools 2.5.0 (Take Your Poet to Work Day)
 	* Fix: validate file path creds in autoload mode

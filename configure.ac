@@ -1,4 +1,5 @@
-AC_INIT([lttng-tools],[2.6.0],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
+AC_PREREQ([2.64])
+AC_INIT([lttng-tools],[2.7.0],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
 AC_CONFIG_AUX_DIR([config])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
@@ -19,11 +20,12 @@ AC_DEFINE_UNQUOTED([VERSION_MAJOR], $major_version, [LTTng-Tools major version n
 AC_DEFINE_UNQUOTED([VERSION_MINOR], $minor_version, [LTTng-Tools minor version number])
 AC_DEFINE_UNQUOTED([VERSION_PATCHLEVEL], $patchlevel_version, [LTTng-Tools patchlevel version number])
 
-version_name="Gaia"
-version_description="From Benelux brewery in Montreal, the Gaia is a witbier with a cloudy light amber ale color. Aroma of coriander with floral hay notes is enchanting. Taste is also dominated by the very floral coriander note and some medium sweet malt notes."
+version_name="Herbe à Détourne"
+version_description='Brewed with unrestrained amounts of Citra hop, the Herbe à Détourne is a fantastic New World Tripel brewed by "Dieu du Ciel!". Aromas of mango, cantaloupe melon and passion fruit, combined with a controlled bitter finish, unite in making this smooth golden-orange beer stand apart.'
+version_description_c=$(echo $version_description | sed 's/"/\\"/g')
 
 AC_DEFINE_UNQUOTED([VERSION_NAME], ["$version_name"], "")
-AC_DEFINE_UNQUOTED([VERSION_DESCRIPTION], ["$version_description"], "")
+AC_DEFINE_UNQUOTED([VERSION_DESCRIPTION], ["$version_description_c"], "")
 
 AC_CONFIG_HEADERS([include/config.h])
 
@@ -57,7 +59,18 @@ AM_CONDITIONAL([NO_SHARED], [test x$enable_shared = xno])
 AC_CHECK_HEADERS([ \
 	sys/types.h unistd.h fcntl.h string.h pthread.h limits.h \
 	signal.h stdlib.h sys/un.h sys/socket.h stdlib.h stdio.h \
-	getopt.h sys/ipc.h sys/shm.h popt.h grp.h \
+	getopt.h sys/ipc.h sys/shm.h popt.h grp.h arpa/inet.h \
+	netdb.h netinet/in.h paths.h stddef.h sys/file.h sys/ioctl.h \
+	sys/mount.h sys/param.h sys/time.h
+])
+
+# Basic functions check
+AC_CHECK_FUNCS([ \
+	atexit bzero clock_gettime dup2 fdatasync ftruncate \
+	gethostbyname gethostname getpagesize localtime_r memchr memset \
+	mkdir munmap putenv realpath rmdir socket strchr strcspn strdup \
+	strncasecmp strndup strpbrk strrchr strstr strtol strtoul \
+	strtoull \
 ])
 
 # Babeltrace viewer check
@@ -117,6 +130,25 @@ AC_ARG_WITH([lttng-system-rundir],
 	[LTTNG_SYSTEM_RUNDIR="$withval"],
 	[LTTNG_SYSTEM_RUNDIR="/var/run/lttng"])
 AC_SUBST([LTTNG_SYSTEM_RUNDIR])
+
+AC_ARG_ENABLE([test-java-agent-jul],
+	[AS_HELP_STRING([--enable-test-java-agent-jul],[enable the LTTng UST Java agent JUL tests [default=no]])],
+	[test_java_agent_jul=$enableval],
+	[test_java_agent_jul=no]
+)
+
+AC_ARG_ENABLE([test-java-agent-log4j],
+        [AS_HELP_STRING([--enable-test-java-agent-log4j],[enable the LTTng UST Java agent Log4j tests [default=no]])],
+        [test_java_agent_log4j=$enableval],
+        [test_java_agent_log4j=no]
+)
+
+AC_ARG_ENABLE([test-java-agent-all],
+        [AS_HELP_STRING([--enable-test-java-agent-all],[enable all the LTTng UST Java agent tests [default=no]])],
+        [test_java_agent_jul=$enableval
+         test_java_agent_log4j=$enableval],
+        [:]
+)
 
 AC_DEFINE_UNQUOTED([CONFIG_CONSUMERD32_BIN], "$CONSUMERD32_BIN", [Location of the 32-bit consumerd executable.])
 AC_DEFINE_UNQUOTED([CONFIG_CONSUMERD64_BIN], "$CONSUMERD64_BIN", [Location of the 64-bit consumerd executable])
@@ -247,7 +279,7 @@ AS_IF([test "x$lttng_ust_support" = "xyes"], [
 			lttng_ust_ctl_found=yes
 		],
 		[AC_MSG_ERROR([Cannot find LTTng-UST >= 2.2.x. Use --with-lttng-ust-prefix=PREFIX to specify its location, or specify --disable-lttng-ust to build lttng-tools without LTTng-UST support.])],
-		[-lurcu-common -lurcu-bp -lurcu-cds -lrt]
+		[-lurcu-common -lurcu-bp -lurcu-cds -lrt -ldl]
 	)
 ])
 AM_CONDITIONAL([HAVE_LIBLTTNG_UST_CTL], [test "x$lttng_ust_ctl_found" = xyes])
@@ -301,13 +333,13 @@ swig_version=2.0.0
 AC_ARG_ENABLE([python-bindings],
               [AC_HELP_STRING([--enable-python-bindings],
                               [compile Python bindings])],
-              [enable_python=yes], [enable_python=no])
+              [enable_python_binding=yes], [enable_python_binding=no])
 
-AM_CONDITIONAL([USE_PYTHON], [test "x${enable_python:-yes}" = xyes])
+AM_CONDITIONAL([PYTHON_BINDING], [test "x${enable_python_binding:-yes}" = xyes])
 
-if test "x${enable_python:-yes}" = xyes; then
+if test "x${enable_python_binding:-yes}" = xyes; then
   AX_PKG_SWIG($swig_version, [], [ AC_MSG_ERROR([SWIG $swig_version or newer is needed]) ])
-  AM_PATH_PYTHON
+  AM_PATH_PYTHON([3.0])
 
   AC_ARG_VAR([PYTHON_INCLUDE], [Include flags for python, bypassing python-config])
   AC_ARG_VAR([PYTHON_CONFIG], [Path to python-config])
@@ -342,69 +374,164 @@ AX_CONFIG_FEATURE(
 )
 AM_CONDITIONAL([COMPAT_EPOLL], [ test "$enable_epoll" = "yes" ])
 
-# Set compile flags to java include files if given. This is only used to
-# compile java agent tests.
-AC_ARG_WITH([java-jdk],
-	[AS_HELP_STRING([--with-java-jdk=DIR],[use the Java JDK in DIR. Ex : $JAVA_HOME.])],
-	[JAVA_JDK=$withval],
-	[JAVA_JDK=""]
-)
-AM_CONDITIONAL([HAVE_JAVA_JDK], [test $JAVA_JDK], [Java JDK path])
-AC_SUBST([JAVA_JDK])
+AM_CONDITIONAL([TEST_JAVA_JUL_AGENT], [test "x$test_java_agent_jul" = "xyes"])
+AM_CONDITIONAL([TEST_JAVA_LOG4J_AGENT], [test "x$test_java_agent_log4j" = "xyes"])
 
-AS_IF([test $JAVA_JDK],[
-	AS_IF([test -d $JAVA_JDK],
-		[
-			AC_MSG_RESULT([using Java includes in $JAVA_SDK])
-			SUBDIRS=`find $JAVA_JDK/include -type d`
-			CPPFLAGS+=" "
-			CPPFLAGS+=`for x in $SUBDIRS; do echo -n "-I$x "; done`
-			CPPFLAGS+=" "
-        ],[AC_MSG_ERROR(Unable to find Java include files in $JAVA_JDK)]
-	)
-])
-
-# Check for the UST agent jar file in the system. Hardcoded path is added here
-# since we have *no* idea where this could be installed. Note that this is only
-# used for agent testing.
-AC_MSG_CHECKING(Java UST agent jar file)
-java_agent_jar_path="${prefix}/share/java/liblttng-ust-agent.jar"
-if test -f $java_agent_jar_path; then
-	build_java_agent=yes
-	AC_MSG_RESULT(found)
-else
-	build_java_agent=no
-	AC_MSG_RESULT(not found)
-fi
-AM_CONDITIONAL([BUILD_JAVA_AGENT], [test "x$build_java_agent" = "xyes"])
-AC_SUBST([java_agent_jar_path])
-
-# Check for log4j support on the system to know if we can build or not the
-# log4j tests.
-if test "x$build_java_agent" = "xyes"; then
-	AC_MSG_CHECKING(Java agent support for log4j)
+if test "x$test_java_agent_jul" = "xyes" || test "x$test_java_agent_log4j" = "xyes"; then
 	AX_JAVA_OPTIONS
-	AX_PROG_JAR
-	AX_PROG_JAVA
 	AX_PROG_JAVAC
+	AX_PROG_JAVA
+	AX_PROG_JAR
 
-	# By default, use a commonly used classpath on the system to ease things up
-	# for the Java testing in this directory.
-	LOG4J_CLASSPATH="$java_agent_jar_path:$CLASSPATH:.:/usr/share/java/*"
-	JAVAFLAGS="-cp $LOG4J_CLASSPATH"
-	JAVACFLAGS="$JAVAFLAGS"
-	AX_CHECK_CLASS(org.apache.log4j.Logger)
+	AX_CHECK_CLASSPATH
 
-	if test "x$ac_cv_class_org_apache_log4j_Logger" = "xno"; then
-		build_java_log4j_agent=no
-	else
-		build_java_log4j_agent=yes
+	# Check for Java UST agent common class first
+	AX_CHECK_CLASS(org.lttng.ust.agent.LTTngAgent)
+	if test "x$ac_cv_class_org_lttng_ust_agent_LTTngAgent" = "xno"; then
+		AC_MSG_ERROR([The UST Java agent common class was not found. Please specify the location of the jar via the Java CLASSPATH e.g: export CLASSPATH="/path/to/liblttng-ust-agent.jar"])
+	fi
+
+	if test "x$test_java_agent_jul" = "xyes"; then
+		# Check for JUL agent class
+		AX_CHECK_CLASS(org.lttng.ust.agent.jul.LTTngJUL)
+		if test "x$ac_cv_class_org_lttng_ust_agent_jul_LTTngJUL" = "xno"; then
+			AC_MSG_ERROR([The UST Java agent JUL class was not found. Please specify the location of the jar via the Java CLASSPATH e.g: export CLASSPATH="/path/to/liblttng-ust-jul.jar"])
+		fi
+	fi
+
+	if test "x$test_java_agent_log4j" = "xyes"; then
+		# Check for Log4j agent class
+		AX_CHECK_CLASS(org.lttng.ust.agent.log4j.LTTngLog4j)
+		if test "x$ac_cv_class_org_lttng_ust_agent_log4j_LTTngLog4j" = "xno"; then
+			AC_MSG_ERROR([The UST Java agent Log4j class was not found. Please specify the location of the jar via the Java CLASSPATH e.g: export CLASSPATH="/path/to/liblttng-ust-agent.jar"])
+		fi
+
+		# Check for Log4j class
+		AX_CHECK_CLASS(org.apache.log4j.Logger)
+		if test "x$ac_cv_class_org_apache_log4j_Logger" = "xno"; then
+			AC_MSG_ERROR([The Log4j class was not found. Please specify the location of the jar via the Java CLASSPATH e.g: export CLASSPATH="/path/to/log4j.jar"])
+		fi
 	fi
 fi
-AM_CONDITIONAL([BUILD_JAVA_LOG4J_AGENT], [test "x$build_java_log4j_agent" = "xyes"])
+
+# Python agent test
+UST_PYTHON_AGENT="lttngust"
+
+AC_ARG_ENABLE(test-python2-agent,
+	AS_HELP_STRING([--enable-test-python2-agent],
+		[enable tests for python2 agent. Python2 interpreter path can be overridden by setting the PYTHON2 environment variable. Default: Autodetect]
+	),[:],[test_python2_agent_autodetect=yes]
+)
+
+AC_ARG_ENABLE(test-python3-agent,
+	AS_HELP_STRING([--enable-test-python3-agent],
+		[enable tests for python3 agent. Python3 interpreter path can be overridden by setting the PYTHON3 environment variable. Default: Autodetect]
+	),[:],[test_python3_agent_autodetect=yes]
+)
+
+AC_ARG_ENABLE(test-python-agent-all,
+	AS_HELP_STRING([--enable-test-python-agent-all],
+		[enable test for all python{2/3} agent.]
+	),
+)
+
+AS_IF([test ! -z "$enable_test_python_agent_all"], [
+       unset test_python2_agent_autodetect
+       unset test_python3_agent_autodetect
+])
+
+AS_IF([test "x$enable_test_python_agent_all" = "xyes"], [
+       enable_test_python2_agent=yes
+       enable_test_python3_agent=yes
+])
+
+AS_IF([test "x$enable_test_python_agent_all" = "xno"], [
+       enable_test_python2_agent=no
+       enable_test_python3_agent=no
+])
+
+
+AS_IF([test "x$enable_test_python2_agent" = "xyes" -o "x$test_python2_agent_autodetect" = "xyes" ], [
+	AS_IF([test -z "$PYTHON2"], [
+			PYTHON2=python2
+		], [
+			AC_MSG_WARN([Using user-defined PYTHON2 ($PYTHON2) for lttng-ust python2 agent check])
+	])
+
+	AC_PATH_PROG([PYTHON2_BIN],[$PYTHON2])
+	AS_IF([test -z "$PYTHON2_BIN"], [
+		AS_IF([test -z "$test_python2_agent_autodetect"],[
+			AC_MSG_ERROR([No python2 interpreter found. PYTHON2 can be set to override default interpreter path])
+		])
+	], [
+		AC_MSG_CHECKING([for python2 lttng-ust agent])
+		AS_IF([$PYTHON2_BIN -c "import $UST_PYTHON_AGENT" 2>/dev/null], [
+			PYTHON2_AGENT=$PYTHON2_BIN
+			AC_MSG_RESULT([yes])
+			RUN_PYTHON_AGENT_TEST=yes
+		], [
+			AC_MSG_RESULT([no])
+			AS_IF([test -z "$test_python2_agent_autodetect"],[
+				AC_MSG_ERROR([No python2 agent found. The path to the agent can be specified by setting the PYTHONPATH environment variable.])
+			])
+		])
+
+	])
+
+])
+
+AS_IF([test "x$enable_test_python3_agent" = "xyes" -o "x$test_python3_agent_autodetect" = "xyes" ], [
+	AS_IF([test -z "$PYTHON3"], [
+		PYTHON3=python3
+	], [
+		AC_MSG_WARN([Using user-defined PYTHON3 ($PYTHON3) for lttng-ust python3 agent check])
+	])
+
+	AC_PATH_PROG([PYTHON3_BIN],[$PYTHON3])
+	AS_IF([test -z "$PYTHON3_BIN"], [
+		AS_IF([test -z "$test_python3_agent_autodetect"],[
+			AC_MSG_ERROR([No python3 interpreter found. PYTHON3 can be set to override default interpreter path])
+		])
+	], [
+		AC_MSG_CHECKING([for python3 lttng-ust agent])
+		AS_IF([$PYTHON3_BIN -c "import $UST_PYTHON_AGENT" 2>/dev/null], [
+			PYTHON3_AGENT=$PYTHON3_BIN
+			AC_MSG_RESULT([yes])
+			RUN_PYTHON_AGENT_TEST=yes
+		], [
+			AC_MSG_RESULT([no])
+			AS_IF([test -z "$test_python3_agent_autodetect"],[
+				AC_MSG_ERROR([No python3 agent found. The path to the agent can be specified by setting the PYTHONPATH environment variable.])
+			])
+		])
+
+	])
+])
+
+AC_SUBST([RUN_PYTHON_AGENT_TEST])
+AC_SUBST([PYTHON2_AGENT])
+AC_SUBST([PYTHON3_AGENT])
 
 AC_SYS_LARGEFILE
+
+# C compiler tests
 AC_PROG_CC
+AC_C_INLINE
+
+# Type availability checking
+AC_TYPE_INT32_T
+AC_TYPE_INT64_T
+AC_TYPE_MODE_T
+AC_TYPE_OFF_T
+AC_TYPE_PID_T
+AC_TYPE_SIZE_T
+AC_TYPE_SSIZE_T
+AC_TYPE_UID_T
+AC_TYPE_UINT16_T
+AC_TYPE_UINT32_T
+AC_TYPE_UINT64_T
+AC_TYPE_UINT8_T
+
 LT_INIT
 AC_PROG_YACC
 AC_PROG_LEX
@@ -414,6 +541,10 @@ if test ! -f "$srcdir/src/lib/lttng-ctl/filter/filter-parser.h"; then
 		AC_MSG_ERROR([[bison not found and is required when building from git.
 		Please install bison]])
 	fi
+	AC_PATH_PROG([BISON],[bison])
+	AX_PROG_BISON_VERSION([2.4], [],[
+		AC_MSG_ERROR([[Bison >= 2.4 is required when building from git]])
+	])
 fi
 
 if test ! -f "$srcdir/src/lib/lttng-ctl/filter/filter-lexer.c"; then
@@ -421,6 +552,10 @@ if test ! -f "$srcdir/src/lib/lttng-ctl/filter/filter-lexer.c"; then
 		AC_MSG_ERROR([[flex not found and is required when building from git.
 		Please install flex]])
 	fi
+	AC_PATH_PROG([FLEX],[flex])
+	AX_PROG_FLEX_VERSION([2.5.35], [],[
+		AC_MSG_ERROR([[Flex >= 2.5.35 is required when building from git]])
+	])
 fi
 
 CFLAGS="-Wall $CFLAGS -g -fno-strict-aliasing"
@@ -467,6 +602,7 @@ AC_CONFIG_FILES([
 	src/bin/lttng-sessiond/Makefile
 	src/bin/lttng-relayd/Makefile
 	src/bin/lttng/Makefile
+	src/bin/lttng-crash/Makefile
 	tests/Makefile
 	tests/regression/Makefile
 	tests/regression/kernel/Makefile
@@ -480,6 +616,8 @@ AC_CONFIG_FILES([
 	tests/regression/tools/exclusion/Makefile
 	tests/regression/tools/save-load/Makefile
 	tests/regression/tools/mi/Makefile
+	tests/regression/tools/wildcard/Makefile
+	tests/regression/tools/crash/Makefile
 	tests/regression/ust/Makefile
 	tests/regression/ust/nprocesses/Makefile
 	tests/regression/ust/high-throughput/Makefile
@@ -497,6 +635,9 @@ AC_CONFIG_FILES([
 	tests/regression/ust/libc-wrapper/Makefile
 	tests/regression/ust/java-jul/Makefile
 	tests/regression/ust/java-log4j/Makefile
+	tests/regression/ust/python-logging/Makefile
+	tests/regression/ust/getcpu-override/Makefile
+	tests/regression/ust/clock-override/Makefile
 	tests/stress/Makefile
 	tests/unit/Makefile
 	tests/unit/ini_config/Makefile
@@ -507,6 +648,9 @@ AC_CONFIG_FILES([
 	tests/utils/testapp/gen-ust-nevents/Makefile
 	tests/utils/testapp/gen-ust-tracef/Makefile
 ])
+
+# Inject variable into python test script
+AC_CONFIG_FILES([tests/regression/ust/python-logging/test_python_logging],[chmod +x tests/regression/ust/python-logging/test_python_logging])
 
 AC_OUTPUT
 
@@ -550,9 +694,39 @@ AS_IF([test "x$lttng_ust_support" = "xyes"],[
 	AS_ECHO("Disabled")
 ])
 
+# LTTng UST Java agent JUL tests enabled/disabled
+AS_ECHO_N("LTTng-UST Java agent JUL tests: ")
+AS_IF([test "x$test_java_agent_jul" = "xyes"],[
+	AS_ECHO("Enabled")
+],[
+	AS_ECHO("Disabled")
+])
+
+# LTTng UST Java agent Log4j tests enabled/disabled
+AS_ECHO_N("LTTng-UST Java agent Log4j tests: ")
+AS_IF([test "x$test_java_agent_log4j" = "xyes"],[
+	AS_ECHO("Enabled")
+],[
+	AS_ECHO("Disabled")
+])
+
+AS_ECHO_N("LTTng-UST Python2 agent tests: ")
+AS_IF([test ! -z "$PYTHON2_AGENT"],[
+	AS_ECHO("Enabled")
+],[
+	AS_ECHO("Disabled")
+])
+
+AS_ECHO_N("LTTng-UST Python3 agent tests: ")
+AS_IF([test ! -z "$PYTHON3_AGENT"],[
+	AS_ECHO("Enabled")
+],[
+	AS_ECHO("Disabled")
+])
+
 #Python binding enabled/disabled
 AS_ECHO_N("Python binding: ")
-AS_IF([test "x${enable_python:-yes}" = xyes], [
+AS_IF([test "x${enable_python_binding:-yes}" = xyes], [
 	AS_ECHO("Enabled")
 ],[
 	AS_ECHO("Disabled")

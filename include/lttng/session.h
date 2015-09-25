@@ -104,6 +104,51 @@ extern int lttng_destroy_session(const char *name);
  */
 extern int lttng_list_sessions(struct lttng_session **sessions);
 
+/*
+ * Set the shared memory path for a session.
+ *
+ * Sets the (optional) file system path where shared memory buffers will
+ * be created for the session. This is useful for buffer extraction on
+ * crash, when used with filesystems like pramfs.
+ *
+ * Return 0 on success else a negative LTTng error code.
+ */
+extern int lttng_set_session_shm_path(const char *session_name,
+		const char *shm_path);
+
+/*
+ * Add PID to session tracker.
+ *
+ * A pid argument >= 0 adds the PID to the session tracker.
+ * A pid argument of -1 means "track all PIDs".
+ *
+ * Return 0 on success else a negative LTTng error code.
+ */
+extern int lttng_track_pid(struct lttng_handle *handle, int pid);
+
+/*
+ * Remove PID from session tracker.
+ *
+ * A pid argument >= 0 removes the PID from the session tracker.
+ * A pid argument of -1 means "untrack all PIDs".
+ *
+ * Return 0 on success else a negative LTTng error code.
+ */
+extern int lttng_untrack_pid(struct lttng_handle *handle, int pid);
+
+/*
+ * List PIDs in the tracker.
+ *
+ * @enabled is set to whether the PID tracker is enabled.
+ * @pids is set to an allocated array of PIDs currently tracked. On
+ * success, @pids must be freed by the caller.
+ * @nr_pids is set to the number of entries contained by the @pids array.
+ *
+ * Returns 0 on success, else a negative LTTng error code.
+ */
+extern int lttng_list_tracker_pids(struct lttng_handle *handle,
+		int *enabled, int32_t **pids, size_t *nr_pids);
+
 #ifdef __cplusplus
 }
 #endif

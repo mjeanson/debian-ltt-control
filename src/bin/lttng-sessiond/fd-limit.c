@@ -16,12 +16,14 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <urcu/uatomic.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <errno.h>
 #include <stdio.h>
 #include "fd-limit.h"
+#include <common/error.h>
 
 /* total count of fd. */
 static long fd_count;
@@ -64,7 +66,7 @@ void lttng_fd_init(void)
 
 	ret = getrlimit(RLIMIT_NOFILE, &rlim);
 	if (ret < 0) {
-		perror("getrlimit");
+		PERROR("getrlimit");
 	}
 	max_nr_fd = rlim.rlim_cur;
 }

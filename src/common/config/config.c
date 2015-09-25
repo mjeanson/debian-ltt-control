@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -31,6 +32,7 @@
 #include <common/error.h>
 #include <common/macros.h>
 #include <common/utils.h>
+#include <common/compat/getenv.h>
 #include <lttng/lttng-error.h>
 #include <libxml/parser.h>
 #include <libxml/valid.h>
@@ -113,11 +115,19 @@ const char * const config_element_net_output = "net_output";
 const char * const config_element_control_uri = "control_uri";
 const char * const config_element_data_uri = "data_uri";
 const char * const config_element_max_size = "max_size";
+const char * const config_element_pid = "pid";
+const char * const config_element_pids = "pids";
+const char * const config_element_shared_memory_path = "shared_memory_path";
+const char * const config_element_pid_tracker = "pid_tracker";
+const char * const config_element_trackers = "trackers";
+const char * const config_element_targets = "targets";
+const char * const config_element_target_pid = "pid_target";
 
 const char * const config_domain_type_kernel = "KERNEL";
 const char * const config_domain_type_ust = "UST";
 const char * const config_domain_type_jul = "JUL";
 const char * const config_domain_type_log4j = "LOG4J";
+const char * const config_domain_type_python = "PYTHON";
 
 const char * const config_buffer_type_per_pid = "PER_PID";
 const char * const config_buffer_type_per_uid = "PER_UID";
@@ -330,11 +340,10 @@ static xmlChar *encode_string(const char *in_str)
 
 	in_len = strlen(in_str);
 	/*
-	 * Add 1 byte for the NULL terminted character. The factor 2 here is
-	 * because UTF-8 can be on two bytes so this fits the worst case for each
-	 * bytes.
+	 * Add 1 byte for the NULL terminted character. The factor 4 here is
+	 * used because UTF-8 characters can take up to 4 bytes.
 	 */
-	out_len = (in_len * 2) + 1;
+	out_len = (in_len * 4) + 1;
 	out_str = xmlMalloc(out_len);
 	if (!out_str) {
 		goto end;
@@ -593,7 +602,7 @@ static
 char *get_session_config_xsd_path()
 {
 	char *xsd_path;
-	const char *base_path = getenv(DEFAULT_SESSION_CONFIG_XSD_PATH_ENV);
+	const char *base_path = lttng_secure_getenv(DEFAULT_SESSION_CONFIG_XSD_PATH_ENV);
 	size_t base_path_len;
 	size_t max_path_len;
 
@@ -752,6 +761,8 @@ int get_domain_type(xmlChar *domain)
 		ret = LTTNG_DOMAIN_JUL;
 	} else if (!strcmp((char *) domain, config_domain_type_log4j)) {
 		ret = LTTNG_DOMAIN_LOG4J;
+	} else if (!strcmp((char *) domain, config_domain_type_python)) {
+		ret = LTTNG_DOMAIN_PYTHON;
 	} else {
 		goto error;
 	}
@@ -1280,7 +1291,7 @@ int create_session(const char *name,
 		int i;
 		struct lttng_domain *domain;
 		struct lttng_domain *domains[] =
-			{ kernel_domain, ust_domain, jul_domain, log4j_domain};
+			{ kernel_domain, ust_domain, jul_domain, log4j_domain };
 
 		/* network destination */
 		if (live_timer_interval && live_timer_interval != UINT64_MAX) {
@@ -1415,6 +1426,26 @@ int process_event_node(xmlNodePtr event_node, struct lttng_handle *handle,
 	assert(channel_name);
 
 	memset(&event, 0, sizeof(event));
+
+	/* Initialize default log level which varies by domain */
+	switch (handle->domain.type)
+	{
+	case LTTNG_DOMAIN_JUL:
+		event.loglevel = LTTNG_LOGLEVEL_JUL_ALL;
+		break;
+	case LTTNG_DOMAIN_LOG4J:
+		event.loglevel = LTTNG_LOGLEVEL_LOG4J_ALL;
+		break;
+	case LTTNG_DOMAIN_PYTHON:
+		event.loglevel = LTTNG_LOGLEVEL_PYTHON_DEBUG;
+		break;
+	case LTTNG_DOMAIN_UST:
+	case LTTNG_DOMAIN_KERNEL:
+		event.loglevel = LTTNG_LOGLEVEL_DEBUG;
+		break;
+	default:
+		assert(0);
+	}
 
 	for (node = xmlFirstElementChild(event_node); node;
 		node = xmlNextElementSibling(node)) {
@@ -2081,12 +2112,87 @@ end:
 }
 
 static
+int process_pid_tracker_node(xmlNodePtr pid_tracker_node,
+	struct lttng_handle *handle)
+{
+	int ret, child;
+	xmlNodePtr targets_node = NULL;
+	xmlNodePtr node;
+
+	assert(handle);
+	assert(pid_tracker_node);
+	/* get the targets node */
+	for (node = xmlFirstElementChild(pid_tracker_node); node;
+		node = xmlNextElementSibling(node)) {
+		if (!strcmp((const char *) node->name,
+				config_element_targets)) {
+			targets_node = node;
+			break;
+		}
+	}
+
+	if (!targets_node) {
+		ret = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	/* Go through all pid_target node */
+	child = xmlChildElementCount(targets_node);
+	if (child == 0) {
+		/* The session is explicitly set to target nothing. */
+		ret = lttng_untrack_pid(handle, -1);
+		if (ret) {
+			goto end;
+		}
+	}
+	for (node = xmlFirstElementChild(targets_node); node;
+			node = xmlNextElementSibling(node)) {
+		xmlNodePtr pid_target_node = node;
+
+		/* get pid node and track it */
+		for (node = xmlFirstElementChild(pid_target_node); node;
+			node = xmlNextElementSibling(node)) {
+			if (!strcmp((const char *) node->name,
+					config_element_pid)) {
+				int64_t pid;
+				xmlChar *content = NULL;
+
+				content = xmlNodeGetContent(node);
+				if (!content) {
+					ret = LTTNG_ERR_LOAD_INVALID_CONFIG;
+					goto end;
+				}
+
+				ret = parse_int(content, &pid);
+				free(content);
+				if (ret) {
+					ret = LTTNG_ERR_LOAD_INVALID_CONFIG;
+					goto end;
+				}
+
+				ret = lttng_track_pid(handle, (int) pid);
+				if (ret) {
+					goto end;
+				}
+			}
+		}
+		node = pid_target_node;
+	}
+
+end:
+	return ret;
+}
+
+
+static
 int process_domain_node(xmlNodePtr domain_node, const char *session_name)
 {
 	int ret;
 	struct lttng_domain domain = { 0 };
 	struct lttng_handle *handle = NULL;
 	xmlNodePtr channels_node = NULL;
+	xmlNodePtr trackers_node = NULL;
+	xmlNodePtr pid_tracker_node = NULL;
 	xmlNodePtr node;
 
 	assert(session_name);
@@ -2153,6 +2259,36 @@ int process_domain_node(xmlNodePtr domain_node, const char *session_name)
 			goto end;
 		}
 	}
+
+	/* get the trackers node */
+	for (node = xmlFirstElementChild(domain_node); node;
+			node = xmlNextElementSibling(node)) {
+		if (!strcmp((const char *) node->name,
+					config_element_trackers)) {
+			trackers_node = node;
+			break;
+		}
+	}
+
+	if (!trackers_node) {
+		goto end;
+	}
+
+	for (node = xmlFirstElementChild(trackers_node); node;
+			node = xmlNextElementSibling(node)) {
+		if (!strcmp((const char *)node->name,config_element_pid_tracker)) {
+			pid_tracker_node = node;
+			ret = process_pid_tracker_node(pid_tracker_node, handle);
+			if (ret) {
+				goto end;
+			}
+		}
+	}
+
+	if (!pid_tracker_node) {
+		lttng_track_pid(handle, -1);
+	}
+
 end:
 	lttng_destroy_handle(handle);
 	return ret;
@@ -2164,7 +2300,8 @@ int process_session_node(xmlNodePtr session_node, const char *session_name,
 {
 	int ret, started = -1, snapshot_mode = -1;
 	uint64_t live_timer_interval = UINT64_MAX;
-	char *name = NULL;
+	xmlChar *name = NULL;
+	xmlChar *shm_path = NULL;
 	xmlNodePtr domains_node = NULL;
 	xmlNodePtr output_node = NULL;
 	xmlNodePtr node;
@@ -2172,6 +2309,7 @@ int process_session_node(xmlNodePtr session_node, const char *session_name,
 	struct lttng_domain *ust_domain = NULL;
 	struct lttng_domain *jul_domain = NULL;
 	struct lttng_domain *log4j_domain = NULL;
+	struct lttng_domain *python_domain = NULL;
 
 	for (node = xmlFirstElementChild(session_node); node;
 		node = xmlNextElementSibling(node)) {
@@ -2184,7 +2322,7 @@ int process_session_node(xmlNodePtr session_node, const char *session_name,
 				goto error;
 			}
 
-			name = (char *) node_content;
+			name = node_content;
 		} else if (!domains_node && !strcmp((const char *) node->name,
 			config_element_domains)) {
 			/* domains */
@@ -2208,6 +2346,16 @@ int process_session_node(xmlNodePtr session_node, const char *session_name,
 			config_element_output)) {
 			/* output */
 			output_node = node;
+		} else if (!shm_path && !strcmp((const char *) node->name,
+			config_element_shared_memory_path)) {
+			/* shared memory path */
+			xmlChar *node_content = xmlNodeGetContent(node);
+			if (!node_content) {
+				ret = -LTTNG_ERR_NOMEM;
+				goto error;
+			}
+
+			shm_path = node_content;
 		} else {
 			/* attributes, snapshot_mode or live_timer_interval */
 			xmlNodePtr attributes_child =
@@ -2254,7 +2402,7 @@ int process_session_node(xmlNodePtr session_node, const char *session_name,
 		goto error;
 	}
 
-	if (session_name && strcmp(name, session_name)) {
+	if (session_name && strcmp((char *) name, session_name)) {
 		/* This is not the session we are looking for */
 		ret = -LTTNG_ERR_NO_SESSION;
 		goto error;
@@ -2305,6 +2453,13 @@ int process_session_node(xmlNodePtr session_node, const char *session_name,
 			}
 			log4j_domain = domain;
 			break;
+		case LTTNG_DOMAIN_PYTHON:
+			if (python_domain) {
+				/* Same domain seen twice, invalid! */
+				goto domain_init_error;
+			}
+			python_domain = domain;
+			break;
 		default:
 			WARN("Invalid domain type");
 			goto domain_init_error;
@@ -2318,7 +2473,7 @@ domain_init_error:
 
 	if (override) {
 		/* Destroy session if it exists */
-		ret = lttng_destroy_session(name);
+		ret = lttng_destroy_session((const char *) name);
 		if (ret && ret != -LTTNG_ERR_SESS_NOT_FOUND) {
 			ERR("Failed to destroy existing session.");
 			goto error;
@@ -2327,30 +2482,40 @@ domain_init_error:
 
 	/* Create session type depending on output type */
 	if (snapshot_mode && snapshot_mode != -1) {
-		ret = create_snapshot_session(name, output_node);
+		ret = create_snapshot_session((const char *) name, output_node);
 	} else if (live_timer_interval &&
 		live_timer_interval != UINT64_MAX) {
-		ret = create_session(name, kernel_domain, ust_domain, jul_domain,
-				log4j_domain, output_node, live_timer_interval);
+		ret = create_session((const char *) name, kernel_domain,
+				ust_domain, jul_domain, log4j_domain,
+				output_node, live_timer_interval);
 	} else {
 		/* regular session */
-		ret = create_session(name, kernel_domain, ust_domain, jul_domain,
-				log4j_domain, output_node, UINT64_MAX);
+		ret = create_session((const char *) name, kernel_domain,
+				ust_domain, jul_domain, log4j_domain,
+				output_node, UINT64_MAX);
 	}
 	if (ret) {
 		goto error;
 	}
 
+	if (shm_path) {
+		ret = lttng_set_session_shm_path((const char *) name,
+				(const char *) shm_path);
+		if (ret) {
+			goto error;
+		}
+	}
+
 	for (node = xmlFirstElementChild(domains_node); node;
 		node = xmlNextElementSibling(node)) {
-		ret = process_domain_node(node, name);
+		ret = process_domain_node(node, (const char *) name);
 		if (ret) {
 			goto end;
 		}
 	}
 
 	if (started) {
-		ret = lttng_start_tracing(name);
+		ret = lttng_start_tracing((const char *) name);
 		if (ret) {
 			goto end;
 		}
@@ -2358,8 +2523,9 @@ domain_init_error:
 
 end:
 	if (ret < 0) {
-		ERR("Failed to load session %s: %s", name, lttng_strerror(ret));
-		lttng_destroy_session(name);
+		ERR("Failed to load session %s: %s", (const char *) name,
+			lttng_strerror(ret));
+		lttng_destroy_session((const char *) name);
 	}
 
 error:
@@ -2367,7 +2533,9 @@ error:
 	free(ust_domain);
 	free(jul_domain);
 	free(log4j_domain);
-	free(name);
+	free(python_domain);
+	xmlFree(name);
+	xmlFree(shm_path);
 	return ret;
 }
 
@@ -2455,6 +2623,23 @@ end:
 	return ret;
 }
 
+/* Allocate dirent as recommended by READDIR(3), NOTES on readdir_r */
+static
+struct dirent *alloc_dirent(const char *path)
+{
+	size_t len;
+	long name_max;
+	struct dirent *entry;
+
+	name_max = pathconf(path, _PC_NAME_MAX);
+	if (name_max == -1) {
+		name_max = PATH_MAX;
+	}
+	len = offsetof(struct dirent, d_name) + name_max + 1;
+	entry = zmalloc(len);
+	return entry;
+}
+
 static
 int load_session_from_path(const char *path, const char *session_name,
 	struct session_config_validation_ctx *validation_ctx, int override)
@@ -2490,7 +2675,7 @@ int load_session_from_path(const char *path, const char *session_name,
 			goto end;
 		}
 
-		entry = zmalloc(sizeof(*entry));
+		entry = alloc_dirent(path);
 		if (!entry) {
 			ret = -LTTNG_ERR_NOMEM;
 			goto end;

@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <inttypes.h>
 #include <popt.h>
 #include <stdio.h>
@@ -24,6 +25,7 @@
 #include <assert.h>
 
 #include <common/mi-lttng.h>
+#include <lttng/constant.h>
 
 #include "../command.h"
 
@@ -31,15 +33,11 @@ static int opt_userspace;
 static int opt_kernel;
 static int opt_jul;
 static int opt_log4j;
+static int opt_python;
 static char *opt_channel;
 static int opt_domain;
 static int opt_fields;
 static int opt_syscall;
-#if 0
-/* Not implemented yet */
-static char *opt_cmd_name;
-static pid_t opt_pid;
-#endif
 
 const char *indent4 = "    ";
 const char *indent6 = "      ";
@@ -56,21 +54,16 @@ static struct mi_writer *writer;
 
 static struct poptOption long_options[] = {
 	/* longName, shortName, argInfo, argPtr, value, descrip, argDesc */
-	{"help",      'h', POPT_ARG_NONE, 0, OPT_HELP, 0, 0},
-	{"kernel",    'k', POPT_ARG_VAL, &opt_kernel, 1, 0, 0},
-	{"jul",       'j', POPT_ARG_VAL, &opt_jul, 1, 0, 0},
-	{"log4j",     'l', POPT_ARG_VAL, &opt_log4j, 1, 0, 0},
-#if 0
-	/* Not implemented yet */
-	{"userspace",      'u', POPT_ARG_STRING | POPT_ARGFLAG_OPTIONAL, &opt_cmd_name, OPT_USERSPACE, 0, 0},
-	{"pid",            'p', POPT_ARG_INT, &opt_pid, 0, 0, 0},
-#else
-	{"userspace",      'u', POPT_ARG_NONE, 0, OPT_USERSPACE, 0, 0},
-#endif
-	{"channel",   'c', POPT_ARG_STRING, &opt_channel, 0, 0, 0},
-	{"domain",    'd', POPT_ARG_VAL, &opt_domain, 1, 0, 0},
-	{"fields",    'f', POPT_ARG_VAL, &opt_fields, 1, 0, 0},
-	{"syscall",   'S', POPT_ARG_VAL, &opt_syscall, 1, 0, 0},
+	{"help",	'h', POPT_ARG_NONE, 0, OPT_HELP, 0, 0},
+	{"kernel",	'k', POPT_ARG_VAL, &opt_kernel, 1, 0, 0},
+	{"jul",	'j', POPT_ARG_VAL, &opt_jul, 1, 0, 0},
+	{"log4j",	'l', POPT_ARG_VAL, &opt_log4j, 1, 0, 0},
+	{"python",	'p', POPT_ARG_VAL, &opt_python, 1, 0, 0},
+	{"userspace",	'u', POPT_ARG_NONE, 0, OPT_USERSPACE, 0, 0},
+	{"channel",	'c', POPT_ARG_STRING, &opt_channel, 0, 0, 0},
+	{"domain",	'd', POPT_ARG_VAL, &opt_domain, 1, 0, 0},
+	{"fields",	'f', POPT_ARG_VAL, &opt_fields, 1, 0, 0},
+	{"syscall",	'S', POPT_ARG_VAL, &opt_syscall, 1, 0, 0},
 	{"list-options", 0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{0, 0, 0, 0, 0, 0, 0}
 };
@@ -93,11 +86,9 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "  -u, --userspace         Select user-space domain.\n");
 	fprintf(ofp, "  -j, --jul               Apply for Java application using JUL\n");
 	fprintf(ofp, "  -l, --log4j             Apply for Java application using LOG4J\n");
+	fprintf(ofp, "  -p, --python            Apply for Python application using logging\n");
 	fprintf(ofp, "  -f, --fields            List event fields.\n");
 	fprintf(ofp, "      --syscall           List available system calls.\n");
-#if 0
-	fprintf(ofp, "  -p, --pid PID           List user-space events by PID\n");
-#endif
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Session Options:\n");
 	fprintf(ofp, "  -c, --channel NAME      List details of a channel\n");
@@ -116,7 +107,8 @@ static char *get_cmdline_by_pid(pid_t pid)
 	int ret;
 	FILE *fp = NULL;
 	char *cmdline = NULL;
-	char path[20];	/* Can't go bigger than /proc/65535/cmdline */
+	/* Can't go bigger than /proc/LTTNG_MAX_PID/cmdline */
+	char path[sizeof("/proc//cmdline") + sizeof(LTTNG_MAX_PID_STR) - 1];
 
 	snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
 	fp = fopen(path, "r");
@@ -127,12 +119,12 @@ static char *get_cmdline_by_pid(pid_t pid)
 	/* Caller must free() *cmdline */
 	cmdline = zmalloc(PATH_MAX);
 	if (!cmdline) {
-		perror("malloc cmdline");
+		PERROR("malloc cmdline");
 		goto end;
 	}
 	ret = fread(cmdline, 1, PATH_MAX, fp);
 	if (ret < 0) {
-		perror("fread proc list");
+		PERROR("fread proc list");
 	}
 
 end:
@@ -348,7 +340,7 @@ static int mi_list_agent_ust_events(struct lttng_event *events, int count,
 		goto end;
 	}
 
-	/* Open pids element */
+	/* Open pids element element */
 	ret = mi_lttng_pids_open(writer);
 	if (ret) {
 		goto end;
@@ -416,8 +408,8 @@ static int list_agent_events(void)
 {
 	int i, size, ret = CMD_SUCCESS;
 	struct lttng_domain domain;
-	struct lttng_handle *handle;
-	struct lttng_event *event_list;
+	struct lttng_handle *handle = NULL;
+	struct lttng_event *event_list = NULL;
 	pid_t cur_pid = 0;
 	char *cmdline = NULL;
 	const char *agent_domain_str;
@@ -427,6 +419,12 @@ static int list_agent_events(void)
 		domain.type = LTTNG_DOMAIN_JUL;
 	} else if (opt_log4j) {
 		domain.type = LTTNG_DOMAIN_LOG4J;
+	} else if (opt_python) {
+		domain.type = LTTNG_DOMAIN_PYTHON;
+	} else {
+		ERR("Invalid agent domain selected.");
+		ret = CMD_ERROR;
+		goto error;
 	}
 
 	agent_domain_str = get_domain_str(domain.type);
@@ -495,7 +493,7 @@ static int list_ust_events(void)
 	int i, size, ret = CMD_SUCCESS;
 	struct lttng_domain domain;
 	struct lttng_handle *handle;
-	struct lttng_event *event_list;
+	struct lttng_event *event_list = NULL;
 	pid_t cur_pid = 0;
 	char *cmdline = NULL;
 
@@ -663,7 +661,7 @@ static int mi_list_ust_event_fields(struct lttng_event_field *fields, int count,
 		}
 	}
 
-	/* Close pids, domain, domains */
+	/* Close pid, domain, domains */
 	ret = mi_lttng_close_multi_element(writer, 3);
 end:
 	return ret;
@@ -987,11 +985,21 @@ static int list_session_agent_events(void)
 		}
 
 		for (i = 0; i < count; i++) {
-			MSG("%s- %s%s (loglevel%s %s)", indent4, events[i].name,
-					enabled_string(events[i].enabled),
-					logleveltype_string(events[i].loglevel_type),
-					mi_lttng_loglevel_string(events[i].loglevel,
-						handle->domain.type));
+			if (events[i].loglevel_type !=
+					LTTNG_EVENT_LOGLEVEL_ALL) {
+				MSG("%s- %s%s (loglevel%s %s)", indent4,
+						events[i].name,
+						enabled_string(
+							events[i].enabled),
+						logleveltype_string(
+							events[i].loglevel_type),
+						mi_lttng_loglevel_string(
+							events[i].loglevel,
+							handle->domain.type));
+			} else {
+				MSG("%s- %s%s", indent4, events[i].name,
+				    enabled_string(events[i].enabled));
+			}
 		}
 
 		MSG("");
@@ -1241,6 +1249,97 @@ error_channels:
 }
 
 /*
+ * List tracker PID(s) of session and domain.
+ */
+static int list_tracker_pids(void)
+{
+	int ret = 0;
+	int enabled;
+	int *pids = NULL;
+	size_t nr_pids;
+
+	ret = lttng_list_tracker_pids(handle,
+		&enabled, &pids, &nr_pids);
+	if (ret) {
+		return ret;
+	}
+	if (enabled) {
+		int i;
+		_MSG("PID tracker: [");
+
+		/* Mi tracker_pid element*/
+		if (writer) {
+			/* Open tracker_pid and targets elements */
+			ret = mi_lttng_pid_tracker_open(writer);
+			if (ret) {
+				goto end;
+			}
+		}
+
+		for (i = 0; i < nr_pids; i++) {
+			if (i) {
+				_MSG(",");
+			}
+			_MSG(" %d", pids[i]);
+
+			/* Mi */
+			if (writer) {
+				ret = mi_lttng_pid_target(writer, pids[i], 0);
+				if (ret) {
+					goto end;
+				}
+			}
+		}
+		_MSG(" ]\n\n");
+
+		/* Mi close tracker_pid and targets */
+		if (writer) {
+			ret = mi_lttng_close_multi_element(writer,2);
+			if (ret) {
+				goto end;
+			}
+		}
+	}
+end:
+	free(pids);
+	return ret;
+
+}
+
+/*
+ * List all tracker of a domain
+ */
+static int list_trackers(void)
+{
+	int ret;
+
+	/* Trackers listing */
+	if (lttng_opt_mi) {
+		ret = mi_lttng_trackers_open(writer);
+		if (ret) {
+			goto end;
+		}
+	}
+
+	/* pid tracker */
+	ret = list_tracker_pids();
+	if (ret) {
+		goto end;
+	}
+
+	if (lttng_opt_mi) {
+		/* Close trackers element */
+		ret = mi_lttng_writer_close_element(writer);
+		if (ret) {
+			goto end;
+		}
+	}
+
+end:
+	return ret;
+}
+
+/*
  * Machine interface
  * Find the session with session_name as name
  * and print his informations.
@@ -1372,8 +1471,11 @@ static int list_sessions(const char *session_name)
 						active_string(sessions[i].enabled),
 						snapshot_string(sessions[i].snapshot_mode));
 				MSG("%sTrace path: %s", indent4, sessions[i].path);
-				MSG("%sLive timer interval (usec): %u\n", indent4,
-						sessions[i].live_timer_interval);
+				if (sessions[i].live_timer_interval != 0) {
+					MSG("%sLive timer interval (usec): %u", indent4,
+							sessions[i].live_timer_interval);
+				}
+				MSG("");
 			}
 		}
 
@@ -1469,6 +1571,9 @@ static int list_domains(const char *session_name)
 			case LTTNG_DOMAIN_LOG4J:
 				MSG("  - LOG4j (Logging for Java)");
 				break;
+			case LTTNG_DOMAIN_PYTHON:
+				MSG("  - Python (logging)");
+				break;
 			default:
 				break;
 			}
@@ -1561,6 +1666,8 @@ int cmd_list(int argc, const char **argv)
 		domain.type = LTTNG_DOMAIN_JUL;
 	} else if (opt_log4j) {
 		domain.type = LTTNG_DOMAIN_LOG4J;
+	} else if (opt_python) {
+		domain.type = LTTNG_DOMAIN_PYTHON;
 	}
 
 	if (!opt_kernel && opt_syscall) {
@@ -1569,7 +1676,7 @@ int cmd_list(int argc, const char **argv)
 		goto end;
 	}
 
-	if (opt_kernel || opt_userspace || opt_jul || opt_log4j) {
+	if (opt_kernel || opt_userspace || opt_jul || opt_log4j || opt_python) {
 		handle = lttng_create_handle(session_name, &domain);
 		if (handle == NULL) {
 			ret = CMD_FATAL;
@@ -1578,7 +1685,8 @@ int cmd_list(int argc, const char **argv)
 	}
 
 	if (session_name == NULL) {
-		if (!opt_kernel && !opt_userspace && !opt_jul && !opt_log4j) {
+		if (!opt_kernel && !opt_userspace && !opt_jul && !opt_log4j
+				&& !opt_python) {
 			ret = list_sessions(NULL);
 			if (ret) {
 				goto end;
@@ -1607,7 +1715,7 @@ int cmd_list(int argc, const char **argv)
 				goto end;
 			}
 		}
-		if (opt_jul || opt_log4j) {
+		if (opt_jul || opt_log4j || opt_python) {
 			ret = list_agent_events();
 			if (ret) {
 				goto end;
@@ -1655,6 +1763,14 @@ int cmd_list(int argc, const char **argv)
 
 			}
 
+
+			/* Trackers */
+			ret = list_trackers();
+			if (ret) {
+				goto end;
+			}
+
+			/* Channels */
 			ret = list_channels(opt_channel);
 			if (ret) {
 				goto end;
@@ -1705,6 +1821,9 @@ int cmd_list(int argc, const char **argv)
 				case LTTNG_DOMAIN_LOG4J:
 					MSG("=== Domain: LOG4j (Logging for Java) ===\n");
 					break;
+				case LTTNG_DOMAIN_PYTHON:
+					MSG("=== Domain: Python (logging) ===\n");
+					break;
 				default:
 					MSG("=== Domain: Unimplemented ===\n");
 					break;
@@ -1730,12 +1849,26 @@ int cmd_list(int argc, const char **argv)
 				}
 
 				if (domains[i].type == LTTNG_DOMAIN_JUL ||
-						domains[i].type == LTTNG_DOMAIN_LOG4J) {
+						domains[i].type == LTTNG_DOMAIN_LOG4J ||
+						domains[i].type == LTTNG_DOMAIN_PYTHON) {
 					ret = list_session_agent_events();
 					if (ret) {
 						goto end;
 					}
-					continue;
+
+					goto next_domain;
+				}
+
+				switch (domains[i].type) {
+				case LTTNG_DOMAIN_KERNEL:
+				case LTTNG_DOMAIN_UST:
+					ret = list_trackers();
+					if (ret) {
+						goto end;
+					}
+					break;
+				default:
+					break;
 				}
 
 				ret = list_channels(opt_channel);
@@ -1743,6 +1876,7 @@ int cmd_list(int argc, const char **argv)
 					goto end;
 				}
 
+next_domain:
 				if (lttng_opt_mi) {
 					/* Close domain element */
 					ret = mi_lttng_writer_close_element(writer);

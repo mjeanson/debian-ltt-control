@@ -20,6 +20,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
@@ -37,6 +38,7 @@
 #define max_t(type, a, b)	((type) ((a) > (b) ? (a) : (b)))
 #endif
 
+#define NSEC_PER_SEC			1000000000ULL
 #define NR_CLOCK_OFFSET_SAMPLES		10
 
 struct offset_sample {
@@ -119,6 +121,23 @@ ssize_t metadata_reserve(struct ust_registry_session *session, size_t len)
 	return ret;
 }
 
+static
+int metadata_file_append(struct ust_registry_session *session,
+		const char *str, size_t len)
+{
+	ssize_t written;
+
+	if (session->metadata_fd < 0) {
+		return 0;
+	}
+	/* Write to metadata file */
+	written = lttng_write(session->metadata_fd, str, len);
+	if (written != len) {
+		return -1;
+	}
+	return 0;
+}
+
 /*
  * We have exclusive access to our metadata buffer (protected by the
  * ust_lock), so we can do racy operations such as looking for
@@ -148,6 +167,11 @@ int lttng_metadata_printf(struct ust_registry_session *session,
 		goto end;
 	}
 	memcpy(&session->metadata[offset], str, len);
+	ret = metadata_file_append(session, str, len);
+	if (ret) {
+		PERROR("Error appending to metadata file");
+		goto end;
+	}
 	DBG3("Append to metadata: \"%s\"", str);
 	ret = 0;
 
@@ -335,7 +359,7 @@ int ust_metadata_event_statedump(struct ust_registry_session *session,
 
 	ret = lttng_metadata_printf(session,
 		"	loglevel = %d;\n",
-		event->loglevel);
+		event->loglevel_value);
 	if (ret)
 		goto end;
 
@@ -501,6 +525,7 @@ static
 int measure_single_clock_offset(struct offset_sample *sample)
 {
 	uint64_t offset, monotonic[2], measure_delta, realtime;
+	uint64_t tcf = trace_clock_freq();
 	struct timespec rts = { 0, 0 };
 	int ret;
 
@@ -519,8 +544,12 @@ int measure_single_clock_offset(struct offset_sample *sample)
 		return 0;
 	}
 	offset = (monotonic[0] + monotonic[1]) >> 1;
-	realtime = (uint64_t) rts.tv_sec * 1000000000ULL;
-	realtime += rts.tv_nsec;
+	realtime = (uint64_t) rts.tv_sec * tcf;
+	if (tcf == NSEC_PER_SEC) {
+		realtime += rts.tv_nsec;
+	} else {
+		realtime += (uint64_t) rts.tv_nsec * tcf / NSEC_PER_SEC;
+	}
 	offset = realtime - offset;
 	sample->offset = offset;
 	sample->measure_delta = measure_delta;
@@ -573,6 +602,15 @@ int ust_metadata_session_statedump(struct ust_registry_session *session,
 		uuid_c[4], uuid_c[5], uuid_c[6], uuid_c[7],
 		uuid_c[8], uuid_c[9], uuid_c[10], uuid_c[11],
 		uuid_c[12], uuid_c[13], uuid_c[14], uuid_c[15]);
+
+	/* For crash ABI */
+	ret = lttng_metadata_printf(session,
+		"/* CTF %u.%u */\n\n",
+		CTF_SPEC_MAJOR,
+		CTF_SPEC_MINOR);
+	if (ret) {
+		goto end;
+	}
 
 	ret = lttng_metadata_printf(session,
 		"typealias integer { size = 8; align = %u; signed = false; } := uint8_t;\n"
@@ -653,8 +691,8 @@ int ust_metadata_session_statedump(struct ust_registry_session *session,
 
 	ret = lttng_metadata_printf(session,
 		"clock {\n"
-		"	name = %s;\n",
-		"monotonic"
+		"	name = \"%s\";\n",
+		trace_clock_name()
 		);
 	if (ret)
 		goto end;
@@ -669,11 +707,12 @@ int ust_metadata_session_statedump(struct ust_registry_session *session,
 	}
 
 	ret = lttng_metadata_printf(session,
-		"	description = \"Monotonic Clock\";\n"
+		"	description = \"%s\";\n"
 		"	freq = %" PRIu64 "; /* Frequency, in Hz */\n"
 		"	/* clock value offset from Epoch is: offset * (1/freq) */\n"
 		"	offset = %" PRIu64 ";\n"
 		"};\n\n",
+		trace_clock_description(),
 		trace_clock_freq(),
 		measure_clock_offset()
 		);
@@ -683,20 +722,23 @@ int ust_metadata_session_statedump(struct ust_registry_session *session,
 	ret = lttng_metadata_printf(session,
 		"typealias integer {\n"
 		"	size = 27; align = 1; signed = false;\n"
-		"	map = clock.monotonic.value;\n"
+		"	map = clock.%s.value;\n"
 		"} := uint27_clock_monotonic_t;\n"
 		"\n"
 		"typealias integer {\n"
 		"	size = 32; align = %u; signed = false;\n"
-		"	map = clock.monotonic.value;\n"
+		"	map = clock.%s.value;\n"
 		"} := uint32_clock_monotonic_t;\n"
 		"\n"
 		"typealias integer {\n"
 		"	size = 64; align = %u; signed = false;\n"
-		"	map = clock.monotonic.value;\n"
+		"	map = clock.%s.value;\n"
 		"} := uint64_clock_monotonic_t;\n\n",
+		trace_clock_name(),
 		session->uint32_t_alignment,
-		session->uint64_t_alignment
+		trace_clock_name(),
+		session->uint64_t_alignment,
+		trace_clock_name()
 		);
 	if (ret)
 		goto end;

@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -261,11 +262,6 @@ int context_ust_add(struct ltt_ust_session *usess, int domain,
 	case LTTNG_DOMAIN_UST:
 		chan_ht = usess->domain_global.channels;
 		break;
-#if 0
-	case LTTNG_DOMAIN_UST_EXEC_NAME:
-	case LTTNG_DOMAIN_UST_PID:
-	case LTTNG_DOMAIN_UST_PID_FOLLOW_CHILDREN:
-#endif
 	default:
 		ret = LTTNG_ERR_UND;
 		goto error;

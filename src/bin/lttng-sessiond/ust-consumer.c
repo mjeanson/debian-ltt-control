@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,7 +73,7 @@ static char *setup_trace_path(struct consumer_output *consumer,
 		ret = run_as_mkdir_recursive(pathname, S_IRWXU | S_IRWXG,
 				ua_sess->euid, ua_sess->egid);
 		if (ret < 0) {
-			if (ret != -EEXIST) {
+			if (errno != EEXIST) {
 				ERR("Trace directory creation error");
 				goto error;
 			}
@@ -108,6 +109,8 @@ static int ask_channel_creation(struct ust_app_session *ua_sess,
 	char *pathname = NULL;
 	struct lttcomm_consumer_msg msg;
 	struct ust_registry_channel *chan_reg;
+	char shm_path[PATH_MAX] = "";
+	char root_shm_path[PATH_MAX] = "";
 
 	assert(ua_sess);
 	assert(ua_chan);
@@ -135,10 +138,27 @@ static int ask_channel_creation(struct ust_app_session *ua_sess,
 
 	if (ua_chan->attr.type == LTTNG_UST_CHAN_METADATA) {
 		chan_id = -1U;
+		/*
+		 * Metadata channels shm_path (buffers) are handled within
+		 * session daemon. Consumer daemon should not try to create
+		 * those buffer files.
+		 */
 	} else {
 		chan_reg = ust_registry_channel_find(registry, chan_reg_key);
 		assert(chan_reg);
 		chan_id = chan_reg->chan_id;
+		if (ua_sess->shm_path[0]) {
+			strncpy(shm_path, ua_sess->shm_path, sizeof(shm_path));
+			shm_path[sizeof(shm_path) - 1] = '\0';
+			strncat(shm_path, "/",
+				sizeof(shm_path) - strlen(shm_path) - 1);
+			strncat(shm_path, ua_chan->name,
+					sizeof(shm_path) - strlen(shm_path) - 1);
+				strncat(shm_path, "_",
+					sizeof(shm_path) - strlen(shm_path) - 1);
+		}
+		strncpy(root_shm_path, ua_sess->root_shm_path, sizeof(root_shm_path));
+		root_shm_path[sizeof(root_shm_path) - 1] = '\0';
 	}
 
 	switch (ua_chan->attr.output) {
@@ -170,7 +190,8 @@ static int ask_channel_creation(struct ust_app_session *ua_sess,
 			ua_chan->tracefile_count,
 			ua_sess->id,
 			ua_sess->output_traces,
-			ua_sess->uid);
+			ua_sess->uid,
+			root_shm_path, shm_path);
 
 	health_code_update();
 
@@ -224,14 +245,13 @@ int ust_consumer_ask_channel(struct ust_app_session *ua_sess,
 	}
 
 	pthread_mutex_lock(socket->lock);
-
 	ret = ask_channel_creation(ua_sess, ua_chan, consumer, socket, registry);
+	pthread_mutex_unlock(socket->lock);
 	if (ret < 0) {
 		goto error;
 	}
 
 error:
-	pthread_mutex_unlock(socket->lock);
 	return ret;
 }
 
@@ -380,7 +400,9 @@ int ust_consumer_send_stream_to_ust(struct ust_app *app,
 	DBG2("UST consumer send stream to app %d", app->sock);
 
 	/* Relay stream to application. */
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_send_stream_to_ust(app->sock, channel->obj, stream->obj);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("ustctl send stream handle %d to app pid: %d with ret %d",
@@ -415,7 +437,9 @@ int ust_consumer_send_channel_to_ust(struct ust_app *app,
 			app->sock, app->pid, channel->name, channel->tracing_channel_id);
 
 	/* Send stream to application. */
+	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_send_channel_to_ust(app->sock, ua_sess->handle, channel->obj);
+	pthread_mutex_unlock(&app->sock_lock);
 	if (ret < 0) {
 		if (ret != -EPIPE && ret != -LTTNG_UST_ERR_EXITING) {
 			ERR("Error ustctl send channel %s to app pid: %d with ret %d",
@@ -490,12 +514,15 @@ int ust_consumer_metadata_request(struct consumer_socket *socket)
 	pthread_mutex_lock(&ust_reg->lock);
 	ret_push = ust_app_push_metadata(ust_reg, socket, 1);
 	pthread_mutex_unlock(&ust_reg->lock);
-	if (ret_push < 0) {
+	if (ret_push == -EPIPE) {
+		DBG("Application or relay closed while pushing metadata");
+	} else if (ret_push < 0) {
 		ERR("Pushing metadata");
 		ret = -1;
 		goto end;
+	} else {
+		DBG("UST Consumer metadata pushed successfully");
 	}
-	DBG("UST Consumer metadata pushed successfully");
 	ret = 0;
 
 end:

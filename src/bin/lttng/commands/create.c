@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <ctype.h>
 #include <popt.h>
@@ -26,6 +27,8 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 #include <common/mi-lttng.h>
 
@@ -43,6 +46,7 @@ static char *opt_session_name;
 static char *opt_url;
 static char *opt_ctrl_url;
 static char *opt_data_url;
+static char *opt_shm_path;
 static int opt_no_consumer;
 static int opt_no_output;
 static int opt_snapshot;
@@ -68,6 +72,7 @@ static struct poptOption long_options[] = {
 	{"no-consumer",     0, POPT_ARG_VAL, &opt_no_consumer, 1, 0, 0},
 	{"snapshot",        0, POPT_ARG_VAL, &opt_snapshot, 1, 0, 0},
 	{"live",            0, POPT_ARG_INT | POPT_ARGFLAG_OPTIONAL, 0, OPT_LIVE_TIMER, 0, 0},
+	{"shm-path",        0, POPT_ARG_STRING, &opt_shm_path, 0, 0, 0},
 	{0, 0, 0, 0, 0, 0, 0}
 };
 
@@ -76,7 +81,7 @@ static struct poptOption long_options[] = {
  * why this declaration exists and used ONLY in for this command.
  */
 extern int _lttng_create_session_ext(const char *name, const char *url,
-		const char *datetime, int live_timer);
+		const char *datetime);
 
 /*
  * usage
@@ -105,6 +110,9 @@ static void usage(FILE *ofp)
 	fprintf(ofp, "                       By default, %u is used for the timer and the\n",
 											DEFAULT_LTTNG_LIVE_TIMER);
 	fprintf(ofp, "                       network URL is set to net://127.0.0.1.\n");
+	fprintf(ofp, "      --shm-path PATH  Path where shared memory holding buffers\n");
+	fprintf(ofp, "                       should be created. Useful when used with pramfs\n");
+	fprintf(ofp, "                       to extract trace data after crash.\n");
 	fprintf(ofp, "\n");
 	fprintf(ofp, "Extended Options:\n");
 	fprintf(ofp, "\n");
@@ -296,6 +304,7 @@ static int create_session(void)
 	char session_name_date[NAME_MAX + 17], *print_str_url = NULL;
 	time_t rawtime;
 	struct tm *timeinfo;
+	char shm_path[PATH_MAX] = "";
 
 	/* Get date and time for automatic session name/path */
 	time(&rawtime);
@@ -451,7 +460,7 @@ static int create_session(void)
 		}
 		ret = lttng_create_session_live(session_name, url, opt_live_timer);
 	} else {
-		ret = _lttng_create_session_ext(session_name, url, datetime, -1);
+		ret = _lttng_create_session_ext(session_name, url, datetime);
 	}
 	if (ret < 0) {
 		/* Don't set ret so lttng can interpret the sessiond error. */
@@ -480,6 +489,21 @@ static int create_session(void)
 		}
 	}
 
+	if (opt_shm_path) {
+		ret = snprintf(shm_path, sizeof(shm_path),
+				"%s/%s", opt_shm_path, session_name_date);
+		if (ret < 0) {
+			PERROR("snprintf shm_path");
+			goto error;
+		}
+
+		ret = lttng_set_session_shm_path(session_name, shm_path);
+		if (ret < 0) {
+			lttng_destroy_session(session_name);
+			goto error;
+		}
+	}
+
 	MSG("Session %s created.", session_name);
 	if (print_str_url && !opt_snapshot) {
 		MSG("Traces will be written in %s", print_str_url);
@@ -493,6 +517,10 @@ static int create_session(void)
 		}
 		MSG("Snapshot mode set. Every channel enabled for that session will "
 				"be set in overwrite mode and mmap output.");
+	}
+	if (opt_shm_path) {
+		MSG("Session %s set to shm_path: %s.", session_name,
+			shm_path);
 	}
 
 	/* Mi output */
@@ -520,6 +548,137 @@ error:
 
 	if (ret < 0) {
 		ERR("%s", lttng_strerror(ret));
+	}
+	return ret;
+}
+
+/*
+ *  spawn_sessiond
+ *
+ *  Spawn a session daemon by forking and execv.
+ */
+static int spawn_sessiond(char *pathname)
+{
+	int ret = 0;
+	pid_t pid;
+
+	MSG("Spawning a session daemon");
+	pid = fork();
+	if (pid == 0) {
+		/*
+		 * Spawn session daemon in daemon mode.
+		 */
+		execlp(pathname, "lttng-sessiond",
+				"--daemonize", NULL);
+		/* execlp only returns if error happened */
+		if (errno == ENOENT) {
+			ERR("No session daemon found. Use --sessiond-path.");
+		} else {
+			PERROR("execlp");
+		}
+		kill(getppid(), SIGTERM);	/* wake parent */
+		exit(EXIT_FAILURE);
+	} else if (pid > 0) {
+		/*
+		 * In daemon mode (--daemonize), sessiond only exits when
+		 * it's ready to accept commands.
+		 */
+		for (;;) {
+			int status;
+			pid_t wait_pid_ret = waitpid(pid, &status, 0);
+
+			if (wait_pid_ret < 0) {
+				if (errno == EINTR) {
+					continue;
+				}
+				PERROR("waitpid");
+				ret = -errno;
+				goto end;
+			}
+
+			if (WIFSIGNALED(status)) {
+				ERR("Session daemon was killed by signal %d",
+						WTERMSIG(status));
+				ret = -1;
+			        goto end;
+			} else if (WIFEXITED(status)) {
+				DBG("Session daemon terminated normally (exit status: %d)",
+						WEXITSTATUS(status));
+
+				if (WEXITSTATUS(status) != 0) {
+					ERR("Session daemon terminated with an error (exit status: %d)",
+							WEXITSTATUS(status));
+					ret = -1;
+				        goto end;
+				}
+				break;
+			}
+		}
+
+		goto end;
+	} else {
+		PERROR("fork");
+		ret = -1;
+		goto end;
+	}
+
+end:
+	return ret;
+}
+
+/*
+ *  launch_sessiond
+ *
+ *  Check if the session daemon is available using
+ *  the liblttngctl API for the check. If not, try to
+ *  spawn a daemon.
+ */
+static int launch_sessiond(void)
+{
+	int ret;
+	char *pathname = NULL;
+
+	ret = lttng_session_daemon_alive();
+	if (ret) {
+		/* Sessiond is alive, not an error */
+		ret = 0;
+		goto end;
+	}
+
+	/* Try command line option path */
+	pathname = opt_sessiond_path;
+
+	/* Try LTTNG_SESSIOND_PATH env variable */
+	if (pathname == NULL) {
+		pathname = getenv(DEFAULT_SESSIOND_PATH_ENV);
+	}
+
+	/* Try with configured path */
+	if (pathname == NULL) {
+		if (CONFIG_SESSIOND_BIN[0] != '\0') {
+			pathname = CONFIG_SESSIOND_BIN;
+		}
+	}
+
+	/* Try the default path */
+	if (pathname == NULL) {
+		pathname = INSTALL_BIN_PATH "/lttng-sessiond";
+	}
+
+	DBG("Session daemon binary path: %s", pathname);
+
+	/* Check existence and permissions */
+	ret = access(pathname, F_OK | X_OK);
+	if (ret < 0) {
+		ERR("No such file or access denied: %s", pathname);
+		goto end;
+	}
+
+	ret = spawn_sessiond(pathname);
+end:
+	if (ret) {
+		ERR("Problem occurred while launching session daemon (%s)",
+				pathname);
 	}
 	return ret;
 }
@@ -571,6 +730,11 @@ int cmd_create(int argc, const char **argv)
 				ret = CMD_ERROR;
 				goto end;
 			}
+			if (v == 0) {
+				ERR("Live timer interval must be greater than zero");
+				ret = CMD_ERROR;
+				goto end;
+			}
 			opt_live_timer = (uint32_t) v;
 			DBG("Session live timer interval set to %d", opt_live_timer);
 			break;
@@ -586,6 +750,15 @@ int cmd_create(int argc, const char **argv)
 		MSG("The option --no-consumer is obsolete. Use --no-output now.");
 		ret = CMD_WARNING;
 		goto end;
+	}
+
+	/* Spawn a session daemon if needed */
+	if (!opt_no_sessiond) {
+		ret = launch_sessiond();
+		if (ret) {
+			ret = CMD_ERROR;
+			goto end;
+		}
 	}
 
 	/* MI initialization */

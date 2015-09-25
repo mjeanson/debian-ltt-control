@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -472,6 +473,7 @@ struct consumer_output *consumer_create_output(enum consumer_dst_type type)
 	output->enabled = 1;
 	output->type = type;
 	output->net_seq_index = (uint64_t) -1ULL;
+	urcu_ref_init(&output->ref);
 
 	output->socks = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
 
@@ -506,11 +508,10 @@ void consumer_destroy_output_sockets(struct consumer_output *obj)
  *
  * Should *NOT* be called with RCU read-side lock held.
  */
-void consumer_destroy_output(struct consumer_output *obj)
+static void consumer_release_output(struct urcu_ref *ref)
 {
-	if (obj == NULL) {
-		return;
-	}
+	struct consumer_output *obj =
+		caa_container_of(ref, struct consumer_output, ref);
 
 	consumer_destroy_output_sockets(obj);
 
@@ -523,6 +524,27 @@ void consumer_destroy_output(struct consumer_output *obj)
 }
 
 /*
+ * Get the consumer_output object.
+ */
+void consumer_output_get(struct consumer_output *obj)
+{
+	urcu_ref_get(&obj->ref);
+}
+
+/*
+ * Put the consumer_output object.
+ *
+ * Should *NOT* be called with RCU read-side lock held.
+ */
+void consumer_output_put(struct consumer_output *obj)
+{
+	if (!obj) {
+		return;
+	}
+	urcu_ref_put(&obj->ref, consumer_release_output);
+}
+
+/*
  * Copy consumer output and returned the newly allocated copy.
  *
  * Should *NOT* be called with RCU read-side lock held.
@@ -530,33 +552,28 @@ void consumer_destroy_output(struct consumer_output *obj)
 struct consumer_output *consumer_copy_output(struct consumer_output *obj)
 {
 	int ret;
-	struct lttng_ht *tmp_ht_ptr;
 	struct consumer_output *output;
 
 	assert(obj);
 
 	output = consumer_create_output(obj->type);
 	if (output == NULL) {
-		goto error;
+		goto end;
 	}
-	/* Avoid losing the HT reference after the memcpy() */
-	tmp_ht_ptr = output->socks;
-
-	memcpy(output, obj, sizeof(struct consumer_output));
-
-	/* Putting back the HT pointer and start copying socket(s). */
-	output->socks = tmp_ht_ptr;
-
+	output->enabled = obj->enabled;
+	output->net_seq_index = obj->net_seq_index;
+	memcpy(output->subdir, obj->subdir, PATH_MAX);
+	output->snapshot = obj->snapshot;
+	memcpy(&output->dst, &obj->dst, sizeof(output->dst));
 	ret = consumer_copy_sockets(output, obj);
 	if (ret < 0) {
-		goto malloc_error;
+		goto error_put;
 	}
-
-error:
+end:
 	return output;
 
-malloc_error:
-	consumer_destroy_output(output);
+error_put:
+	consumer_output_put(output);
 	return NULL;
 }
 
@@ -800,7 +817,9 @@ void consumer_init_ask_channel_comm_msg(struct lttcomm_consumer_msg *msg,
 		uint64_t tracefile_count,
 		uint64_t session_id_per_pid,
 		unsigned int monitor,
-		uint32_t ust_app_uid)
+		uint32_t ust_app_uid,
+		const char *root_shm_path,
+		const char *shm_path)
 {
 	assert(msg);
 
@@ -838,6 +857,17 @@ void consumer_init_ask_channel_comm_msg(struct lttcomm_consumer_msg *msg,
 
 	strncpy(msg->u.ask_channel.name, name, sizeof(msg->u.ask_channel.name));
 	msg->u.ask_channel.name[sizeof(msg->u.ask_channel.name) - 1] = '\0';
+
+	if (root_shm_path) {
+		strncpy(msg->u.ask_channel.root_shm_path, root_shm_path,
+			sizeof(msg->u.ask_channel.root_shm_path));
+		msg->u.ask_channel.root_shm_path[sizeof(msg->u.ask_channel.root_shm_path) - 1] = '\0';
+	}
+	if (shm_path) {
+		strncpy(msg->u.ask_channel.shm_path, shm_path,
+			sizeof(msg->u.ask_channel.shm_path));
+		msg->u.ask_channel.shm_path[sizeof(msg->u.ask_channel.shm_path) - 1] = '\0';
+	}
 }
 
 /*
@@ -1326,7 +1356,7 @@ int consumer_snapshot_channel(struct consumer_socket *socket, uint64_t key,
 		ret = run_as_mkdir_recursive(msg.u.snapshot_channel.pathname,
 				S_IRWXU | S_IRWXG, uid, gid);
 		if (ret < 0) {
-			if (ret != -EEXIST) {
+			if (errno != EEXIST) {
 				ERR("Trace directory creation error");
 				goto error;
 			}

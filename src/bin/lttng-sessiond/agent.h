@@ -36,7 +36,8 @@ struct lttng_ht *agent_apps_ht_by_sock;
 
 struct agent_ht_key {
 	const char *name;
-	int loglevel;
+	int loglevel_value;
+	enum lttng_loglevel_type loglevel_type;
 };
 
 /*
@@ -80,7 +81,7 @@ struct agent_app {
 struct agent_event {
 	/* Name of the event. */
 	char name[LTTNG_SYMBOL_NAME_LEN];
-	int loglevel;
+	int loglevel_value;
 	enum lttng_loglevel_type loglevel_type;
 
 	/*
@@ -91,8 +92,10 @@ struct agent_event {
 	/* Hash table node of the agent domain object. */
 	struct lttng_ht_node_str node;
 
-	/* Bytecode filter associated with the event . NULL if none. */
+	/* Filter associated with the event. NULL if none. */
 	struct lttng_filter_bytecode *filter;
+	char *filter_expression;
+	struct lttng_event_exclusion *exclusion;
 };
 
 /*
@@ -117,8 +120,10 @@ struct agent {
 	struct lttng_ht_node_u64 node;
 };
 
-/* Setup agent subsystem. */
-int agent_setup(void);
+/* Allocate agent apps hash table */
+int agent_app_ht_alloc(void);
+/* Clean-up agent apps hash table */
+void agent_app_ht_clean(void);
 
 /* Initialize an already allocated agent domain. */
 int agent_init(struct agent *agt);
@@ -128,13 +133,18 @@ void agent_add(struct agent *agt, struct lttng_ht *ht);
 
 /* Agent event API. */
 struct agent_event *agent_create_event(const char *name,
-		struct lttng_filter_bytecode *filter);
+		enum lttng_loglevel_type loglevel_type, int loglevel_value,
+		struct lttng_filter_bytecode *filter,
+		char *filter_expression);
 void agent_add_event(struct agent_event *event, struct agent *agt);
 
-struct agent_event *agent_find_event(const char *name, int loglevel,
+struct agent_event *agent_find_event(const char *name,
+		enum lttng_loglevel_type loglevel_type, int loglevel_value,
 		struct agent *agt);
-struct agent_event *agent_find_event_by_name(const char *name,
-		struct agent *agt);
+void agent_find_events_by_name(const char *name, struct agent *agt,
+		struct lttng_ht_iter* iter);
+void agent_event_next_duplicate(const char *name,
+		struct agent *agt, struct lttng_ht_iter* iter);
 void agent_delete_event(struct agent_event *event, struct agent *agt);
 void agent_destroy_event(struct agent_event *event);
 
@@ -145,6 +155,7 @@ void agent_add_app(struct agent_app *app);
 void agent_delete_app(struct agent_app *app);
 struct agent_app *agent_find_app_by_sock(int sock);
 void agent_destroy_app(struct agent_app *app);
+void agent_destroy_app_by_sock(int sock);
 int agent_send_registration_done(struct agent_app *app);
 
 /* Agent action API */

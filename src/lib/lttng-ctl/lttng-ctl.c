@@ -20,6 +20,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <grp.h>
 #include <errno.h>
@@ -106,6 +107,7 @@ void lttng_ctl_copy_lttng_domain(struct lttng_domain *dst,
 		case LTTNG_DOMAIN_UST:
 		case LTTNG_DOMAIN_JUL:
 		case LTTNG_DOMAIN_LOG4J:
+		case LTTNG_DOMAIN_PYTHON:
 			memcpy(dst, src, sizeof(struct lttng_domain));
 			break;
 		default:
@@ -219,19 +221,19 @@ int lttng_check_tracing_group(void)
 	/* Get number of supplementary group IDs */
 	grp_list_size = getgroups(0, NULL);
 	if (grp_list_size < 0) {
-		perror("getgroups");
+		PERROR("getgroups");
 		goto end;
 	}
 
 	/* Alloc group list of the right size */
 	grp_list = zmalloc(grp_list_size * sizeof(gid_t));
 	if (!grp_list) {
-		perror("malloc");
+		PERROR("malloc");
 		goto end;
 	}
 	grp_id = getgroups(grp_list_size, grp_list);
 	if (grp_id < 0) {
-		perror("getgroups");
+		PERROR("getgroups");
 		goto free_list;
 	}
 
@@ -273,7 +275,7 @@ static int try_connect_sessiond(const char *sock_path)
 
 	ret = lttcomm_close_unix_sock(ret);
 	if (ret < 0) {
-		perror("lttcomm_close_unix_sock");
+		PERROR("lttcomm_close_unix_sock");
 	}
 
 	return 0;
@@ -694,25 +696,25 @@ int lttng_enable_event_with_filter(struct lttng_handle *handle,
 }
 
 /*
- * Depending on the event, return a newly allocated JUL filter expression or
+ * Depending on the event, return a newly allocated agent filter expression or
  * NULL if not applicable.
  *
  * An event with NO loglevel and the name is * will return NULL.
  */
-static char *set_jul_filter(const char *filter, struct lttng_event *ev)
+static char *set_agent_filter(const char *filter, struct lttng_event *ev)
 {
 	int err;
-	char *jul_filter = NULL;
+	char *agent_filter = NULL;
 
 	assert(ev);
 
 	/* Don't add filter for the '*' event. */
 	if (ev->name[0] != '*') {
 		if (filter) {
-			err = asprintf(&jul_filter, "(%s) && (logger_name == \"%s\")", filter,
+			err = asprintf(&agent_filter, "(%s) && (logger_name == \"%s\")", filter,
 					ev->name);
 		} else {
-			err = asprintf(&jul_filter, "logger_name == \"%s\"", ev->name);
+			err = asprintf(&agent_filter, "logger_name == \"%s\"", ev->name);
 		}
 		if (err < 0) {
 			PERROR("asprintf");
@@ -730,18 +732,18 @@ static char *set_jul_filter(const char *filter, struct lttng_event *ev)
 			op = "==";
 		}
 
-		if (filter || jul_filter) {
+		if (filter || agent_filter) {
 			char *new_filter;
 
 			err = asprintf(&new_filter, "(%s) && (int_loglevel %s %d)",
-					jul_filter ? jul_filter : filter, op,
+					agent_filter ? agent_filter : filter, op,
 					ev->loglevel);
-			if (jul_filter) {
-				free(jul_filter);
+			if (agent_filter) {
+				free(agent_filter);
 			}
-			jul_filter = new_filter;
+			agent_filter = new_filter;
 		} else {
-			err = asprintf(&jul_filter, "int_loglevel %s %d", op,
+			err = asprintf(&agent_filter, "int_loglevel %s %d", op,
 					ev->loglevel);
 		}
 		if (err < 0) {
@@ -750,9 +752,9 @@ static char *set_jul_filter(const char *filter, struct lttng_event *ev)
 		}
 	}
 
-	return jul_filter;
+	return agent_filter;
 error:
-	free(jul_filter);
+	free(agent_filter);
 	return NULL;
 }
 
@@ -856,7 +858,7 @@ static int generate_filter(char *filter_expression,
 
 	/* No need to keep the memory stream. */
 	if (fclose(fmem) != 0) {
-		perror("fclose");
+		PERROR("fclose");
 	}
 
 	*ctxp = ctx;
@@ -867,7 +869,7 @@ parse_error:
 	filter_parser_ctx_free(ctx);
 filter_alloc_error:
 	if (fclose(fmem) != 0) {
-		perror("fclose");
+		PERROR("fclose");
 	}
 error:
 	return ret;
@@ -945,7 +947,8 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 	 */
 	if (exclusion_count == 0 && filter_expression == NULL &&
 			(handle->domain.type != LTTNG_DOMAIN_JUL &&
-				handle->domain.type != LTTNG_DOMAIN_LOG4J)) {
+				handle->domain.type != LTTNG_DOMAIN_LOG4J &&
+				handle->domain.type != LTTNG_DOMAIN_PYTHON)) {
 		goto ask_sessiond;
 	}
 
@@ -956,24 +959,26 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 
 	/* Parse filter expression */
 	if (filter_expression != NULL || handle->domain.type == LTTNG_DOMAIN_JUL
-			|| handle->domain.type == LTTNG_DOMAIN_LOG4J) {
+			|| handle->domain.type == LTTNG_DOMAIN_LOG4J
+			|| handle->domain.type == LTTNG_DOMAIN_PYTHON) {
 		if (handle->domain.type == LTTNG_DOMAIN_JUL ||
-				handle->domain.type == LTTNG_DOMAIN_LOG4J) {
-			char *jul_filter;
+				handle->domain.type == LTTNG_DOMAIN_LOG4J ||
+				handle->domain.type == LTTNG_DOMAIN_PYTHON) {
+			char *agent_filter;
 
 			/* Setup JUL filter if needed. */
-			jul_filter = set_jul_filter(filter_expression, ev);
-			if (!jul_filter) {
+			agent_filter = set_agent_filter(filter_expression, ev);
+			if (!agent_filter) {
 				if (!filter_expression) {
 					/* No JUL and no filter, just skip everything below. */
 					goto ask_sessiond;
 				}
 			} else {
 				/*
-				 * With a JUL filter, the original filter has been added to it
-				 * thus replace the filter expression.
+				 * With an agent filter, the original filter has been added to
+				 * it thus replace the filter expression.
 				 */
-				filter_expression = jul_filter;
+				filter_expression = agent_filter;
 				free_filter_expression = 1;
 			}
 		}
@@ -1086,10 +1091,6 @@ int lttng_disable_event_ext(struct lttng_handle *handle,
 	}
 
 	lsm.cmd_type = LTTNG_DISABLE_EVENT;
-	if (ev->name[0] == '\0') {
-		/* Disable all events */
-		lttng_ctl_copy_string(ev->name, "*", sizeof(ev->name));
-	}
 
 	lttng_ctl_copy_lttng_domain(&lsm.domain, &handle->domain);
 	/* FIXME: copying non-packed struct to packed struct. */
@@ -1106,7 +1107,8 @@ int lttng_disable_event_ext(struct lttng_handle *handle,
 	 */
 	if (filter_expression == NULL &&
 			(handle->domain.type != LTTNG_DOMAIN_JUL &&
-				handle->domain.type != LTTNG_DOMAIN_LOG4J)) {
+				handle->domain.type != LTTNG_DOMAIN_LOG4J &&
+				handle->domain.type != LTTNG_DOMAIN_PYTHON)) {
 		goto ask_sessiond;
 	}
 
@@ -1117,14 +1119,16 @@ int lttng_disable_event_ext(struct lttng_handle *handle,
 
 	/* Parse filter expression */
 	if (filter_expression != NULL || handle->domain.type == LTTNG_DOMAIN_JUL
-			|| handle->domain.type == LTTNG_DOMAIN_LOG4J) {
+			|| handle->domain.type == LTTNG_DOMAIN_LOG4J
+			|| handle->domain.type == LTTNG_DOMAIN_PYTHON) {
 		if (handle->domain.type == LTTNG_DOMAIN_JUL ||
-				handle->domain.type == LTTNG_DOMAIN_LOG4J) {
-			char *jul_filter;
+				handle->domain.type == LTTNG_DOMAIN_LOG4J ||
+				handle->domain.type == LTTNG_DOMAIN_PYTHON) {
+			char *agent_filter;
 
 			/* Setup JUL filter if needed. */
-			jul_filter = set_jul_filter(filter_expression, ev);
-			if (!jul_filter) {
+			agent_filter = set_agent_filter(filter_expression, ev);
+			if (!agent_filter) {
 				if (!filter_expression) {
 					/* No JUL and no filter, just skip everything below. */
 					goto ask_sessiond;
@@ -1134,7 +1138,7 @@ int lttng_disable_event_ext(struct lttng_handle *handle,
 				 * With a JUL filter, the original filter has been added to it
 				 * thus replace the filter expression.
 				 */
-				filter_expression = jul_filter;
+				filter_expression = agent_filter;
 				free_filter_expression = 1;
 			}
 		}
@@ -1263,6 +1267,62 @@ int lttng_disable_channel(struct lttng_handle *handle, const char *name)
 
 	lttng_ctl_copy_string(lsm.u.disable.channel_name, name,
 			sizeof(lsm.u.disable.channel_name));
+
+	lttng_ctl_copy_lttng_domain(&lsm.domain, &handle->domain);
+
+	lttng_ctl_copy_string(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+
+	return lttng_ctl_ask_sessiond(&lsm, NULL);
+}
+
+/*
+ *  Add PID to session tracker.
+ *  Return 0 on success else a negative LTTng error code.
+ */
+int lttng_track_pid(struct lttng_handle *handle, int pid)
+{
+	struct lttcomm_session_msg lsm;
+
+	/*
+	 * NULL arguments are forbidden. No default values.
+	 */
+	if (handle == NULL) {
+		return -LTTNG_ERR_INVALID;
+	}
+
+	memset(&lsm, 0, sizeof(lsm));
+
+	lsm.cmd_type = LTTNG_TRACK_PID;
+	lsm.u.pid_tracker.pid = pid;
+
+	lttng_ctl_copy_lttng_domain(&lsm.domain, &handle->domain);
+
+	lttng_ctl_copy_string(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+
+	return lttng_ctl_ask_sessiond(&lsm, NULL);
+}
+
+/*
+ *  Remove PID from session tracker.
+ *  Return 0 on success else a negative LTTng error code.
+ */
+int lttng_untrack_pid(struct lttng_handle *handle, int pid)
+{
+	struct lttcomm_session_msg lsm;
+
+	/*
+	 * NULL arguments are forbidden. No default values.
+	 */
+	if (handle == NULL) {
+		return -LTTNG_ERR_INVALID;
+	}
+
+	memset(&lsm, 0, sizeof(lsm));
+
+	lsm.cmd_type = LTTNG_UNTRACK_PID;
+	lsm.u.pid_tracker.pid = pid;
 
 	lttng_ctl_copy_lttng_domain(&lsm.domain, &handle->domain);
 
@@ -1442,6 +1502,26 @@ int lttng_list_sessions(struct lttng_session **sessions)
 	}
 
 	return ret / sizeof(struct lttng_session);
+}
+
+int lttng_set_session_shm_path(const char *session_name,
+		const char *shm_path)
+{
+	struct lttcomm_session_msg lsm;
+
+	if (session_name == NULL) {
+		return -LTTNG_ERR_INVALID;
+	}
+
+	memset(&lsm, 0, sizeof(lsm));
+	lsm.cmd_type = LTTNG_SET_SESSION_SHM_PATH;
+
+	lttng_ctl_copy_string(lsm.session.name, session_name,
+			sizeof(lsm.session.name));
+	lttng_ctl_copy_string(lsm.u.set_shm_path.shm_path, shm_path,
+			sizeof(lsm.u.set_shm_path.shm_path));
+
+	return lttng_ctl_ask_sessiond(&lsm, NULL);
 }
 
 /*
@@ -1870,7 +1950,7 @@ int lttng_create_session_live(const char *name, const char *url,
 	struct lttcomm_session_msg lsm;
 	struct lttng_uri *uris = NULL;
 
-	if (name == NULL) {
+	if (name == NULL || timer_interval == 0) {
 		return -LTTNG_ERR_INVALID;
 	}
 
@@ -1904,6 +1984,52 @@ int lttng_create_session_live(const char *name, const char *url,
 end:
 	free(uris);
 	return ret;
+}
+
+/*
+ * List PIDs in the tracker.
+ *
+ * @enabled is set to whether the PID tracker is enabled.
+ * @pids is set to an allocated array of PIDs currently tracked. On
+ * success, @pids must be freed by the caller.
+ * @nr_pids is set to the number of entries contained by the @pids array.
+ *
+ * Returns 0 on success, else a negative LTTng error code.
+ */
+int lttng_list_tracker_pids(struct lttng_handle *handle,
+		int *_enabled, int32_t **_pids, size_t *_nr_pids)
+{
+	int ret;
+	int enabled = 1;
+	struct lttcomm_session_msg lsm;
+	size_t nr_pids;
+	int32_t *pids;
+
+	if (handle == NULL) {
+		return -LTTNG_ERR_INVALID;
+	}
+
+	memset(&lsm, 0, sizeof(lsm));
+	lsm.cmd_type = LTTNG_LIST_TRACKER_PIDS;
+	lttng_ctl_copy_string(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+	lttng_ctl_copy_lttng_domain(&lsm.domain, &handle->domain);
+
+	ret = lttng_ctl_ask_sessiond(&lsm, (void **) &pids);
+	if (ret < 0) {
+		return ret;
+	}
+	nr_pids = ret / sizeof(int32_t);
+	if (nr_pids == 1 && pids[0] == -1) {
+		free(pids);
+		pids = NULL;
+		enabled = 0;
+		nr_pids = 0;
+	}
+	*_enabled = enabled;
+	*_pids = pids;
+	*_nr_pids = nr_pids;
+	return 0;
 }
 
 /*

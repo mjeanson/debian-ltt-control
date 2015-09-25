@@ -15,7 +15,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef _LTT_UST_APP_H 
+#ifndef _LTT_UST_APP_H
 #define _LTT_UST_APP_H
 
 #include <stdint.h>
@@ -48,9 +48,9 @@ struct ust_app_notify_sock_obj {
 
 struct ust_app_ht_key {
 	const char *name;
-	const struct lttng_ust_filter_bytecode *filter;
-	enum lttng_ust_loglevel_type loglevel;
-	const struct lttng_ust_event_exclusion *exclusion;
+	const struct lttng_filter_bytecode *filter;
+	enum lttng_ust_loglevel_type loglevel_type;
+	const struct lttng_event_exclusion *exclusion;
 };
 
 /*
@@ -115,8 +115,8 @@ struct ust_app_event {
 	struct lttng_ust_event attr;
 	char name[LTTNG_UST_SYM_NAME_LEN];
 	struct lttng_ht_node_str node;
-	struct lttng_ust_filter_bytecode *filter;
-	struct lttng_ust_event_exclusion *exclusion;
+	struct lttng_filter_bytecode *filter;
+	struct lttng_event_exclusion *exclusion;
 };
 
 struct ust_app_stream {
@@ -183,6 +183,8 @@ struct ust_app_session {
 	int started;  /* allows detection of start vs restart. */
 	int handle;   /* used has unique identifier for app session */
 
+	bool deleted;	/* Session deleted flag. Check with lock held. */
+
 	/*
 	 * Tracing session ID. Multiple ust app session can have the same tracing
 	 * session id making this value NOT unique to the object.
@@ -215,6 +217,9 @@ struct ust_app_session {
 
 	/* Metadata channel attributes. */
 	struct ustctl_consumer_channel_attr metadata_attr;
+
+	char root_shm_path[PATH_MAX];
+	char shm_path[PATH_MAX];
 };
 
 /*
@@ -223,6 +228,8 @@ struct ust_app_session {
  */
 struct ust_app {
 	int sock;
+	pthread_mutex_t sock_lock;	/* Protects sock protocol. */
+
 	int notify_sock;
 	pid_t pid;
 	pid_t ppid;
@@ -279,11 +286,7 @@ struct ust_app {
 #ifdef HAVE_LIBLTTNG_UST_CTL
 
 int ust_app_register(struct ust_register_msg *msg, int sock);
-static inline
-int ust_app_register_done(int sock)
-{
-	return ustctl_register_done(sock);
-}
+int ust_app_register_done(struct ust_app *app);
 int ust_app_version(struct ust_app *app);
 void ust_app_unregister(int sock);
 int ust_app_start_trace_all(struct ltt_ust_session *usess);
@@ -310,10 +313,11 @@ int ust_app_disable_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent);
 int ust_app_add_ctx_channel_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_context *uctx);
-void ust_app_global_update(struct ltt_ust_session *usess, int sock);
+void ust_app_global_update(struct ltt_ust_session *usess, struct ust_app *app);
+void ust_app_global_update_all(struct ltt_ust_session *usess);
 
 void ust_app_clean_list(void);
-void ust_app_ht_alloc(void);
+int ust_app_ht_alloc(void);
 struct ust_app *ust_app_find_by_pid(pid_t pid);
 int ust_app_calibrate_glb(struct lttng_ust_calibrate *calibrate);
 struct ust_app_stream *ust_app_alloc_stream(void);
@@ -376,7 +380,7 @@ int ust_app_register(struct ust_register_msg *msg, int sock)
 	return -ENOSYS;
 }
 static inline
-int ust_app_register_done(int sock)
+int ust_app_register_done(struct ust_app *app)
 {
 	return -ENOSYS;
 }
@@ -412,10 +416,12 @@ struct ust_app *ust_app_get_by_pid(pid_t pid)
 	return NULL;
 }
 static inline
-void ust_app_ht_alloc(void)
-{}
+int ust_app_ht_alloc(void)
+{
+	return 0;
+}
 static inline
-void ust_app_global_update(struct ltt_ust_session *usess, int sock)
+void ust_app_global_update(struct ltt_ust_session *usess, struct ust_app *app)
 {}
 static inline
 int ust_app_disable_channel_glb(struct ltt_ust_session *usess,

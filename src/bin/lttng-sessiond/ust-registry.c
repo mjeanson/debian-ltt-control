@@ -15,6 +15,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <inttypes.h>
 
@@ -42,13 +43,13 @@ static int ht_match_event(struct cds_lfht_node *node, const void *_key)
 	key = _key;
 
 	/* It has to be a perfect match. */
-	if (strncmp(event->name, key->name, sizeof(event->name)) != 0) {
+	if (strncmp(event->name, key->name, sizeof(event->name))) {
 		goto no_match;
 	}
 
 	/* It has to be a perfect match. */
 	if (strncmp(event->signature, key->signature,
-				strlen(event->signature) != 0)) {
+			strlen(event->signature))) {
 		goto no_match;
 	}
 
@@ -132,8 +133,8 @@ int validate_event_fields(size_t nr_fields, struct ustctl_field *fields,
  */
 static struct ust_registry_event *alloc_event(int session_objd,
 		int channel_objd, char *name, char *sig, size_t nr_fields,
-		struct ustctl_field *fields, int loglevel, char *model_emf_uri,
-		struct ust_app *app)
+		struct ustctl_field *fields, int loglevel_value,
+		char *model_emf_uri, struct ust_app *app)
 {
 	struct ust_registry_event *event = NULL;
 
@@ -156,7 +157,7 @@ static struct ust_registry_event *alloc_event(int session_objd,
 	event->signature = sig;
 	event->nr_fields = nr_fields;
 	event->fields = fields;
-	event->loglevel = loglevel;
+	event->loglevel_value = loglevel_value;
 	event->model_emf_uri = model_emf_uri;
 	if (name) {
 		/* Copy event name and force NULL byte. */
@@ -247,9 +248,9 @@ end:
  */
 int ust_registry_create_event(struct ust_registry_session *session,
 		uint64_t chan_key, int session_objd, int channel_objd, char *name,
-		char *sig, size_t nr_fields, struct ustctl_field *fields, int loglevel,
-		char *model_emf_uri, int buffer_type, uint32_t *event_id_p,
-		struct ust_app *app)
+		char *sig, size_t nr_fields, struct ustctl_field *fields,
+		int loglevel_value, char *model_emf_uri, int buffer_type,
+		uint32_t *event_id_p, struct ust_app *app)
 {
 	int ret;
 	uint32_t event_id;
@@ -286,7 +287,7 @@ int ust_registry_create_event(struct ust_registry_session *session,
 	}
 
 	event = alloc_event(session_objd, channel_objd, name, sig, nr_fields,
-			fields, loglevel, model_emf_uri, app);
+			fields, loglevel_value, model_emf_uri, app);
 	if (!event) {
 		ret = -ENOMEM;
 		goto error_free;
@@ -545,7 +546,11 @@ int ust_registry_session_init(struct ust_registry_session **sessionp,
 		uint32_t long_alignment,
 		int byte_order,
 		uint32_t major,
-		uint32_t minor)
+		uint32_t minor,
+		const char *root_shm_path,
+		const char *shm_path,
+		uid_t euid,
+		gid_t egid)
 {
 	int ret;
 	struct ust_registry_session *session;
@@ -566,6 +571,43 @@ int ust_registry_session_init(struct ust_registry_session **sessionp,
 	session->uint64_t_alignment = uint64_t_alignment;
 	session->long_alignment = long_alignment;
 	session->byte_order = byte_order;
+	session->metadata_fd = -1;
+	session->uid = euid;
+	session->gid = egid;
+	strncpy(session->root_shm_path, root_shm_path,
+		sizeof(session->root_shm_path));
+	session->root_shm_path[sizeof(session->root_shm_path) - 1] = '\0';
+	if (shm_path[0]) {
+		strncpy(session->shm_path, shm_path,
+			sizeof(session->shm_path));
+		session->shm_path[sizeof(session->shm_path) - 1] = '\0';
+		strncpy(session->metadata_path, shm_path,
+			sizeof(session->metadata_path));
+		session->metadata_path[sizeof(session->metadata_path) - 1] = '\0';
+		strncat(session->metadata_path, "/metadata",
+			sizeof(session->metadata_path)
+				- strlen(session->metadata_path) - 1);
+	}
+	if (session->shm_path[0]) {
+		ret = run_as_mkdir_recursive(session->shm_path,
+			S_IRWXU | S_IRWXG,
+			euid, egid);
+		if (ret) {
+			PERROR("run_as_mkdir_recursive");
+			goto error;
+		}
+	}
+	if (session->metadata_path[0]) {
+		/* Create metadata file */
+		ret = run_as_open(session->metadata_path,
+			O_WRONLY | O_CREAT | O_EXCL,
+			S_IRUSR | S_IWUSR, euid, egid);
+		if (ret < 0) {
+			PERROR("Opening metadata file");
+			goto error;
+		}
+		session->metadata_fd = ret;
+	}
 
 	session->channels = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
 	if (!session->channels) {
@@ -607,7 +649,9 @@ void ust_registry_session_destroy(struct ust_registry_session *reg)
 	struct lttng_ht_iter iter;
 	struct ust_registry_channel *chan;
 
-	assert(reg);
+	if (!reg) {
+		return;
+	}
 
 	/* On error, EBUSY can be returned if lock. Code flow error. */
 	ret = pthread_mutex_destroy(&reg->lock);
@@ -628,4 +672,22 @@ void ust_registry_session_destroy(struct ust_registry_session *reg)
 	}
 
 	free(reg->metadata);
+	if (reg->metadata_fd >= 0) {
+		ret = close(reg->metadata_fd);
+		if (ret) {
+			PERROR("close");
+		}
+		ret = run_as_unlink(reg->metadata_path,
+				reg->uid, reg->gid);
+		if (ret) {
+			PERROR("unlink");
+		}
+	}
+	if (reg->root_shm_path[0]) {
+		/*
+		 * Try deleting the directory hierarchy.
+		 */
+		(void) run_as_recursive_rmdir(reg->root_shm_path,
+				reg->uid, reg->gid);
+	}
 }

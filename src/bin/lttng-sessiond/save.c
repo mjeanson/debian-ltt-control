@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <inttypes.h>
 #include <string.h>
@@ -29,10 +30,12 @@
 #include <common/runas.h>
 #include <lttng/save-internal.h>
 
+#include "kernel.h"
 #include "save.h"
 #include "session.h"
 #include "syscall.h"
 #include "trace-ust.h"
+#include "agent.h"
 
 static
 int save_kernel_channel_attributes(struct config_writer *writer,
@@ -361,6 +364,16 @@ int save_kernel_event(struct config_writer *writer,
 		goto end;
 	}
 
+	if (event->filter_expression) {
+		ret = config_writer_write_element_string(writer,
+				config_element_filter,
+				event->filter_expression);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+	}
+
 	if (event->event->instrumentation == LTTNG_KERNEL_FUNCTION ||
 		event->event->instrumentation == LTTNG_KERNEL_KPROBE ||
 		event->event->instrumentation == LTTNG_KERNEL_KRETPROBE) {
@@ -509,7 +522,13 @@ int save_kernel_syscall(struct config_writer *writer,
 		struct ltt_kernel_event *kevent;
 
 		/* Create a temporary kevent in order to save it. */
-		kevent = trace_kernel_create_event(&events[i]);
+		/*
+		 * TODO: struct lttng_event does not really work for a filter,
+		 * but unfortunately, it is exposed as external API (and used as
+		 * internal representation. Using NULL meanwhile.
+		 */
+		kevent = trace_kernel_create_event(&events[i],
+			NULL, NULL);
 		if (!kevent) {
 			ret = -ENOMEM;
 			goto end;
@@ -624,11 +643,14 @@ int save_ust_event(struct config_writer *writer,
 		goto end;
 	}
 
-	ret = config_writer_write_element_signed_int(writer,
-		config_element_loglevel, event->attr.loglevel);
-	if (ret) {
-		ret = LTTNG_ERR_SAVE_IO_FAIL;
-		goto end;
+	/* The log level is irrelevant if no "filtering" is enabled */
+	if (event->attr.loglevel_type != LTTNG_UST_LOGLEVEL_ALL) {
+		ret = config_writer_write_element_signed_int(writer,
+				config_element_loglevel, event->attr.loglevel);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
 	}
 
 	if (event->filter_expression) {
@@ -697,7 +719,98 @@ int save_ust_events(struct config_writer *writer,
 	cds_lfht_for_each_entry(events->ht, &iter.iter, node, node) {
 		event = caa_container_of(node, struct ltt_ust_event, node);
 
+		if (event->internal) {
+			/* Internal events must not be exposed to clients */
+			continue;
+		}
 		ret = save_ust_event(writer, event);
+		if (ret) {
+			rcu_read_unlock();
+			goto end;
+		}
+	}
+	rcu_read_unlock();
+
+	/* /events */
+	ret = config_writer_close_element(writer);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+end:
+	return ret;
+}
+
+static
+int init_ust_event_from_agent_event(struct ltt_ust_event *ust_event,
+		struct agent_event *agent_event)
+{
+	int ret = 0;
+	enum lttng_ust_loglevel_type ust_loglevel_type;
+
+	ust_event->enabled = agent_event->enabled;
+	ust_event->attr.instrumentation = LTTNG_UST_TRACEPOINT;
+	strncpy(ust_event->attr.name, agent_event->name, LTTNG_SYMBOL_NAME_LEN);
+	switch (agent_event->loglevel_type) {
+	case LTTNG_EVENT_LOGLEVEL_ALL:
+		ust_loglevel_type = LTTNG_UST_LOGLEVEL_ALL;
+		break;
+	case LTTNG_EVENT_LOGLEVEL_SINGLE:
+		ust_loglevel_type = LTTNG_UST_LOGLEVEL_SINGLE;
+		break;
+	case LTTNG_EVENT_LOGLEVEL_RANGE:
+		ust_loglevel_type = LTTNG_UST_LOGLEVEL_RANGE;
+		break;
+	default:
+		ERR("Invalid agent_event loglevel_type.");
+	        ret = -1;
+		goto end;
+	}
+
+	ust_event->attr.loglevel_type = ust_loglevel_type;
+	ust_event->attr.loglevel = agent_event->loglevel_value;
+	ust_event->filter_expression = agent_event->filter_expression;
+	ust_event->exclusion = agent_event->exclusion;
+end:
+	return ret;
+}
+
+static
+int save_agent_events(struct config_writer *writer,
+		struct ltt_ust_channel *chan,
+		struct agent *agent)
+{
+	int ret;
+	struct lttng_ht_iter iter;
+	struct lttng_ht_node_str *node;
+
+	ret = config_writer_open_element(writer, config_element_events);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	rcu_read_lock();
+	cds_lfht_for_each_entry(agent->events->ht, &iter.iter, node, node) {
+		int ret;
+		struct agent_event *agent_event;
+		struct ltt_ust_event fake_event;
+
+		memset(&fake_event, 0, sizeof(fake_event));
+		agent_event = caa_container_of(node, struct agent_event, node);
+
+		/*
+		 * Initialize a fake ust event to reuse the same serialization
+		 * function since UST and agent events contain the same info
+		 * (and one could wonder why they don't reuse the same
+		 * structures...).
+		 */
+		ret = init_ust_event_from_agent_event(&fake_event, agent_event);
+		if (ret) {
+			rcu_read_unlock();
+			goto end;
+		}
+		ret = save_ust_event(writer, &fake_event);
 		if (ret) {
 			rcu_read_unlock();
 			goto end;
@@ -1043,10 +1156,31 @@ int save_ust_channel(struct config_writer *writer,
 		goto end;
 	}
 
-	ret = save_ust_events(writer, ust_chan->events);
-	if (ret) {
-		ret = LTTNG_ERR_SAVE_IO_FAIL;
-		goto end;
+	if (ust_chan->domain == LTTNG_DOMAIN_UST) {
+		ret = save_ust_events(writer, ust_chan->events);
+		if (ret) {
+			goto end;
+		}
+	} else {
+		struct agent *agent = NULL;
+
+		agent = trace_ust_find_agent(session, ust_chan->domain);
+		if (!agent) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			ERR("Could not find agent associated to UST subdomain");
+			goto end;
+		}
+
+		/*
+		 * Channels associated with a UST sub-domain (such as JUL, Log4j
+		 * or Python) don't have any non-internal events. We retrieve
+		 * the "agent" events associated with this channel and serialize
+		 * them.
+		 */
+		ret = save_agent_events(writer, ust_chan, agent);
+		if (ret) {
+			goto end;
+		}
 	}
 
 	ret = save_ust_context(writer, &ust_chan->ctx_list);
@@ -1114,20 +1248,155 @@ end:
 }
 
 static
-int save_ust_session(struct config_writer *writer,
-	struct ltt_session *session, int save_agent)
+const char *get_config_domain_str(enum lttng_domain_type domain)
+{
+	const char *str_dom;
+
+	switch (domain) {
+	case LTTNG_DOMAIN_KERNEL:
+		str_dom = config_domain_type_kernel;
+		break;
+	case LTTNG_DOMAIN_UST:
+		str_dom = config_domain_type_ust;
+		break;
+	case LTTNG_DOMAIN_JUL:
+		str_dom = config_domain_type_jul;
+		break;
+	case LTTNG_DOMAIN_LOG4J:
+		str_dom = config_domain_type_log4j;
+		break;
+	case LTTNG_DOMAIN_PYTHON:
+		str_dom = config_domain_type_python;
+		break;
+	default:
+		assert(0);
+	}
+
+	return str_dom;
+}
+
+static
+int save_pid_tracker(struct config_writer *writer,
+	struct ltt_session *sess, int domain)
+{
+	int ret = 0;
+	ssize_t nr_pids = 0, i;
+	int32_t *pids = NULL;
+
+	switch (domain) {
+	case LTTNG_DOMAIN_KERNEL:
+	{
+		nr_pids = kernel_list_tracker_pids(sess->kernel_session, &pids);
+		if (nr_pids < 0) {
+			ret = LTTNG_ERR_KERN_LIST_FAIL;
+			goto end;
+		}
+		break;
+	}
+	case LTTNG_DOMAIN_UST:
+	{
+		nr_pids = trace_ust_list_tracker_pids(sess->ust_session, &pids);
+		if (nr_pids < 0) {
+			ret = LTTNG_ERR_UST_LIST_FAIL;
+			goto end;
+		}
+		break;
+	}
+	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_LOG4J:
+	case LTTNG_DOMAIN_PYTHON:
+	default:
+		ret = LTTNG_ERR_UNKNOWN_DOMAIN;
+		goto end;
+	}
+
+	/* Only create a pid_tracker if enabled or untrack all */
+	if (nr_pids != 1 || (nr_pids == 1 && pids[0] != -1)) {
+		ret = config_writer_open_element(writer,
+				config_element_pid_tracker);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+
+		ret = config_writer_open_element(writer,
+				config_element_targets);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+
+		for (i = 0; i < nr_pids; i++) {
+			ret = config_writer_open_element(writer,
+					config_element_target_pid);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
+
+			ret = config_writer_write_element_unsigned_int(writer,
+					config_element_pid, pids[i]);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
+
+			/* /pid_target */
+			ret = config_writer_close_element(writer);
+			if (ret) {
+				ret = LTTNG_ERR_SAVE_IO_FAIL;
+				goto end;
+			}
+		}
+
+		/* /targets */
+		ret = config_writer_close_element(writer);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+
+		/* /pid_tracker */
+		ret = config_writer_close_element(writer);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+	}
+end:
+	free(pids);
+	return ret;
+}
+
+static
+int save_ust_domain(struct config_writer *writer,
+	struct ltt_session *session, enum lttng_domain_type domain)
 {
 	int ret;
 	struct ltt_ust_channel *ust_chan;
 	const char *buffer_type_string;
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
+	const char *config_domain_name;
 
 	assert(writer);
 	assert(session);
 
-	ret = config_writer_write_element_string(writer, config_element_type,
-			save_agent ? config_domain_type_jul : config_domain_type_ust);
+	ret = config_writer_open_element(writer,
+			config_element_domain);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	config_domain_name = get_config_domain_str(domain);
+	if (!config_domain_name) {
+		ret = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ret = config_writer_write_element_string(writer,
+			config_element_type, config_domain_name);
 	if (ret) {
 		ret = LTTNG_ERR_SAVE_IO_FAIL;
 		goto end;
@@ -1157,12 +1426,8 @@ int save_ust_session(struct config_writer *writer,
 	rcu_read_lock();
 	cds_lfht_for_each_entry(session->ust_session->domain_global.channels->ht,
 			&iter.iter, node, node) {
-		int agent_channel;
-
 		ust_chan = caa_container_of(node, struct ltt_ust_channel, node);
-		agent_channel = !strcmp(DEFAULT_JUL_CHANNEL_NAME, ust_chan->name) ||
-			!strcmp(DEFAULT_LOG4J_CHANNEL_NAME, ust_chan->name);
-		if (!(save_agent ^ agent_channel)) {
+		if (domain == ust_chan->domain) {
 			ret = save_ust_channel(writer, ust_chan, session->ust_session);
 			if (ret) {
 				rcu_read_unlock();
@@ -1178,6 +1443,34 @@ int save_ust_session(struct config_writer *writer,
 		ret = LTTNG_ERR_SAVE_IO_FAIL;
 		goto end;
 	}
+
+	if (domain == LTTNG_DOMAIN_UST) {
+		ret = config_writer_open_element(writer,
+				config_element_trackers);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+
+		ret = save_pid_tracker(writer, session, LTTNG_DOMAIN_UST);
+		if (ret) {
+			goto end;
+		}
+
+		/* /trackers */
+		ret = config_writer_close_element(writer);
+		if (ret) {
+			goto end;
+		}
+	}
+
+	/* /domain */
+	ret = config_writer_close_element(writer);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
 end:
 	return ret;
 }
@@ -1214,6 +1507,24 @@ int save_domains(struct config_writer *writer, struct ltt_session *session)
 			goto end;
 		}
 
+		ret = config_writer_open_element(writer,
+			config_element_trackers);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+
+		ret = save_pid_tracker(writer, session, LTTNG_DOMAIN_KERNEL);
+		if (ret) {
+			goto end;
+		}
+
+		/* /trackers */
+		ret = config_writer_close_element(writer);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
 		/* /domain */
 		ret = config_writer_close_element(writer);
 		if (ret) {
@@ -1223,51 +1534,24 @@ int save_domains(struct config_writer *writer, struct ltt_session *session)
 	}
 
 	if (session->ust_session) {
-		unsigned long agent_count;
-
-		ret = config_writer_open_element(writer,
-			config_element_domain);
-		if (ret) {
-			ret = LTTNG_ERR_SAVE_IO_FAIL;
-			goto end;
-		}
-
-		ret = save_ust_session(writer, session, 0);
+		ret = save_ust_domain(writer, session, LTTNG_DOMAIN_UST);
 		if (ret) {
 			goto end;
 		}
 
-		/* /domain */
-		ret = config_writer_close_element(writer);
+		ret = save_ust_domain(writer, session, LTTNG_DOMAIN_JUL);
 		if (ret) {
-			ret = LTTNG_ERR_SAVE_IO_FAIL;
 			goto end;
 		}
 
-		rcu_read_lock();
-		agent_count =
-			lttng_ht_get_count(session->ust_session->agents);
-		rcu_read_unlock();
+		ret = save_ust_domain(writer, session, LTTNG_DOMAIN_LOG4J);
+		if (ret) {
+			goto end;
+		}
 
-		if (agent_count > 0) {
-			ret = config_writer_open_element(writer,
-				config_element_domain);
-			if (ret) {
-				ret = LTTNG_ERR_SAVE_IO_FAIL;
-				goto end;
-			}
-
-			ret = save_ust_session(writer, session, 1);
-			if (ret) {
-				goto end;
-			}
-
-			/* /domain */
-			ret = config_writer_close_element(writer);
-			if (ret) {
-				ret = LTTNG_ERR_SAVE_IO_FAIL;
-				goto end;
-			}
+		ret = save_ust_domain(writer, session, LTTNG_DOMAIN_PYTHON);
+		if (ret) {
+			goto end;
 		}
 	}
 
@@ -1651,6 +1935,16 @@ int save_session(struct ltt_session *session,
 	if (ret) {
 		ret = LTTNG_ERR_SAVE_IO_FAIL;
 		goto end;
+	}
+
+	if(session->shm_path[0] != '\0') {
+		ret = config_writer_write_element_string(writer,
+				config_element_shared_memory_path,
+				session->shm_path);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
 	}
 
 	ret = save_domains(writer, session);

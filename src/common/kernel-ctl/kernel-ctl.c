@@ -16,10 +16,13 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#define _GNU_SOURCE
+#define _LGPL_SOURCE
 #define __USE_LINUX_IOCTL_DEFS
 #include <sys/ioctl.h>
 #include <string.h>
 #include <common/align.h>
+#include <errno.h>
 
 #include "kernel-ctl.h"
 #include "kernel-ioctl.h"
@@ -109,6 +112,7 @@ int kernctl_create_channel(int fd, struct lttng_channel_attr *chops)
 {
 	struct lttng_kernel_channel channel;
 
+	memset(&channel, 0, sizeof(channel));
 	if (lttng_kernel_use_old_abi) {
 		struct lttng_kernel_old_channel old_channel;
 
@@ -138,30 +142,6 @@ int kernctl_create_channel(int fd, struct lttng_channel_attr *chops)
 	memcpy(channel.padding, chops->padding, sizeof(chops->padding));
 
 	return ioctl(fd, LTTNG_KERNEL_CHANNEL, &channel);
-}
-
-int kernctl_enable_syscall(int fd, const char *syscall_name)
-{
-	struct lttng_kernel_event event;
-
-	memset(&event, 0, sizeof(event));
-	strncpy(event.name, syscall_name, sizeof(event.name));
-	event.name[sizeof(event.name) - 1] = '\0';
-	event.instrumentation = LTTNG_KERNEL_SYSCALL;
-	event.u.syscall.enable = 1;
-	return ioctl(fd, LTTNG_KERNEL_EVENT, &event);
-}
-
-int kernctl_disable_syscall(int fd, const char *syscall_name)
-{
-	struct lttng_kernel_event event;
-
-	memset(&event, 0, sizeof(event));
-	strncpy(event.name, syscall_name, sizeof(event.name));
-	event.name[sizeof(event.name) - 1] = '\0';
-	event.instrumentation = LTTNG_KERNEL_SYSCALL;
-	event.u.syscall.enable = 0;
-	return ioctl(fd, LTTNG_KERNEL_EVENT, &event);
 }
 
 int kernctl_syscall_mask(int fd, char **syscall_mask, uint32_t *nr_bits)
@@ -213,6 +193,21 @@ int kernctl_syscall_mask(int fd, char **syscall_mask, uint32_t *nr_bits)
 end:
 	free(kmask);
 	return ret;
+}
+
+int kernctl_track_pid(int fd, int pid)
+{
+	return ioctl(fd, LTTNG_KERNEL_SESSION_TRACK_PID, pid);
+}
+
+int kernctl_untrack_pid(int fd, int pid)
+{
+	return ioctl(fd, LTTNG_KERNEL_SESSION_UNTRACK_PID, pid);
+}
+
+int kernctl_list_tracker_pids(int fd)
+{
+	return ioctl(fd, LTTNG_KERNEL_SESSION_LIST_TRACKER_PIDS);
 }
 
 int kernctl_create_stream(int fd)
@@ -303,6 +298,25 @@ int kernctl_stop_session(int fd)
 {
 	return compat_ioctl_no_arg(fd, LTTNG_KERNEL_OLD_SESSION_STOP,
 			LTTNG_KERNEL_SESSION_STOP);
+}
+
+int kernctl_filter(int fd, struct lttng_filter_bytecode *filter)
+{
+	struct lttng_kernel_filter_bytecode *kb;
+	uint32_t len;
+	int ret;
+
+	/* Translate bytecode to kernel bytecode */
+	kb = zmalloc(sizeof(*kb) + filter->len);
+	if (!kb)
+		return -ENOMEM;
+	kb->len = len = filter->len;
+	kb->reloc_offset = filter->reloc_table_offset;
+	kb->seqnum = filter->seqnum;
+	memcpy(kb->data, filter->data, len);
+	ret = ioctl(fd, LTTNG_KERNEL_FILTER, kb);
+	free(kb);
+	return ret;
 }
 
 int kernctl_tracepoint_list(int fd)

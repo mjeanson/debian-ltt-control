@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <fcntl.h>
 #include <getopt.h>
 #include <grp.h>
@@ -48,6 +49,7 @@
 #include <common/compat/poll.h>
 #include <common/sessiond-comm/sessiond-comm.h>
 #include <common/utils.h>
+#include <common/compat/getenv.h>
 
 #include "lttng-relayd.h"
 #include "health-relayd.h"
@@ -135,7 +137,7 @@ int parse_health_env(void)
 {
 	const char *health_path;
 
-	health_path = getenv(LTTNG_RELAYD_HEALTH_ENV);
+	health_path = lttng_secure_getenv(LTTNG_RELAYD_HEALTH_ENV);
 	if (health_path) {
 		strncpy(health_unix_sock_path, health_path,
 			PATH_MAX);
@@ -149,7 +151,7 @@ static
 int setup_health_path(void)
 {
 	int is_root, ret = 0;
-	char *home_path = NULL, *rundir = NULL, *relayd_path;
+	char *home_path = NULL, *rundir = NULL, *relayd_path = NULL;
 
 	ret = parse_health_env();
 	if (ret) {
@@ -221,6 +223,7 @@ int setup_health_path(void)
 
 end:
 	free(rundir);
+	free(relayd_path);
 	return ret;
 }
 
@@ -343,8 +346,13 @@ restart:
 
 			/* Event on the registration socket */
 			if (pollfd == sock) {
-				if (revents & (LPOLLERR | LPOLLHUP | LPOLLRDHUP)) {
+				if (revents & LPOLLIN) {
+					continue;
+				} else if (revents & (LPOLLERR | LPOLLHUP | LPOLLRDHUP)) {
 					ERR("Health socket poll error");
+					goto error;
+				} else {
+					ERR("Unexpected poll events %u for sock %d", revents, pollfd);
 					goto error;
 				}
 			}

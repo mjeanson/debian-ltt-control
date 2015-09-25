@@ -17,6 +17,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <poll.h>
 #include <pthread.h>
@@ -479,7 +480,8 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 				msg.u.channel.tracefile_size,
 				msg.u.channel.tracefile_count, 0,
 				msg.u.channel.monitor,
-				msg.u.channel.live_timer_interval);
+				msg.u.channel.live_timer_interval,
+				NULL, NULL);
 		if (new_channel == NULL) {
 			lttng_consumer_send_error(ctx, LTTCOMM_CONSUMERD_OUTFD_ERROR);
 			goto end_nosignal;
@@ -1217,7 +1219,22 @@ ssize_t lttng_kconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
 		/*
 		 * In live, block until all the metadata is sent.
 		 */
+		pthread_mutex_lock(&stream->metadata_timer_lock);
+		assert(!stream->missed_metadata_flush);
+		stream->waiting_on_metadata = true;
+		pthread_mutex_unlock(&stream->metadata_timer_lock);
+
 		err = consumer_stream_sync_metadata(ctx, stream->session_id);
+
+		pthread_mutex_lock(&stream->metadata_timer_lock);
+		stream->waiting_on_metadata = false;
+		if (stream->missed_metadata_flush) {
+			stream->missed_metadata_flush = false;
+			pthread_mutex_unlock(&stream->metadata_timer_lock);
+			(void) consumer_flush_kernel_index(stream);
+		} else {
+			pthread_mutex_unlock(&stream->metadata_timer_lock);
+		}
 		if (err < 0) {
 			goto end;
 		}

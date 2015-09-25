@@ -1,5 +1,7 @@
 AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
 
+AUTOMAKE_OPTIONS = subdir-objects
+
 SUBDIRS = compat health hashtable kernel-ctl sessiond-comm relayd \
 		  kernel-consumer ust-consumer testpoint index config
 
@@ -18,7 +20,9 @@ libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
                        common.h futex.c futex.h uri.c uri.h defaults.c \
                        pipe.c pipe.h readwrite.c readwrite.h \
                        mi-lttng.h mi-lttng.c \
-                       daemonize.c daemonize.h
+                       daemonize.c daemonize.h \
+                       sessiond-comm/unix.c sessiond-comm/unix.h
+
 libcommon_la_LIBADD = \
 		-luuid \
 		-lrt \
@@ -41,3 +45,17 @@ if HAVE_LIBLTTNG_UST_CTL
 libconsumer_la_LIBADD += \
 		$(top_builddir)/src/common/ust-consumer/libust-consumer.la
 endif
+
+all-local:
+	@if [ x"$(srcdir)" != x"$(builddir)" ]; then \
+		for script in $(EXTRA_DIST); do \
+		cp -f $(srcdir)/$$script $(builddir); \
+		done; \
+	fi
+
+clean-local:
+	@if [ x"$(srcdir)" != x"$(builddir)" ]; then \
+		for script in $(EXTRA_DIST); do \
+		rm -f $(builddir)/$$script; \
+		done; \
+	fi

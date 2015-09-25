@@ -15,6 +15,8 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <errno.h>
 #include <limits.h>
@@ -30,6 +32,7 @@
  * error occured.
  * The error can be checked by querying errno.
  */
+LTTNG_HIDDEN
 ssize_t lttng_read(int fd, void *buf, size_t count)
 {
 	size_t i = 0;
@@ -67,6 +70,7 @@ error:
 	}
 }
 
+LTTNG_HIDDEN
 ssize_t lttng_write(int fd, const void *buf, size_t count)
 {
 	size_t i = 0;

@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <assert.h>
 #include <urcu/uatomic.h>
 
@@ -64,6 +65,7 @@ static int ht_match_event(struct cds_lfht_node *node,
 {
 	struct agent_event *event;
 	const struct agent_ht_key *key;
+	int ll_match;
 
 	assert(node);
 	assert(_key);
@@ -78,14 +80,15 @@ static int ht_match_event(struct cds_lfht_node *node,
 		goto no_match;
 	}
 
-	if (event->loglevel != key->loglevel) {
-		if (event->loglevel_type == LTTNG_EVENT_LOGLEVEL_ALL &&
-				key->loglevel == 0 && event->loglevel == -1) {
-			goto match;
-		}
+	/* Event loglevel value and type. */
+	ll_match = loglevels_match(event->loglevel_type,
+		event->loglevel_value, key->loglevel_type,
+		key->loglevel_value, LTTNG_EVENT_LOGLEVEL_ALL);
+
+	if (!ll_match) {
 		goto no_match;
 	}
-match:
+
 	return 1;
 
 no_match:
@@ -106,7 +109,8 @@ static void add_unique_agent_event(struct lttng_ht *ht,
 	assert(event);
 
 	key.name = event->name;
-	key.loglevel = event->loglevel;
+	key.loglevel_value = event->loglevel_value;
+	key.loglevel_type = event->loglevel_type;
 
 	node_ptr = cds_lfht_add_unique(ht->ht,
 			ht->hash_fct(event->node.key, lttng_ht_seed),
@@ -124,7 +128,7 @@ static void destroy_event_agent_rcu(struct rcu_head *head)
 	struct agent_event *event =
 		caa_container_of(node, struct agent_event, node);
 
-	free(event);
+	agent_destroy_event(event);
 }
 
 /*
@@ -337,7 +341,7 @@ static int enable_event(struct agent_app *app, struct agent_event *event)
 	}
 
 	memset(&msg, 0, sizeof(msg));
-	msg.loglevel = event->loglevel;
+	msg.loglevel_value = event->loglevel_value;
 	msg.loglevel_type = event->loglevel_type;
 	strncpy(msg.name, event->name, sizeof(msg.name));
 	ret = send_payload(app->sock, &msg, sizeof(msg));
@@ -493,11 +497,14 @@ error:
 int agent_disable_event(struct agent_event *event,
 		enum lttng_domain_type domain)
 {
-	int ret;
+	int ret = LTTNG_OK;
 	struct agent_app *app;
 	struct lttng_ht_iter iter;
 
 	assert(event);
+	if (!event->enabled) {
+		goto end;
+	}
 
 	rcu_read_lock();
 
@@ -515,10 +522,10 @@ int agent_disable_event(struct agent_event *event,
 	}
 
 	event->enabled = 0;
-	ret = LTTNG_OK;
 
 error:
 	rcu_read_unlock();
+end:
 	return ret;
 }
 
@@ -538,6 +545,8 @@ int agent_list_events(struct lttng_event **events,
 	struct lttng_ht_iter iter;
 
 	assert(events);
+
+	DBG2("Agent listing events for domain %d", domain);
 
 	nbmem = UST_APP_EVENT_LIST_SIZE;
 	tmp_events = zmalloc(nbmem * sizeof(*tmp_events));
@@ -677,6 +686,8 @@ void agent_add_app(struct agent_app *app)
 
 /*
  * Delete agent application from the global hash table.
+ *
+ * rcu_read_lock() must be held by the caller.
  */
 void agent_delete_app(struct agent_app *app)
 {
@@ -688,9 +699,7 @@ void agent_delete_app(struct agent_app *app)
 	DBG3("Agent deleting app pid: %d and sock: %d", app->pid, app->sock->fd);
 
 	iter.iter.node = &app->node.node;
-	rcu_read_lock();
 	ret = lttng_ht_del(agent_apps_ht_by_sock, &iter);
-	rcu_read_unlock();
 	assert(!ret);
 }
 
@@ -778,33 +787,38 @@ error:
 }
 
 /*
- * Create a newly allocated agent event data structure. If name is valid, it's
- * copied into the created event.
+ * Create a newly allocated agent event data structure.
+ * Ownership of filter_expression is taken.
  *
  * Return a new object else NULL on error.
  */
 struct agent_event *agent_create_event(const char *name,
-		struct lttng_filter_bytecode *filter)
+		enum lttng_loglevel_type loglevel_type, int loglevel_value,
+		struct lttng_filter_bytecode *filter, char *filter_expression)
 {
-	struct agent_event *event;
+	struct agent_event *event = NULL;
 
-	DBG3("Agent create new event with name %s", name);
+	DBG3("Agent create new event with name %s, loglevel type %d and loglevel value %d",
+		name, loglevel_type, loglevel_value);
+
+	if (!name) {
+		ERR("Failed to create agent event; no name provided.");
+		goto error;
+	}
 
 	event = zmalloc(sizeof(*event));
 	if (!event) {
 		goto error;
 	}
 
-	if (name) {
-		strncpy(event->name, name, sizeof(event->name));
-		event->name[sizeof(event->name) - 1] = '\0';
-		lttng_ht_node_init_str(&event->node, event->name);
-	}
+	strncpy(event->name, name, sizeof(event->name));
+	event->name[sizeof(event->name) - 1] = '\0';
+	lttng_ht_node_init_str(&event->node, event->name);
 
-	if (filter) {
-		event->filter = filter;
-	}
-
+	event->loglevel_value = loglevel_value;
+	event->loglevel_type = loglevel_type;
+	event->filter = filter;
+	event->filter_expression = filter_expression;
 error:
 	return event;
 }
@@ -827,40 +841,47 @@ void agent_add_event(struct agent_event *event, struct agent *agt)
 }
 
 /*
- * Find a agent event in the given agent using name.
+ * Find multiple agent events sharing the given name.
  *
- * RCU read side lock MUST be acquired.
+ * RCU read side lock MUST be acquired. It must be held for the
+ * duration of the iteration.
  *
- * Return object if found else NULL.
+ * Sets the given iterator.
  */
-struct agent_event *agent_find_event_by_name(const char *name,
-		struct agent *agt)
+void agent_find_events_by_name(const char *name, struct agent *agt,
+		struct lttng_ht_iter* iter)
 {
-	struct lttng_ht_node_str *node;
-	struct lttng_ht_iter iter;
 	struct lttng_ht *ht;
 	struct agent_ht_key key;
 
 	assert(name);
 	assert(agt);
 	assert(agt->events);
+	assert(iter);
 
 	ht = agt->events;
 	key.name = name;
 
 	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
-			ht_match_event_by_name, &key, &iter.iter);
-	node = lttng_ht_iter_get_node_str(&iter);
-	if (node == NULL) {
-		goto error;
-	}
+			ht_match_event_by_name, &key, &iter->iter);
+}
 
-	DBG3("Agent event found %s by name.", name);
-	return caa_container_of(node, struct agent_event, node);
+/*
+ * Get the next agent event duplicate by name. This should be called
+ * after a call to agent_find_events_by_name() to iterate on events.
+ *
+ * The RCU read lock must be held during the iteration and for as long
+ * as the object the iterator points to remains in use.
+ */
+void agent_event_next_duplicate(const char *name,
+		struct agent *agt, struct lttng_ht_iter* iter)
+{
+	struct agent_ht_key key;
 
-error:
-	DBG3("Agent NOT found by name %s.", name);
-	return NULL;
+	key.name = name;
+
+	cds_lfht_next_duplicate(agt->events->ht, ht_match_event_by_name,
+		&key, &iter->iter);
 }
 
 /*
@@ -870,7 +891,8 @@ error:
  *
  * Return object if found else NULL.
  */
-struct agent_event *agent_find_event(const char *name, int loglevel,
+struct agent_event *agent_find_event(const char *name,
+		enum lttng_loglevel_type loglevel_type, int loglevel_value,
 		struct agent *agt)
 {
 	struct lttng_ht_node_str *node;
@@ -884,7 +906,8 @@ struct agent_event *agent_find_event(const char *name, int loglevel,
 
 	ht = agt->events;
 	key.name = name;
-	key.loglevel = loglevel;
+	key.loglevel_value = loglevel_value;
+	key.loglevel_type = loglevel_type;
 
 	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
 			ht_match_event, &key, &iter.iter);
@@ -897,7 +920,7 @@ struct agent_event *agent_find_event(const char *name, int loglevel,
 	return caa_container_of(node, struct agent_event, node);
 
 error:
-	DBG3("Agent NOT found %s.", name);
+	DBG3("Agent event NOT found %s.", name);
 	return NULL;
 }
 
@@ -911,12 +934,13 @@ void agent_destroy_event(struct agent_event *event)
 	assert(event);
 
 	free(event->filter);
+	free(event->filter_expression);
+	free(event->exclusion);
 	free(event);
 }
 
 /*
- * Destroy an agent completely. Note that the given pointer is NOT freed
- * thus a reference to static or stack data can be passed to this function.
+ * Destroy an agent completely.
  */
 void agent_destroy(struct agent *agt)
 {
@@ -955,19 +979,71 @@ void agent_destroy(struct agent *agt)
 	rcu_read_unlock();
 
 	ht_cleanup_push(agt->events);
+	free(agt);
 }
 
 /*
- * Initialize agent subsystem.
+ * Allocate agent_apps_ht_by_sock.
  */
-int agent_setup(void)
+int agent_app_ht_alloc(void)
 {
+	int ret = 0;
+
 	agent_apps_ht_by_sock = lttng_ht_new(0, LTTNG_HT_TYPE_ULONG);
 	if (!agent_apps_ht_by_sock) {
-		return -1;
+		ret = -1;
 	}
 
-	return 0;
+	return ret;
+}
+
+/*
+ * Destroy a agent application by socket.
+ */
+void agent_destroy_app_by_sock(int sock)
+{
+	struct agent_app *app;
+
+	assert(sock >= 0);
+
+	/*
+	 * Not finding an application is a very important error that should NEVER
+	 * happen. The hash table deletion is ONLY done through this call when the
+	 * main sessiond thread is torn down.
+	 */
+	rcu_read_lock();
+	app = agent_find_app_by_sock(sock);
+	assert(app);
+
+	/* RCU read side lock is assumed to be held by this function. */
+	agent_delete_app(app);
+
+	/* The application is freed in a RCU call but the socket is closed here. */
+	agent_destroy_app(app);
+	rcu_read_unlock();
+}
+
+/*
+ * Clean-up the agent app hash table and destroy it.
+ */
+void agent_app_ht_clean(void)
+{
+	struct lttng_ht_node_ulong *node;
+	struct lttng_ht_iter iter;
+
+	if (!agent_apps_ht_by_sock) {
+		return;
+	}
+	rcu_read_lock();
+	cds_lfht_for_each_entry(agent_apps_ht_by_sock->ht, &iter.iter, node, node) {
+		struct agent_app *app;
+
+		app = caa_container_of(node, struct agent_app, node);
+		agent_destroy_app_by_sock(app->sock->fd);
+	}
+	rcu_read_unlock();
+
+	lttng_ht_destroy(agent_apps_ht_by_sock);
 }
 
 /*

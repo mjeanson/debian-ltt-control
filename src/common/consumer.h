@@ -206,6 +206,11 @@ struct lttng_consumer_channel {
 
 	/* Timer value in usec for live streaming. */
 	unsigned int live_timer_interval;
+
+	int *stream_fds;
+	int nr_stream_fds;
+	char root_shm_path[PATH_MAX];
+	char shm_path[PATH_MAX];
 };
 
 /*
@@ -237,6 +242,21 @@ struct lttng_consumer_stream {
 	int shm_fd_is_copy;
 	int data_read;
 	int hangup_flush_done;
+
+	/*
+	 * metadata_timer_lock protects flags waiting_on_metadata and
+	 * missed_metadata_flush.
+	 */
+	pthread_mutex_t metadata_timer_lock;
+	/*
+	 * Flag set when awaiting metadata to be pushed. Used in the
+	 * timer thread to skip waiting on the stream (and stream lock) to
+	 * ensure we can proceed to flushing metadata in live mode.
+	 */
+	bool waiting_on_metadata;
+	/* Raised when a timer misses a metadata flush. */
+	bool missed_metadata_flush;
+
 	enum lttng_event_output output;
 	/* Maximum subbuffer size. */
 	unsigned long max_sb_size;
@@ -599,7 +619,9 @@ struct lttng_consumer_channel *consumer_allocate_channel(uint64_t key,
 		uint64_t tracefile_count,
 		uint64_t session_id_per_pid,
 		unsigned int monitor,
-		unsigned int live_timer_interval);
+		unsigned int live_timer_interval,
+		const char *root_shm_path,
+		const char *shm_path);
 void consumer_del_stream(struct lttng_consumer_stream *stream,
 		struct lttng_ht *ht);
 void consumer_del_metadata_stream(struct lttng_consumer_stream *stream,

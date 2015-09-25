@@ -16,6 +16,7 @@
  */
 
 #define _GNU_SOURCE
+#define _LGPL_SOURCE
 #include <fcntl.h>
 #include <getopt.h>
 #include <grp.h>
@@ -274,7 +275,8 @@ restart:
 
 			/* Event on the registration socket */
 			if (pollfd == sock) {
-				if (revents & (LPOLLERR | LPOLLHUP | LPOLLRDHUP)) {
+				if (revents & (LPOLLERR | LPOLLHUP | LPOLLRDHUP)
+						&& !(revents & LPOLLIN)) {
 					ERR("Health socket poll error");
 					goto error;
 				}
