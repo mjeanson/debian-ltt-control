@@ -1,3 +1,21 @@
+ltt-control (2.7.0-1) unstable; urgency=medium
+
+  [ Michael Jeanson ]
+  * [5ed30e9] New upstream version 2.7.0
+  * [6c8a907] Remove old transitionnal packages
+  * [f931523] Build on linux-any architectures (Closes: #772093)
+  * [067a1a1] Build depend specifically on liblttng-ust-dev 2.7
+  * [b759e83] Update symbols file
+  * [dfb3919] Fix copyright file syntax
+  * [e507ede] Added systemd service file for lttng-sessiond
+  * [f95e6c0] Add python bindings subpackage
+
+  [ Jon Bernard ]
+  * [c89985d] Correct capitalization error in python3-lttng synopsis
+  * [abbc327] Update copyright information
+
+ -- Jon Bernard <jbernard@debian.org>  Thu, 12 Nov 2015 22:46:50 +0000
+
 ltt-control (2.6.0-1ppc64el1) unstable; urgency=medium
 
   * [2adaaf1] debian/control: add ppc64el architecture.
