@@ -3,7 +3,8 @@ Section: libs
 Priority: extra
 Maintainer: Jon Bernard <jbernard@debian.org>
 Build-Depends: debhelper (>= 9), libpopt-dev, libxml2-dev,
-  bison, dh-autoreconf, bash-completion, python3-all-dev, swig (>= 2.0),
+  bison, dh-autoreconf, bash-completion, pkg-config,
+  python3-all-dev, swig (>= 2.0),
   liburcu-dev (>= 0.8.4),
   liblttng-ust-dev (>= 2.7.0~),
   liblttng-ust-dev (<< 2.8.0~)
