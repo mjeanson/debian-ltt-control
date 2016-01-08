@@ -354,6 +354,11 @@ PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATCHLEVEL_VERSION = @PATCHLEVEL_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
+PKG_CONFIG = @PKG_CONFIG@
+PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
+PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
+POPT_CFLAGS = @POPT_CFLAGS@
+POPT_LIBS = @POPT_LIBS@
 PYTHON = @PYTHON@
 PYTHON2_AGENT = @PYTHON2_AGENT@
 PYTHON2_BIN = @PYTHON2_BIN@
@@ -375,6 +380,8 @@ STRIP = @STRIP@
 SWIG = @SWIG@
 SWIG_LIB = @SWIG_LIB@
 UUDECODE = @UUDECODE@
+UUID_CFLAGS = @UUID_CFLAGS@
+UUID_LIBS = @UUID_LIBS@
 VERSION = @VERSION@
 XML2_CONFIG = @XML2_CONFIG@
 XML_CPPFLAGS = @XML_CPPFLAGS@
@@ -461,9 +468,9 @@ SESSIONS = $(top_builddir)/src/bin/lttng-sessiond/session.o	\
 	 $(top_builddir)/src/bin/lttng-sessiond/consumer.o \
 	 $(top_builddir)/src/bin/lttng-sessiond/utils.o \
 	 $(top_builddir)/src/bin/lttng-sessiond/snapshot.o \
-	 $(top_builddir)/src/common/.libs/uri.o \
-	 $(top_builddir)/src/common/.libs/utils.o \
-	 $(top_builddir)/src/common/.libs/error.o \
+	 $(top_builddir)/src/common/uri.o \
+	 $(top_builddir)/src/common/utils.o \
+	 $(top_builddir)/src/common/error.o \
 	 $(top_builddir)/src/common/health/libhealth.la \
 	 $(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
 
@@ -484,8 +491,8 @@ test_session_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/session.o \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/snapshot.o \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/agent.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/.libs/uri.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/.libs/utils.o \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/uri.o \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/utils.o \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/health/libhealth.la \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
 
@@ -500,8 +507,8 @@ test_session_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) \
 KERN_DATA_TRACE = $(top_builddir)/src/bin/lttng-sessiond/trace-kernel.o	\
 		$(top_builddir)/src/bin/lttng-sessiond/consumer.o	\
 		$(top_builddir)/src/bin/lttng-sessiond/utils.o \
-		$(top_builddir)/src/common/.libs/uri.o \
-		$(top_builddir)/src/common/.libs/utils.o \
+		$(top_builddir)/src/common/uri.o \
+		$(top_builddir)/src/common/utils.o \
 		$(top_builddir)/src/common/health/libhealth.la \
 		$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
 
@@ -510,8 +517,8 @@ test_kernel_data_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) \
 	$(LIBSESSIOND_COMM) $(LIBHASHTABLE) -lrt $(KERN_DATA_TRACE)
 
 # utils suffix for unit test
-UTILS_SUFFIX = $(top_builddir)/src/common/.libs/utils.o \
-		$(top_builddir)/src/common/.libs/runas.o
+UTILS_SUFFIX = $(top_builddir)/src/common/utils.o \
+		$(top_builddir)/src/common/runas.o
 
 
 # parse_size_suffix unit test
