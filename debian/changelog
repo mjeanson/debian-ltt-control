@@ -1,3 +1,11 @@
+ltt-control (2.7.1-1) unstable; urgency=medium
+
+  [ Michael Jeanson ]
+  * [77e4030] New upstream version 2.7.1
+  * [949306e] Add pkg-config to builddeps
+
+ -- Jon Bernard <jbernard@debian.org>  Mon, 11 Jan 2016 13:43:27 +0000
+
 ltt-control (2.7.0-1) unstable; urgency=medium
 
   [ Michael Jeanson ]
