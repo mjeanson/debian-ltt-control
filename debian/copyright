@@ -1,4 +1,4 @@
-Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: lttng-tools
 Source: http://lttng.org/files/lttng-tools/
 
@@ -7,6 +7,55 @@ Copyright: 2011, David Goulet <david.goulet@polymtl.ca>
            2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
            2011, Julien Desfossez <julien.desfossez@polymtl.ca>
 License: LGPL-2.1
+
+Files: tests/regression/ust/low-throughput/tp.c
+       tests/regression/ust/low-throughput/tp.h
+       tests/regression/ust/high-throughput/tp.c
+       tests/regression/ust/high-throughput/tp.h
+       tests/regression/ust/clock-override/lttng-ust-clock-override-test.c
+       tests/regression/ust/getcpu-override/lttng-ust-getcpu-override-test.c
+       tests/regression/ust/overlap/demo/tp.c
+       tests/regression/ust/overlap/demo/tp2.c
+       tests/regression/ust/overlap/demo/ust_tests_demo.h
+       tests/regression/ust/overlap/demo/ust_tests_demo2.h
+       tests/regression/ust/overlap/demo/ust_tests_demo3.h
+       tests/regression/ust/overlap/demo/tp3.c
+       tests/regression/ust/daemon/ust_tests_daemon.h
+       tests/regression/ust/fork/ust_tests_fork.h
+       tests/regression/ust/linking/tp.c
+       tests/regression/ust/linking/tp2.c
+       tests/regression/ust/linking/ust_tests_demo.h
+       tests/regression/ust/linking/ust_tests_demo2.h
+       tests/regression/ust/linking/ust_tests_demo3.h
+       tests/regression/ust/linking/tp3.c
+       tests/regression/ust/exit-fast/ust_tests_exitfast.h
+       src/lib/lttng-ctl/filter/memstream.h
+       src/bin/lttng-sessiond/lttng-ust-abi.h
+       src/bin/lttng-relayd/*
+       src/common/bug.h
+       src/common/bitfield.h
+       src/common/mi_lttng.xsd
+       src/common/config/session.xsd
+       src/common/compat/*
+       src/common/align.h
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: tests/utils/tap/tap.c
+       tests/utils/tap/tap.h
+Copyright: 2004, Nik Clayton
+License: BSD-2-clause
+
+Files: src/common/config/ini.c
+       src/common/config/ini.h
+Copyright: 2009, Brush Technology
+License: BSD-3-clause
+
+Files: tests/utils/tap/tap.sh
+       src/lib/lttng-ctl/filter/filter-parser.c
+       src/lib/lttng-ctl/filter/filter-parser.h
+Copyright: 2010, Patrick LeBoutillier <patrick.leboutillier@gmail.com>
+License: GPL-3
 
 Files: debian/*
 Copyright: 2011-2012, Alexandre Montplaisir <alexandre.montplaisir@gmail.com>
@@ -47,3 +96,88 @@ License: GPL-2+
  .
  On Debian systems, the complete text of the GNU General
  Public License version 2 can be found in "/usr/share/common-licenses/GPL-2".
+
+License: GPL-3
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in "/usr/share/common-licenses/GPL-3".
+
+License: Expat
+ Permission is hereby granted, free of charge, to any person obtaining
+ a copy of this software and associated documentation files (the
+ "Software"), to deal in the Software without restriction, including
+ without limitation the rights to use, copy, modify, merge, publish,
+ distribute, sublicense, and/or sell copies of the Software, and to
+ permit persons to whom the Software is furnished to do so, subject to
+ the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included
+ in all copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+License: BSD-2-clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions are met:
+ .
+ 1. Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+ .
+ 2. Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+License: BSD-3-clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions are met:
+ .
+ 1. Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+ .
+ 2. Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+ .
+ 3. Neither the name of the copyright holder nor the names of its contributors
+    may be used to endorse or promote products derived from this software without
+    specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
