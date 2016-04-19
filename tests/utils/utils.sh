@@ -16,6 +16,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
 
 SESSIOND_BIN="lttng-sessiond"
+RUNAS_BIN="lttng-runas"
 CONSUMERD_BIN="lttng-consumerd"
 RELAYD_BIN="lttng-relayd"
 LTTNG_BIN="lttng"
@@ -32,6 +33,12 @@ KERNEL_PATCHLEVEL_VERSION=27
 # basic tests don't have to worry about hitting timeouts on busy
 # systems. Specialized tests should test those corner-cases.
 export LTTNG_UST_REGISTER_TIMEOUT=-1
+
+# We set the default lttng-sessiond path to /bin/true to prevent the spawning
+# of a daemonized sessiond. This is necessary since 'lttng create' will spawn
+# its own sessiond if none is running. It also ensures that 'lttng create'
+# fails when no sessiond is running.
+export LTTNG_SESSIOND_PATH="/bin/true"
 
 source $TESTDIR/utils/tap/tap.sh
 
@@ -82,7 +89,17 @@ function validate_kernel_version ()
 function randstring()
 {
 	[ "$2" == "0" ] && CHAR="[:alnum:]" || CHAR="[:graph:]"
-	cat /dev/urandom | tr -cd "$CHAR" | head -c ${1:-16}
+	cat /dev/urandom 2>/dev/null | tr -cd "$CHAR" 2>/dev/null | head -c ${1:-16} 2>/dev/null
+	echo
+}
+
+# Return the number of _configured_ CPUs.
+function conf_proc_count()
+{
+	getconf _NPROCESSORS_CONF
+	if [ $? -ne 0 ]; then
+		diag "Failed to get the number of configured CPUs"
+	fi
 	echo
 }
 
@@ -362,7 +379,7 @@ function start_lttng_sessiond_opt()
 	if [ -z $(pgrep --full lt-$SESSIOND_BIN) ]; then
 		# Have a load path ?
 		if [ -n "$load_path" ]; then
-			$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --load "$1" --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
+			$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --load "$load_path" --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
 		else
 			$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
 		fi
@@ -395,12 +412,14 @@ function stop_lttng_sessiond_opt()
 		return
 	fi
 
-	PID_SESSIOND=`pgrep --full lt-$SESSIOND_BIN`
+	PID_SESSIOND="$(pgrep --full lt-$SESSIOND_BIN) $(pgrep --full $RUNAS_BIN)"
 
 	if [ -n "$2" ]; then
 		kill_opt="$kill_opt -s $signal"
 	fi
-
+	if [ $withtap -eq "1" ]; then
+		diag "Killing lt-$SESSIOND_BIN pids: $(echo $PID_SESSIOND | tr '\n' ' ')"
+	fi
 	kill $kill_opt $PID_SESSIOND 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
 
 	if [ $? -eq 1 ]; then
@@ -434,6 +453,62 @@ function stop_lttng_sessiond_notap()
 	stop_lttng_sessiond_opt 0 "$@"
 }
 
+function sigstop_lttng_sessiond_opt()
+{
+	local withtap=$1
+	local signal=SIGSTOP
+	local kill_opt=""
+
+	if [ -n $TEST_NO_SESSIOND ] && [ "$TEST_NO_SESSIOND" == "1" ]; then
+		# Env variable requested no session daemon
+		return
+	fi
+
+	PID_SESSIOND="$(pgrep --full lt-$SESSIOND_BIN) $(pgrep --full $RUNAS_BIN)"
+
+	kill_opt="$kill_opt -s $signal"
+
+	if [ $withtap -eq "1" ]; then
+		diag "Sending SIGSTOP to lt-$SESSIOND_BIN pids: $(echo $PID_SESSIOND | tr '\n' ' ')"
+	fi
+	kill $kill_opt $PID_SESSIOND 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+
+	if [ $? -eq 1 ]; then
+		if [ $withtap -eq "1" ]; then
+			fail "Sending SIGSTOP to session daemon"
+		fi
+	else
+		out=1
+		while [ $out -ne 0 ]; do
+			pid=$(pgrep --full lt-$SESSIOND_BIN)
+
+			# Wait until state becomes stopped for session
+			# daemon(s).
+			out=0
+			for sessiond_pid in $pid; do
+				state=$(ps -p $sessiond_pid -o state= )
+				if [[ -n "$state" && "$state" != "T" ]]; then
+					out=1
+				fi
+			done
+			sleep 0.5
+		done
+		if [ $withtap -eq "1" ]; then
+			pass "Sending SIGSTOP to session daemon"
+		fi
+	fi
+}
+
+function sigstop_lttng_sessiond()
+{
+	sigstop_lttng_sessiond_opt 1 "$@"
+}
+
+function sigstop_lttng_sessiond_notap()
+{
+	sigstop_lttng_sessiond_opt 0 "$@"
+}
+
 function stop_lttng_consumerd_opt()
 {
 	local withtap=$1
@@ -447,7 +522,7 @@ function stop_lttng_consumerd_opt()
 	fi
 
 	if [ $withtap -eq "1" ]; then
-		diag "Killing lttng-consumerd (pid: $PID_CONSUMERD)"
+		diag "Killing $CONSUMERD_BIN pids: $(echo $PID_CONSUMERD | tr '\n' ' ')"
 	fi
 	kill $kill_opt $PID_CONSUMERD 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
 	retval=$?
@@ -489,6 +564,61 @@ function stop_lttng_consumerd()
 function stop_lttng_consumerd_notap()
 {
 	stop_lttng_consumerd_opt 0 "$@"
+}
+
+function sigstop_lttng_consumerd_opt()
+{
+	local withtap=$1
+	local signal=SIGSTOP
+	local kill_opt=""
+
+	PID_CONSUMERD=`pgrep --full $CONSUMERD_BIN`
+
+	kill_opt="$kill_opt -s $signal"
+
+	if [ $withtap -eq "1" ]; then
+		diag "Sending SIGSTOP to $CONSUMERD_BIN pids: $(echo $PID_CONSUMERD | tr '\n' ' ')"
+	fi
+	kill $kill_opt $PID_CONSUMERD 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+	retval=$?
+	set +x
+
+	if [ $? -eq 1 ]; then
+		if [ $withtap -eq "1" ]; then
+			fail "Sending SIGSTOP to consumer daemon"
+		fi
+		return 1
+	else
+		out=1
+		while [ $out -ne 0 ]; do
+			pid=$(pgrep --full $CONSUMERD_BIN)
+
+			# Wait until state becomes stopped for all
+			# consumers.
+			out=0
+			for consumer_pid in $pid; do
+				state=$(ps -p $consumer_pid -o state= )
+				if [[ -n "$state" && "$state" != "T" ]]; then
+					out=1
+				fi
+			done
+			sleep 0.5
+		done
+		if [ $withtap -eq "1" ]; then
+			pass "Sending SIGSTOP to consumer daemon"
+		fi
+	fi
+	return $retval
+}
+
+function sigstop_lttng_consumerd()
+{
+	sigstop_lttng_consumerd_opt 1 "$@"
+}
+
+function sigstop_lttng_consumerd_notap()
+{
+	sigstop_lttng_consumerd_opt 0 "$@"
 }
 
 function list_lttng_with_opts ()
