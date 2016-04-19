@@ -365,7 +365,7 @@ static int list_lttng_kernel_events(char *channel_name,
 
 	if (nb_event == 0) {
 		*events = NULL;
-		goto syscall;
+		goto end;
 	}
 
 	*events = zmalloc(nb_event * sizeof(struct lttng_event));
@@ -414,19 +414,7 @@ static int list_lttng_kernel_events(char *channel_name,
 		i++;
 	}
 
-syscall:
-	if (syscall_table) {
-		ssize_t new_size;
-
-		new_size = syscall_list_channel(kchan, events, nb_event);
-		if (new_size < 0) {
-			free(events);
-			ret = -new_size;
-			goto error;
-		}
-		nb_event = new_size;
-	}
-
+end:
 	return nb_event;
 
 error:
@@ -1740,7 +1728,9 @@ static int _cmd_enable_event(struct ltt_session *session,
 		filter_expression = NULL;
 		filter = NULL;
 		exclusion = NULL;
-		if (ret != LTTNG_OK) {
+		if (ret == LTTNG_ERR_UST_EVENT_ENABLED) {
+			goto already_enabled;
+		} else if (ret != LTTNG_OK) {
 			goto error;
 		}
 		break;
@@ -1838,7 +1828,9 @@ static int _cmd_enable_event(struct ltt_session *session,
 					filter_copy, NULL, wpipe);
 		}
 
-		if (ret != LTTNG_OK && ret != LTTNG_ERR_UST_EVENT_ENABLED) {
+		if (ret == LTTNG_ERR_UST_EVENT_ENABLED) {
+			goto already_enabled;
+		} else if (ret != LTTNG_OK) {
 			goto error;
 		}
 
@@ -1865,6 +1857,7 @@ static int _cmd_enable_event(struct ltt_session *session,
 
 	ret = LTTNG_OK;
 
+already_enabled:
 error:
 	free(filter_expression);
 	free(filter);
