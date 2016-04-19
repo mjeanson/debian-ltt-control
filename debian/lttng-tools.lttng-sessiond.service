@@ -1,2 +1,6 @@
+[Unit]
+Description=LTTng session daemon
+Documentation=http://lttng.org/docs/v2.7/#doc-lttng-sessiond
+
 [Service]
 ExecStart=/usr/bin/lttng-sessiond
