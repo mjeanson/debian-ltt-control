@@ -1,138 +1,527 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: lttng-tools
-Source: http://lttng.org/files/lttng-tools/
+Source: https://lttng.org/files/lttng-tools/
 
 Files: *
+Copyright: 2011-2014, David Goulet <david.goulet@efficios.com>
+           2011-2016, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2011, Julien Desfossez <julien.desfossez@polymtl.ca>
+License: LGPL-2.1
+
+Files: extras/*
+Copyright: 2013, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: extras/lttng-bash_completion
+Copyright: 2013, Simon Marchi <simon.marchi@polymtl.ca>
+License: GPL
+
+Files: include/lttng/health-internal.h
+Copyright: 2013, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2012, David Goulet <dgoulet@efficios.com>
+License: GPL-2
+
+Files: include/lttng/load-internal.h
+  include/lttng/load.h
+  include/lttng/save-internal.h
+  include/lttng/save.h
+Copyright: 2013-2014, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: LGPL-2.1
+
+Files: src/*
+Copyright: 2011-2014, David Goulet <david.goulet@efficios.com>
+           2011-2013, Julien Desfossez <julien.desfossez@efficios.com>
+           2010-2015, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2012, Christian Babeux <christian.babeux@efficios.com>
+           2013-2014, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: GPL-2
+
+Files: src/bin/lttng-relayd/lttng-viewer-abi.h
+Copyright: 2013, Julien Desfossez <jdesfossez@efficios.com>
+License: Expat
+
+Files: src/bin/lttng-sessiond/lttng-ust-abi.h
+Copyright: 2010-2012, - Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: src/bin/lttng-sessiond/lttng-ust-error.h
+Copyright: 2011, David Goulet <david.goulet@polymtl.ca>
+           2011, Julien Desfossez <julien.desfossez@polymtl.ca>
+           2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: LGPL-2.1
+
+Files: src/bin/lttng-sessiond/lttng-sessiond.h
+Copyright: 2013, Raphaël Beamonte <raphael.beamonte@gmail.com>
+           2011, David Goulet <david.goulet@polymtl.ca>
+License: GPL-2
+
+Files: src/bin/lttng-sessiond/modprobe.c
+Copyright: 2014, Jan Glauber <jan.glauber@gmail.com>
+           2011, David Goulet <dgoulet@efficios.com>
+License: GPL-2
+
+Files: src/bin/lttng-sessiond/ust-clock.h
+Copyright: 2011, 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2009, 2010, Pierre-Marc Fournier
+License: LGPL-2.1
+
+Files: src/common/align.h
+  src/common/bug.h
+Copyright: 2010-2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: src/common/bitfield.h
+Copyright: 2010, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: src/common/compat/tid.h
+Copyright: 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: src/common/compat/uuid.h
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: src/common/config/ini.c
+  src/common/config/ini.h
+Copyright: 2009, Brush Technology
+License: BSD-3-clause
+
+Files: src/common/defaults.c
+Copyright: 2012, Simon Marchi <simon.marchi@polymtl.ca>
+License: GPL-2
+
+Files: src/common/hashtable/hashtable-symbols.h
+Copyright: 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: LGPL-2.1
+
+Files: src/common/hashtable/utils.c
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2006, Bob Jenkins
+           2011, David Goulet <david.goulet@polymtl.ca>
+License: GPL-2
+
+Files: src/common/index/ctf-index.h
+Copyright: 2013, Julien Desfossez <jdesfossez@efficios.com>
+License: Expat
+
+Files: src/common/mi-lttng.c
+  src/common/mi-lttng.h
+Copyright: 2014, Jonathan Rajotte <jonathan.r.julien@gmail.com>
+License: GPL-2
+
+Files: src/common/readwrite.c
+  src/common/readwrite.h
+Copyright: 2013, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: LGPL-2.1
+
+Files: src/common/utils.c
+Copyright: 2013, Raphaël Beamonte <raphael.beamonte@gmail.com>
+           2013, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+           2012, David Goulet <dgoulet@efficios.com>
+License: GPL-2
+
+Files: src/lib/*
+Copyright: 2013, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: LGPL-2.1
+
+Files: src/lib/lttng-ctl/filter/*
+Copyright: 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: LGPL-2.1
+
+Files: src/lib/lttng-ctl/filter/filter-lexer.c
 Copyright: 2011, David Goulet <david.goulet@polymtl.ca>
            2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
            2011, Julien Desfossez <julien.desfossez@polymtl.ca>
 License: LGPL-2.1
 
-Files: tests/regression/ust/low-throughput/tp.c
-       tests/regression/ust/low-throughput/tp.h
-       tests/regression/ust/high-throughput/tp.c
-       tests/regression/ust/high-throughput/tp.h
-       tests/regression/ust/clock-override/lttng-ust-clock-override-test.c
-       tests/regression/ust/getcpu-override/lttng-ust-getcpu-override-test.c
-       tests/regression/ust/overlap/demo/tp.c
-       tests/regression/ust/overlap/demo/tp2.c
-       tests/regression/ust/overlap/demo/ust_tests_demo.h
-       tests/regression/ust/overlap/demo/ust_tests_demo2.h
-       tests/regression/ust/overlap/demo/ust_tests_demo3.h
-       tests/regression/ust/overlap/demo/tp3.c
-       tests/regression/ust/daemon/ust_tests_daemon.h
-       tests/regression/ust/fork/ust_tests_fork.h
-       tests/regression/ust/linking/tp.c
-       tests/regression/ust/linking/tp2.c
-       tests/regression/ust/linking/ust_tests_demo.h
-       tests/regression/ust/linking/ust_tests_demo2.h
-       tests/regression/ust/linking/ust_tests_demo3.h
-       tests/regression/ust/linking/tp3.c
-       tests/regression/ust/exit-fast/ust_tests_exitfast.h
-       src/lib/lttng-ctl/filter/memstream.h
-       src/bin/lttng-sessiond/lttng-ust-abi.h
-       src/bin/lttng-relayd/*
-       src/common/bug.h
-       src/common/bitfield.h
-       src/common/mi_lttng.xsd
-       src/common/config/session.xsd
-       src/common/compat/*
-       src/common/align.h
+Files: src/lib/lttng-ctl/filter/filter-parser.c
+  src/lib/lttng-ctl/filter/filter-parser.h
+Copyright: 1984, 1989, 1990, 2000-2015, Free Software Foundation, Inc
+License: GPL-3+
+
+Files: src/lib/lttng-ctl/filter/filter-visitor-ir-validate-string.c
+Copyright: 2014, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: LGPL-2.1
+
+Files: src/lib/lttng-ctl/filter/memstream.h
+Copyright: 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: src/lib/lttng-ctl/load.c
+Copyright: 2014, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: src/lib/lttng-ctl/lttng-ctl-health.c
+Copyright: 2013, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2011, David Goulet <david.goulet@polymtl.ca>
+License: LGPL-2.1
+
+Files: src/lib/lttng-ctl/lttng-ctl-helper.h
+Copyright: 2013, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: src/lib/lttng-ctl/lttng-ctl.c
+Copyright: 2011, David Goulet <david.goulet@polymtl.ca>
+License: LGPL-2.1
+
+Files: src/lib/lttng-ctl/snapshot.c
+Copyright: 2013, - David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/*
+Copyright: 2013, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: tests/regression/kernel/test_syscall
+Copyright: 2015, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2013, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: tests/regression/tools/*
+Copyright: 2012, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: tests/regression/tools/crash/*
+Copyright: 2015, Jonathan Rajotte <jonathan.rajotte-julien@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/filtering/gen-ust-events.c
+  tests/regression/tools/filtering/tp.c
+Copyright: 2012, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/filtering/tp.h
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/health/*
+Copyright: 2014, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2012, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: tests/regression/tools/health/health_check.c
+  tests/regression/tools/health/health_exit.c
+  tests/regression/tools/health/health_fail.c
+  tests/regression/tools/health/health_stall.c
+Copyright: 2014, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2012, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: tests/regression/tools/live/*
+Copyright: 2013, Julien Desfossez <julien.desfossez@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/live/live_test.c
+Copyright: 2013, Julien Desfossez <jdesfossez@efficios.com>
+License: GPL
+
+Files: tests/regression/tools/mi/*
+Copyright: 2014, Jonathan Rajotte <jonathan.r.julien@gmail.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/mi/extract_xml.c
+Copyright: 2014, Jonathan Rajotte <jonathan.r.julien@gmail.com>
+License: GPL-2
+
+Files: tests/regression/tools/save-load/*
+Copyright: 2014, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/snapshots/*
+Copyright: 2013, Julien Desfossez <jdesfossez@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/snapshots/test_kernel_streaming
+  tests/regression/tools/snapshots/test_ust_streaming
+Copyright: 2013, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/streaming/*
+Copyright: 2012, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/streaming/test_high_throughput_limits
+Copyright: 2013, Christian Babeux <christian.babeux@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/tracefile-limits/*
+Copyright: 2013, Christian Babeux <christian.babeux@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/tools/wildcard/*
+Copyright: 2015, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2013, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/*
+Copyright: 2012, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/ust/clock-override/*
+Copyright: 2015, Jonathan Rajotte <jonathan.rajotte-julien@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/ust/clock-override/lttng-ust-clock-override-test.c
+Copyright: 2015, Jonthan Rajotte <jonathan.rajotte-julien@efficios.com>
+           2014, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: tests/regression/ust/daemon/*
+Copyright: 2013, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/daemon/daemon.c
+Copyright: 2011, 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2009, 2010, Pierre-Marc Fournier
+License: LGPL-2.1
+
+Files: tests/regression/ust/daemon/ust_tests_daemon.h
+Copyright: 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: tests/regression/ust/exit-fast/*
+Copyright: 2013, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/exit-fast/exit-fast.c
+Copyright: 2011, Nils Carlson
+License: LGPL-2.1+
+
+Files: tests/regression/ust/exit-fast/ust_tests_exitfast.h
+Copyright: 2011, 2012, Matthew Khouzam <matthew.khouzam@ericsson.com>
+           2011, 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: tests/regression/ust/fork/*
+Copyright: 2013, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/fork/fork.c
+Copyright: 2011, 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2009, 2010, Pierre-Marc Fournier
+License: LGPL-2.1
+
+Files: tests/regression/ust/fork/fork2.c
+Copyright: 2009, Pierre-Marc Fournier
+License: LGPL-2.1+
+
+Files: tests/regression/ust/fork/ust_tests_fork.h
 Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
 License: Expat
 
-Files: tests/utils/tap/tap.c
-       tests/utils/tap/tap.h
+Files: tests/regression/ust/getcpu-override/*
+Copyright: 2011, David Goulet <david.goulet@polymtl.ca>
+           2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2011, Julien Desfossez <julien.desfossez@polymtl.ca>
+License: LGPL-2.1
+
+Files: tests/regression/ust/getcpu-override/lttng-ust-getcpu-override-test.c
+Copyright: 2015, Jonathan Rajotte <jonathan.rajotte-julien@efficios.com>
+           2014, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: tests/regression/ust/getcpu-override/test_getcpu_override
+Copyright: 2015, Jonathan Rajotte <jonathan.rajotte-julien@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/ust/high-throughput/*
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: tests/regression/ust/high-throughput/main.c
+Copyright: 2011, 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2009, 2010, Pierre-Marc Fournier
+License: LGPL-2.1
+
+Files: tests/regression/ust/high-throughput/test_high_throughput
+Copyright: 2012, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/ust/java-jul/*
+Copyright: 2013, David Goulet <dgoulet@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/java-jul/test_java_jul
+Copyright: 2013, David Goulet <dgoulet@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/java-log4j/*
+Copyright: 2014, David Goulet <dgoulet@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/java-log4j/test_java_log4j
+Copyright: 2014, David Goulet <dgoulet@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/libc-wrapper/*
+Copyright: 2013, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/libc-wrapper/prog.c
+Copyright: 2009, Pierre-Marc Fournier
+License: LGPL-2.1+
+
+Files: tests/regression/ust/linking/*
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: tests/regression/ust/linking/demo.c
+Copyright: 2011, 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+  2009, 2010, Pierre-Marc Fournier
+License: LGPL-2.1
+
+Files: tests/regression/ust/linking/demo_preload
+Copyright: 2011, David Goulet <david.goulet@polymtl.ca>
+           2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2011, Julien Desfossez <julien.desfossez@polymtl.ca>
+License: LGPL-2.1
+
+Files: tests/regression/ust/linking/test_linking
+  tests/regression/ust/linking/test_linking.py
+Copyright: - 2013, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/low-throughput/*
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: tests/regression/ust/low-throughput/main.c
+Copyright: 2012, - David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/ust/low-throughput/test_low_throughput
+Copyright: - 2012, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/ust/multi-session/gen-nevents.c
+Copyright: 2012, David Goulet <dgoulet@efficios.com>
+           2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2009, Pierre-Marc Fournier
+License: LGPL-2.1
+
+Files: tests/regression/ust/multi-session/tp.c
+Copyright: 2012, David Goulet <dgoulet@efficios.com>
+           2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/ust/multi-session/ust_gen_nevents.h
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/ust/overlap/*
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: Expat
+
+Files: tests/regression/ust/overlap/demo/demo-trace
+Copyright: 2011, David Goulet <david.goulet@polymtl.ca>
+           2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2011, Julien Desfossez <julien.desfossez@polymtl.ca>
+License: LGPL-2.1
+
+Files: tests/regression/ust/overlap/demo/demo.c
+Copyright: 2011, 2012, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2009, 2010, Pierre-Marc Fournier
+License: LGPL-2.1
+
+Files: tests/regression/ust/overlap/test_overlap
+Copyright: 2012, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/ust/python-logging/*
+Copyright: 2015, Philippe Proulx <pproulx@efficios.com>
+           2014, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/regression/ust/python-logging/test_python_logging
+Copyright: 2015, Philippe Proulx <pproulx@efficios.com>
+           2014, David Goulet <dgoulet@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/test_event_basic
+Copyright: 2013, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/test_event_perf
+Copyright: 2014, Julien Desfossez <jdesfossez@efficios.com>
+           2013, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: tests/regression/ust/test_event_tracef
+Copyright: 2015, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2013, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: tests/run.sh
+Copyright: 2013, Christian Babeux <christian.babeux@efficios.com>
+License: GPL
+
+Files: tests/stress/*
+Copyright: 2013, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/unit/*
+Copyright: 2011, David Goulet <david.goulet@polymtl.ca>
+License: GPL
+
+Files: tests/unit/ini_config/*
+Copyright: 2013, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: GPL
+
+Files: tests/unit/ini_config/test_ini_config
+Copyright: 2013, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: GPL
+
+Files: tests/unit/test_uri.c
+Copyright: 2012, David Goulet <dgoulet@efficios.com>
+License: GPL
+
+Files: tests/unit/test_utils_expand_path.c
+Copyright: 2013, Raphaël Beamonte <raphael.beamonte@gmail.com>
+License: GPL
+
+Files: tests/unit/test_utils_parse_size_suffix.c
+Copyright: 2013, Simon Marchi <simon.marchi@polymtl.ca>
+License: GPL
+
+Files: tests/utils/*
+Copyright: 2012, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
+
+Files: tests/utils/babelstats.pl
+Copyright: 2012, Christian Babeux <christian.babeux@efficios.com>
+License: GPL-2
+
+Files: tests/utils/tap/*
 Copyright: 2004, Nik Clayton
 License: BSD-2-clause
 
-Files: src/common/config/ini.c
-       src/common/config/ini.h
-Copyright: 2009, Brush Technology
-License: BSD-3-clause
-
 Files: tests/utils/tap/tap.sh
-       src/lib/lttng-ctl/filter/filter-parser.c
-       src/lib/lttng-ctl/filter/filter-parser.h
 Copyright: 2010, Patrick LeBoutillier <patrick.leboutillier@gmail.com>
-License: GPL-3
+License: GPL-3+
+
+Files: tests/utils/test_utils.py
+Copyright: 2013, Jérémie Galarneau <jeremie.galarneau@efficios.com>
+License: GPL-2
+
+Files: tests/utils/testapp/gen-ust-events/tp.h
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: LGPL-2.1
+
+Files: tests/utils/testapp/gen-ust-nevents/tp.h
+Copyright: 2011, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+License: LGPL-2.1
+
+Files: tests/utils/testapp/gen-ust-tracef/*
+Copyright: 2014, Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+           2012, David Goulet <dgoulet@efficios.com>
+License: LGPL-2.1
 
 Files: debian/*
 Copyright: 2011-2012, Alexandre Montplaisir <alexandre.montplaisir@gmail.com>
-           2011, Michael Jeanson <mjeanson@rlnx.com>
-           2012, Jon Bernard <jbernard@debian.org>
+           2011-2016, Michael Jeanson <mjeanson@ubuntu.com>
+           2012-2016, Jon Bernard <jbernard@debian.org>
 License: GPL-2+
-
-License: LGPL-2.1
- This library is free software; you can redistribute it and/or
- modify it under the terms of the GNU Lesser General Public
- License as published by the Free Software Foundation; under
- version 2.1 of the License.
- .
- This library is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- Lesser General Public License for more details.
- .
- You should have received a copy of the GNU Lesser General Public License
- along with this program. If not, see <http://www.gnu.org/licenses/>
- .
- On Debian systems, the complete text of the GNU Lesser General Public
- License version 2.1 can be found in "/usr/share/common-licenses/LGPL-2.1".
-
-License: GPL-2+
- This package is free software; you can redistribute it and/or modify
- it under the terms of the GNU General Public License as published by
- the Free Software Foundation; either version 2 of the License, or
- (at your option) any later version.
- .
- This package is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
- .
- You should have received a copy of the GNU General Public License
- along with this program. If not, see <http://www.gnu.org/licenses/>
- .
- On Debian systems, the complete text of the GNU General
- Public License version 2 can be found in "/usr/share/common-licenses/GPL-2".
-
-License: GPL-3
- This program is free software: you can redistribute it and/or modify
- it under the terms of the GNU General Public License as published by
- the Free Software Foundation, either version 3 of the License, or
- (at your option) any later version.
- .
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
- .
- You should have received a copy of the GNU General Public License
- along with this program.  If not, see <http://www.gnu.org/licenses/>.
- .
- On Debian systems, the complete text of the GNU General Public License
- version 3 can be found in "/usr/share/common-licenses/GPL-3".
-
-License: Expat
- Permission is hereby granted, free of charge, to any person obtaining
- a copy of this software and associated documentation files (the
- "Software"), to deal in the Software without restriction, including
- without limitation the rights to use, copy, modify, merge, publish,
- distribute, sublicense, and/or sell copies of the Software, and to
- permit persons to whom the Software is furnished to do so, subject to
- the following conditions:
- .
- The above copyright notice and this permission notice shall be included
- in all copies or substantial portions of the Software.
- .
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
- CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
- TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
- SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 License: BSD-2-clause
  Redistribution and use in source and binary forms, with or without
@@ -181,3 +570,86 @@ License: BSD-3-clause
  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+
+License: Expat
+ Permission is hereby granted, free of charge, to any person obtaining
+ a copy of this software and associated documentation files (the
+ "Software"), to deal in the Software without restriction, including
+ without limitation the rights to use, copy, modify, merge, publish,
+ distribute, sublicense, and/or sell copies of the Software, and to
+ permit persons to whom the Software is furnished to do so, subject to
+ the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included
+ in all copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+License: GPL
+ Please fill license GPL from header of extras/*
+
+License: GPL-2
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; version 2 dated June, 1991.
+ .
+ On Debian systems, the complete text of version 2 of the GNU General
+ Public License can be found in '/usr/share/common-licenses/GPL-2'.
+
+License: GPL-2+
+ This package is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 2 of the License, or
+ (at your option) any later version.
+ .
+ This package is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>
+ .
+ On Debian systems, the complete text of the GNU General
+ Public License version 2 can be found in "/usr/share/common-licenses/GPL-2".
+
+License: GPL-3+
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; version 3 dated June, 2007, or (at
+ your option) any later version.
+ .
+ On Debian systems, the complete text of version 3 of the GNU General
+ Public License can be found in '/usr/share/common-licenses/GPL-3'.
+
+License: LGPL-2.1
+ This library is free software; you can redistribute it and/or
+ modify it under the terms of the GNU Lesser General Public
+ License as published by the Free Software Foundation; under
+ version 2.1 of the License.
+ .
+ This library is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ Lesser General Public License for more details.
+ .
+ You should have received a copy of the GNU Lesser General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>
+ .
+ On Debian systems, the complete text of the GNU Lesser General Public
+ License version 2.1 can be found in "/usr/share/common-licenses/LGPL-2.1".
+
+License: LGPL-2.1+
+ This program is free software; you can redistribute it and/or modify it
+ under the terms of the GNU Lesser General Public License as published by the
+ Free Software Foundation; version 2.1 of the License, or (at
+ your option) any later version.
+ .
+ On Debian systems, the complete text of version 2.1 of the GNU Lesser
+ General Public License can be found in `/usr/share/common-licenses/LGPL-2.1'.
