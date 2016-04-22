@@ -1,3 +1,13 @@
+ltt-control (2.7.2-1) unstable; urgency=medium
+
+  [ Michael Jeanson ]
+  * [07d1a45] New upstream version 2.7.2
+  * [34bebd4] Update debian/copyright and add missing licences
+  * [fc94db2] Bump standards version to 3.9.7, no changes necessary
+  * [7374b85] Add unit section to lttng-sessiond service file
+
+ -- Jon Bernard <jbernard@debian.org>  Fri, 22 Apr 2016 13:48:05 +0000
+
 ltt-control (2.7.1-2) unstable; urgency=medium
 
   * [cfcd9af] Update vcs fields to use secure uri
