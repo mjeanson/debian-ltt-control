@@ -59,6 +59,17 @@ struct ustctl_consumer_channel_attr {
  * API used by sessiond.
  */
 
+struct lttng_ust_context_attr {
+	enum lttng_ust_context_type ctx;
+	union {
+		struct lttng_ust_perf_counter_ctx perf_counter;
+		struct {
+		        char *provider_name;
+			char *ctx_name;
+		} app_ctx;
+	} u;
+};
+
 /*
  * Error values: all the following functions return:
  * >= 0: Success (LTTNG_UST_OK)
@@ -69,7 +80,7 @@ int ustctl_create_session(int sock);
 int ustctl_create_event(int sock, struct lttng_ust_event *ev,
 		struct lttng_ust_object_data *channel_data,
 		struct lttng_ust_object_data **event_data);
-int ustctl_add_context(int sock, struct lttng_ust_context *ctx,
+int ustctl_add_context(int sock, struct lttng_ust_context_attr *ctx,
 		struct lttng_ust_object_data *obj_data,
 		struct lttng_ust_object_data **context_data);
 int ustctl_set_filter(int sock, struct lttng_ust_filter_bytecode *bytecode,
@@ -227,6 +238,7 @@ enum ustctl_socket_type {
 enum ustctl_notify_cmd {
 	USTCTL_NOTIFY_CMD_EVENT = 0,
 	USTCTL_NOTIFY_CMD_CHANNEL = 1,
+	USTCTL_NOTIFY_CMD_ENUM = 2,
 };
 
 enum ustctl_channel_header {
@@ -274,6 +286,13 @@ struct ustctl_float_type {
 	char padding[USTCTL_UST_FLOAT_TYPE_PADDING];
 } LTTNG_PACKED;
 
+#define USTCTL_UST_ENUM_ENTRY_PADDING	32
+struct ustctl_enum_entry {
+	uint64_t start, end;		/* start and end are inclusive */
+	char string[LTTNG_UST_SYM_NAME_LEN];
+	char padding[USTCTL_UST_ENUM_ENTRY_PADDING];
+};
+
 #define USTCTL_UST_BASIC_TYPE_PADDING	296
 union _ustctl_basic_type {
 	struct ustctl_integer_type integer;
@@ -281,6 +300,9 @@ union _ustctl_basic_type {
 		enum ustctl_string_encodings encoding;
 	} string;
 	struct ustctl_float_type _float;
+	struct {
+		char name[LTTNG_UST_SYM_NAME_LEN];
+	} enumeration;
 	char padding[USTCTL_UST_BASIC_TYPE_PADDING];
 } LTTNG_PACKED;
 
@@ -374,6 +396,22 @@ int ustctl_recv_register_event(int sock,
 int ustctl_reply_register_event(int sock,
 	uint32_t id,			/* event id (input) */
 	int ret_code);			/* return code. 0 ok, negative error */
+
+/*
+ * Returns 0 on success, negative UST or system error value on error.
+ */
+int ustctl_recv_register_enum(int sock,
+	int *session_objd,
+	char *enum_name,
+	struct ustctl_enum_entry **entries,
+	unsigned int *nr_entries);
+
+/*
+ * Returns 0 on success, negative error value on error.
+ */
+int ustctl_reply_register_enum(int sock,
+	int64_t id,			/* enum id (input) */
+	int ret_code);
 
 /*
  * Returns 0 on success, negative UST or system error value on error.

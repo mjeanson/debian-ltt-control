@@ -26,6 +26,7 @@
  */
 
 #include <limits.h>
+#include <common/macros.h>
 
 #define LTTNG_VIEWER_PATH_MAX		4096
 #define LTTNG_VIEWER_NAME_MAX		255
@@ -48,6 +49,7 @@ enum lttng_viewer_command {
 	LTTNG_VIEWER_GET_METADATA	= 6,
 	LTTNG_VIEWER_GET_NEW_STREAMS	= 7,
 	LTTNG_VIEWER_CREATE_SESSION	= 8,
+	LTTNG_VIEWER_DETACH_SESSION	= 9,
 };
 
 enum lttng_viewer_attach_return_code {
@@ -105,6 +107,12 @@ enum lttng_viewer_create_session_return_code {
 	LTTNG_VIEWER_CREATE_SESSION_ERR		= 2,
 };
 
+enum lttng_viewer_detach_session_return_code {
+	LTTNG_VIEWER_DETACH_SESSION_OK          = 1,
+	LTTNG_VIEWER_DETACH_SESSION_UNK		= 2,
+	LTTNG_VIEWER_DETACH_SESSION_ERR         = 3,
+};
+
 struct lttng_viewer_session {
 	uint64_t id;
 	uint32_t live_timer;
@@ -112,7 +120,7 @@ struct lttng_viewer_session {
 	uint32_t streams;
 	char hostname[LTTNG_VIEWER_HOST_NAME_MAX];
 	char session_name[LTTNG_VIEWER_NAME_MAX];
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 struct lttng_viewer_stream {
 	uint64_t id;
@@ -120,13 +128,13 @@ struct lttng_viewer_stream {
 	uint32_t metadata_flag;
 	char path_name[LTTNG_VIEWER_PATH_MAX];
 	char channel_name[LTTNG_VIEWER_NAME_MAX];
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 struct lttng_viewer_cmd {
 	uint64_t data_size;	/* data size following this header */
 	uint32_t cmd;		/* enum lttcomm_relayd_command */
 	uint32_t cmd_version;	/* command version */
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 /*
  * LTTNG_VIEWER_CONNECT payload.
@@ -137,7 +145,7 @@ struct lttng_viewer_connect {
 	uint32_t major;
 	uint32_t minor;
 	uint32_t type;		/* enum lttng_viewer_connection_type */
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 /*
  * LTTNG_VIEWER_LIST_SESSIONS payload.
@@ -145,7 +153,7 @@ struct lttng_viewer_connect {
 struct lttng_viewer_list_sessions {
 	uint32_t sessions_count;
 	char session_list[];	/* struct lttng_viewer_session */
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 /*
  * LTTNG_VIEWER_ATTACH_SESSION payload.
@@ -154,7 +162,7 @@ struct lttng_viewer_attach_session_request {
 	uint64_t session_id;
 	uint64_t offset;	/* unused for now */
 	uint32_t seek;		/* enum lttng_viewer_seek */
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 struct lttng_viewer_attach_session_response {
 	/* enum lttng_viewer_attach_return_code */
@@ -162,7 +170,7 @@ struct lttng_viewer_attach_session_response {
 	uint32_t streams_count;
 	/* struct lttng_viewer_stream */
 	char stream_list[];
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 /*
  * LTTNG_VIEWER_GET_NEXT_INDEX payload.
@@ -190,34 +198,34 @@ struct lttng_viewer_get_packet {
 	uint64_t stream_id;
 	uint64_t offset;
 	uint32_t len;
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 struct lttng_viewer_trace_packet {
 	uint32_t status;	/* enum lttng_viewer_get_packet_return_code */
 	uint32_t len;
 	uint32_t flags;		/* LTTNG_VIEWER_FLAG_* */
 	char data[];
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 /*
  * LTTNG_VIEWER_GET_METADATA payload.
  */
 struct lttng_viewer_get_metadata {
 	uint64_t stream_id;
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 struct lttng_viewer_metadata_packet {
 	uint64_t len;
 	uint32_t status;	/* enum lttng_viewer_get_metadata_return_code */
 	char data[];
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 /*
  * LTTNG_VIEWER_GET_NEW_STREAMS payload.
  */
 struct lttng_viewer_new_streams_request {
 	uint64_t session_id;
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 struct lttng_viewer_new_streams_response {
 	/* enum lttng_viewer_new_streams_return_code */
@@ -225,11 +233,23 @@ struct lttng_viewer_new_streams_response {
 	uint32_t streams_count;
 	/* struct lttng_viewer_stream */
 	char stream_list[];
-} __attribute__((__packed__));
+} LTTNG_PACKED;
 
 struct lttng_viewer_create_session_response {
 	/* enum lttng_viewer_create_session_return_code */
 	uint32_t status;
-} __attribute__((__packed__));
+} LTTNG_PACKED;
+
+/*
+ * LTTNG_VIEWER_DETACH_SESSION payload.
+ */
+struct lttng_viewer_detach_session_request {
+	uint64_t session_id;
+} LTTNG_PACKED;
+
+struct lttng_viewer_detach_session_response {
+	/* enum lttng_viewer_detach_session_return_code */
+	uint32_t status;
+} LTTNG_PACKED;
 
 #endif /* LTTNG_VIEWER_ABI_H */

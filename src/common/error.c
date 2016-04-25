@@ -15,7 +15,6 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <inttypes.h>
@@ -170,6 +169,11 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_PID_TRACKED) ] = "PID already tracked",
 	[ ERROR_INDEX(LTTNG_ERR_PID_NOT_TRACKED) ] = "PID not tracked",
 	[ ERROR_INDEX(LTTNG_ERR_INVALID_CHANNEL_DOMAIN) ] = "Invalid channel domain",
+	[ ERROR_INDEX(LTTNG_ERR_OVERFLOW) ] = "Overflow occured",
+	[ ERROR_INDEX(LTTNG_ERR_SESSION_NOT_STARTED) ] = "Session not started",
+	[ ERROR_INDEX(LTTNG_ERR_LIVE_SESSION) ] = "Live sessions are not supported",
+	[ ERROR_INDEX(LTTNG_ERR_PER_PID_SESSION) ] = "Per-PID tracing sessions are not supported",
+	[ ERROR_INDEX(LTTNG_ERR_KERN_CONTEXT_UNAVAILABLE) ] = "Context unavailable on this kernel",
 
 	/* Last element */
 	[ ERROR_INDEX(LTTNG_ERR_NR) ] = "Unknown error code"

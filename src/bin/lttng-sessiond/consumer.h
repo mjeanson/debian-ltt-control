@@ -18,7 +18,7 @@
 #ifndef _CONSUMER_H
 #define _CONSUMER_H
 
-#include <common/consumer.h>
+#include <common/consumer/consumer.h>
 #include <common/hashtable/hashtable.h>
 #include <lttng/lttng.h>
 #include <urcu/ref.h>
@@ -153,6 +153,9 @@ struct consumer_output {
 	 * index. The relayd sockets are index with it on the consumer side.
 	 */
 	uint64_t net_seq_index;
+	/* Store the relay protocol in use if the session is remote. */
+	uint32_t relay_major_version;
+	uint32_t relay_minor_version;
 
 	/*
 	 * Subdirectory path name used for both local and network consumer.
@@ -279,8 +282,12 @@ int consumer_setup_metadata(struct consumer_socket *socket,
 		uint64_t metadata_key);
 int consumer_push_metadata(struct consumer_socket *socket,
 		uint64_t metadata_key, char *metadata_str, size_t len,
-		size_t target_offset);
+		size_t target_offset, uint64_t version);
 int consumer_flush_channel(struct consumer_socket *socket, uint64_t key);
+int consumer_get_discarded_events(uint64_t session_id, uint64_t channel_key,
+		struct consumer_output *consumer, uint64_t *discarded);
+int consumer_get_lost_packets(uint64_t session_id, uint64_t channel_key,
+		struct consumer_output *consumer, uint64_t *lost);
 
 /* Snapshot command. */
 int consumer_snapshot_channel(struct consumer_socket *socket, uint64_t key,

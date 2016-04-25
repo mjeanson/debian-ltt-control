@@ -15,7 +15,6 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <inttypes.h>
@@ -25,7 +24,7 @@
 
 #include <common/defaults.h>
 #include <common/error.h>
-#include <common/config/config.h>
+#include <common/config/session-config.h>
 #include <common/utils.h>
 #include <common/runas.h>
 #include <lttng/save-internal.h>
@@ -233,6 +232,18 @@ const char *get_kernel_context_type_string(
 	case LTTNG_KERNEL_CONTEXT_HOSTNAME:
 		context_type_string = config_event_context_hostname;
 		break;
+	case LTTNG_KERNEL_CONTEXT_INTERRUPTIBLE:
+		context_type_string = config_event_context_interruptible;
+		break;
+	case LTTNG_KERNEL_CONTEXT_PREEMPTIBLE:
+		context_type_string = config_event_context_preemptible;
+		break;
+	case LTTNG_KERNEL_CONTEXT_NEED_RESCHEDULE:
+		context_type_string = config_event_context_need_reschedule;
+		break;
+	case LTTNG_KERNEL_CONTEXT_MIGRATABLE:
+		context_type_string = config_event_context_migratable;
+		break;
 	default:
 		context_type_string = NULL;
 	}
@@ -261,6 +272,9 @@ const char *get_ust_context_type_string(
 		break;
 	case LTTNG_UST_CONTEXT_PTHREAD_ID:
 		context_type_string = config_event_context_pthread_id;
+		break;
+	case LTTNG_UST_CONTEXT_APP_CONTEXT:
+		context_type_string = config_event_context_app;
 		break;
 	case LTTNG_UST_CONTEXT_PERF_THREAD_COUNTER:
 		/*
@@ -618,7 +632,8 @@ int save_ust_event(struct config_writer *writer,
 		for (i = 0; i < event->exclusion->count; i++) {
 			ret = config_writer_write_element_string(writer,
 				config_element_exclusion,
-				&event->exclusion->names[0][i]);
+				LTTNG_EVENT_EXCLUSION_NAME_AT(
+					event->exclusion, i));
 			if (ret) {
 				ret = LTTNG_ERR_SAVE_IO_FAIL;
 				goto end;
@@ -788,7 +803,8 @@ int save_kernel_context(struct config_writer *writer,
 	}
 
 	if (ctx->ctx == LTTNG_KERNEL_CONTEXT_PERF_CPU_COUNTER) {
-		ret = config_writer_open_element(writer, config_element_perf);
+		ret = config_writer_open_element(writer,
+				config_element_context_perf);
 		if (ret) {
 			ret = LTTNG_ERR_SAVE_IO_FAIL;
 			goto end;
@@ -886,6 +902,124 @@ end:
 }
 
 static
+int save_ust_context_perf_thread_counter(struct config_writer *writer,
+		struct ltt_ust_context *ctx)
+{
+	int ret;
+
+	assert(writer);
+	assert(ctx);
+
+	/* Perf contexts are saved as event_perf_context_type */
+	ret = config_writer_open_element(writer, config_element_context_perf);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_unsigned_int(writer,
+			config_element_type, ctx->ctx.u.perf_counter.type);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_unsigned_int(writer,
+			config_element_config, ctx->ctx.u.perf_counter.config);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_string(writer, config_element_name,
+			ctx->ctx.u.perf_counter.name);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	/* /perf */
+	ret = config_writer_close_element(writer);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+end:
+	return ret;
+}
+
+static
+int save_ust_context_app_ctx(struct config_writer *writer,
+		struct ltt_ust_context *ctx)
+{
+	int ret;
+
+	assert(writer);
+	assert(ctx);
+
+	/* Application contexts are saved as application_context_type */
+	ret = config_writer_open_element(writer, config_element_context_app);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_string(writer,
+			config_element_context_app_provider_name,
+			ctx->ctx.u.app_ctx.provider_name);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_string(writer,
+			config_element_context_app_ctx_name,
+			ctx->ctx.u.app_ctx.ctx_name);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	/* /app */
+	ret = config_writer_close_element(writer);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+end:
+	return ret;
+}
+
+static
+int save_ust_context_generic(struct config_writer *writer,
+		struct ltt_ust_context *ctx)
+{
+	int ret;
+	const char *context_type_string;
+
+	assert(writer);
+	assert(ctx);
+
+	/* Save context as event_context_type_type */
+	context_type_string = get_ust_context_type_string(
+			ctx->ctx.ctx);
+	if (!context_type_string) {
+		ERR("Unsupported UST context type.");
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_string(writer,
+			config_element_type, context_type_string);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+end:
+	return ret;
+}
+
+static
 int save_ust_context(struct config_writer *writer,
 	struct cds_list_head *ctx_list)
 {
@@ -902,9 +1036,6 @@ int save_ust_context(struct config_writer *writer,
 	}
 
 	cds_list_for_each_entry(ctx, ctx_list, list) {
-		const char *context_type_string;
-
-
 		ret = config_writer_open_element(writer,
 			config_element_context);
 		if (ret) {
@@ -912,61 +1043,19 @@ int save_ust_context(struct config_writer *writer,
 			goto end;
 		}
 
-		if (ctx->ctx.ctx == LTTNG_UST_CONTEXT_PERF_THREAD_COUNTER) {
-			/* Perf contexts are saved as event_perf_context_type */
-			ret = config_writer_open_element(writer,
-				config_element_perf);
-			if (ret) {
-				ret = LTTNG_ERR_SAVE_IO_FAIL;
-				goto end;
-			}
-
-			ret = config_writer_write_element_unsigned_int(writer,
-				config_element_type,
-				ctx->ctx.u.perf_counter.type);
-			if (ret) {
-				ret = LTTNG_ERR_SAVE_IO_FAIL;
-				goto end;
-			}
-
-			ret = config_writer_write_element_unsigned_int(writer,
-				config_element_config,
-				ctx->ctx.u.perf_counter.config);
-			if (ret) {
-				ret = LTTNG_ERR_SAVE_IO_FAIL;
-				goto end;
-			}
-
-			ret = config_writer_write_element_string(writer,
-				config_element_name,
-				ctx->ctx.u.perf_counter.name);
-			if (ret) {
-				ret = LTTNG_ERR_SAVE_IO_FAIL;
-				goto end;
-			}
-
-			/* /perf */
-			ret = config_writer_close_element(writer);
-			if (ret) {
-				ret = LTTNG_ERR_SAVE_IO_FAIL;
-				goto end;
-			}
-		} else {
-			/* Save context as event_context_type_type */
-			context_type_string = get_ust_context_type_string(
-				ctx->ctx.ctx);
-			if (!context_type_string) {
-				ERR("Unsupported UST context type.")
-					ret = LTTNG_ERR_INVALID;
-				goto end;
-			}
-
-			ret = config_writer_write_element_string(writer,
-				config_element_type, context_type_string);
-			if (ret) {
-				ret = LTTNG_ERR_SAVE_IO_FAIL;
-				goto end;
-			}
+		switch (ctx->ctx.ctx) {
+		case LTTNG_UST_CONTEXT_PERF_THREAD_COUNTER:
+			ret = save_ust_context_perf_thread_counter(writer, ctx);
+			break;
+		case LTTNG_UST_CONTEXT_APP_CONTEXT:
+			ret = save_ust_context_app_ctx(writer, ctx);
+			break;
+		default:
+			/* Save generic context. */
+			ret = save_ust_context_generic(writer, ctx);
+		}
+		if (ret) {
+			goto end;
 		}
 
 		/* /context */
@@ -1496,9 +1585,6 @@ int save_domains(struct config_writer *writer, struct ltt_session *session)
 		if (ret) {
 			goto end;
 		}
-	}
-
-	if (session->ust_session) {
 	}
 
 	/* /domains */

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2013 - David Goulet <dgoulet@efficios.com>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License, version 2 only, as
@@ -18,21 +19,20 @@
 #ifndef LTTNG_SESSIOND_AGENT_H
 #define LTTNG_SESSIOND_AGENT_H
 
-#define _GNU_SOURCE
 #include <inttypes.h>
 
 #include <common/hashtable/hashtable.h>
 #include <lttng/lttng.h>
 
 /* Agent protocol version that is verified during the agent registration. */
-#define AGENT_MAJOR_VERSION		1
+#define AGENT_MAJOR_VERSION		2
 #define AGENT_MINOR_VERSION		0
 
 /*
  * Hash table that contains the agent app created upon registration indexed by
- * socket.
+ * socket. Global to the session daemon.
  */
-struct lttng_ht *agent_apps_ht_by_sock;
+extern struct lttng_ht *agent_apps_ht_by_sock;
 
 struct agent_ht_key {
 	const char *name;
@@ -60,7 +60,7 @@ struct agent_register_msg {
  */
 struct agent_app {
 	/*
-	 * PID sent during registration of a AGENT application.
+	 * PID sent during registration of an agent application.
 	 */
 	pid_t pid;
 
@@ -117,6 +117,9 @@ struct agent {
 	/* Contains event indexed by name. */
 	struct lttng_ht *events;
 
+	/* Application context list (struct agent_app_ctx). */
+	struct cds_list_head app_ctx_list;
+
 	/* Node used for the hash table indexed by domain type. */
 	struct lttng_ht_node_u64 node;
 };
@@ -148,6 +151,11 @@ void agent_event_next_duplicate(const char *name,
 		struct agent *agt, struct lttng_ht_iter* iter);
 void agent_delete_event(struct agent_event *event, struct agent *agt);
 void agent_destroy_event(struct agent_event *event);
+
+/* Agent context API.*/
+int agent_enable_context(struct lttng_event_context *ctx,
+		enum lttng_domain_type domain);
+int agent_add_context(struct lttng_event_context *ctx, struct agent *agt);
 
 /* Agent app API. */
 struct agent_app *agent_create_app(pid_t pid, enum lttng_domain_type domain,

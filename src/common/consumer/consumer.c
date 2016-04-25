@@ -17,7 +17,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <poll.h>
@@ -43,12 +42,11 @@
 #include <common/kernel-consumer/kernel-consumer.h>
 #include <common/relayd/relayd.h>
 #include <common/ust-consumer/ust-consumer.h>
-#include <common/consumer-timer.h>
-
-#include "consumer.h"
-#include "consumer-stream.h"
-#include "consumer-testpoint.h"
-#include "align.h"
+#include <common/consumer/consumer-timer.h>
+#include <common/consumer/consumer.h>
+#include <common/consumer/consumer-stream.h>
+#include <common/consumer/consumer-testpoint.h>
+#include <common/align.h>
 
 struct lttng_consumer_global_data consumer_data = {
 	.stream_count = 0,
@@ -573,6 +571,7 @@ struct lttng_consumer_stream *consumer_allocate_stream(uint64_t channel_key,
 	stream->monitor = monitor;
 	stream->endpoint_status = CONSUMER_ENDPOINT_ACTIVE;
 	stream->index_fd = -1;
+	stream->last_sequence_number = -1ULL;
 	pthread_mutex_init(&stream->lock, NULL);
 	pthread_mutex_init(&stream->metadata_timer_lock, NULL);
 
@@ -713,7 +712,7 @@ end:
 /*
  * Allocate and return a consumer relayd socket.
  */
-struct consumer_relayd_sock_pair *consumer_allocate_relayd_sock_pair(
+static struct consumer_relayd_sock_pair *consumer_allocate_relayd_sock_pair(
 		uint64_t net_seq_idx)
 {
 	struct consumer_relayd_sock_pair *obj = NULL;
@@ -1557,6 +1556,16 @@ ssize_t lttng_consumer_on_read_subbuffer_mmap(
 		if (stream->metadata_flag) {
 			/* Metadata requires the control socket. */
 			pthread_mutex_lock(&relayd->ctrl_sock_mutex);
+			if (stream->reset_metadata_flag) {
+				ret = relayd_reset_metadata(&relayd->control_sock,
+						stream->relayd_stream_id,
+						stream->metadata_version);
+				if (ret < 0) {
+					relayd_hang_up = 1;
+					goto write_error;
+				}
+				stream->reset_metadata_flag = 0;
+			}
 			netlen += sizeof(struct lttcomm_relayd_metadata_payload);
 		}
 
@@ -1579,6 +1588,15 @@ ssize_t lttng_consumer_on_read_subbuffer_mmap(
 	} else {
 		/* No streaming, we have to set the len with the full padding */
 		len += padding;
+
+		if (stream->metadata_flag && stream->reset_metadata_flag) {
+			ret = utils_truncate_stream_file(stream->out_fd, 0);
+			if (ret < 0) {
+				ERR("Reset metadata file");
+				goto end;
+			}
+			stream->reset_metadata_flag = 0;
+		}
 
 		/*
 		 * Check if we need to change the tracefile before writing the packet.
@@ -1745,6 +1763,16 @@ ssize_t lttng_consumer_on_read_subbuffer_splice(
 			 */
 			pthread_mutex_lock(&relayd->ctrl_sock_mutex);
 
+			if (stream->reset_metadata_flag) {
+				ret = relayd_reset_metadata(&relayd->control_sock,
+						stream->relayd_stream_id,
+						stream->metadata_version);
+				if (ret < 0) {
+					relayd_hang_up = 1;
+					goto write_error;
+				}
+				stream->reset_metadata_flag = 0;
+			}
 			ret = write_relayd_metadata_id(splice_pipe[1], stream, relayd,
 					padding);
 			if (ret < 0) {
@@ -1768,6 +1796,14 @@ ssize_t lttng_consumer_on_read_subbuffer_splice(
 		/* No streaming, we have to set the len with the full padding */
 		len += padding;
 
+		if (stream->metadata_flag && stream->reset_metadata_flag) {
+			ret = utils_truncate_stream_file(stream->out_fd, 0);
+			if (ret < 0) {
+				ERR("Reset metadata file");
+				goto end;
+			}
+			stream->reset_metadata_flag = 0;
+		}
 		/*
 		 * Check if we need to change the tracefile before writing the packet.
 		 */

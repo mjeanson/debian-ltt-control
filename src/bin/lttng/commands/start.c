@@ -15,7 +15,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <popt.h>
 #include <stdio.h>
@@ -45,22 +44,6 @@ static struct poptOption long_options[] = {
 	{"list-options", 0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{0, 0, 0, 0, 0, 0, 0}
 };
-
-/*
- * usage
- */
-static void usage(FILE *ofp)
-{
-	fprintf(ofp, "usage: lttng start [NAME] [OPTIONS]\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Where NAME is an optional session name. If not specified, lttng will\n");
-	fprintf(ofp, "get it from the configuration directory (.lttng).\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Options:\n");
-	fprintf(ofp, "  -h, --help               Show this help\n");
-	fprintf(ofp, "      --list-options       Simple listing of options\n");
-	fprintf(ofp, "\n");
-}
 
 static int mi_print_session(char *session_name, int enabled)
 {
@@ -162,13 +145,12 @@ int cmd_start(int argc, const char **argv)
 	while ((opt = poptGetNextOpt(pc)) != -1) {
 		switch (opt) {
 		case OPT_HELP:
-			usage(stdout);
+			SHOW_HELP();
 			goto end;
 		case OPT_LIST_OPTIONS:
 			list_cmd_options(stdout, long_options);
 			goto end;
 		default:
-			usage(stderr);
 			ret = CMD_UNDEFINED;
 			goto end;
 		}

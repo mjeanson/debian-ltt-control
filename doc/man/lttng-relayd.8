@@ -1,139 +1,263 @@
-.TH "LTTNG-RELAYD" "8" "July 15, 2012" "" ""
-
+'\" t
+.\"     Title: lttng-relayd
+.\"    Author: [see the "AUTHORS" section]
+.\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
+.\"      Date: 03/18/2016
+.\"    Manual: LTTng Manual
+.\"    Source: LTTng 2.8.0
+.\"  Language: English
+.\"
+.TH "LTTNG\-RELAYD" "8" "03/18/2016" "LTTng 2\&.8\&.0" "LTTng Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
 .SH "NAME"
-lttng-relayd \- LTTng remote trace collection daemon
-
+lttng-relayd \- LTTng 2 relay daemon
 .SH "SYNOPSIS"
-
-.PP
+.sp
 .nf
-lttng-relayd [OPTIONS]
+\fBlttng\-relayd\fR [\fB--background\fR | \fB--daemonize\fR]
+             [\fB--control-port\fR=\fIURL\fR] [\fB--data-port\fR=\fIURL\fR] [\fB--live-port\fR=\fIURL\fR]
+             [\fB--output\fR=\fIPATH\fR] [\fB-v\fR | \fB-vv\fR | \fB-vvv\fR]
 .fi
 .SH "DESCRIPTION"
-
+.sp
+The \fILinux Trace Toolkit: next generation\fR is an open source software package used for correlated tracing of the Linux kernel, user applications, and user libraries\&.
+.sp
+LTTng consists of Linux kernel modules (for Linux kernel tracing) and dynamically loaded libraries (for user application and library tracing)\&.
+.sp
+The \fILTTng relay daemon\fR is responsible for receiving trace data from possibly remote LTTng session/consumer daemons and for writing it to the local file system\&. The relay daemon also accepts \fILTTng live\fR connections from compatible viewers; this is the official approach to viewing LTTng events as they are emitted\&.
+.sp
+The relay daemon listens by default on all network interfaces to gather trace data, but only on localhost for LTTng live connections\&.
+.sp
+The relay daemon does not require any particular permissions, as long as it can write to the output directory and listen on the configured ports\&. If a user is within a secured network and/or has proper firewall settings, \fBlttng-relayd\fR can listen to LTTng live connections from \fIall\fR network interfaces by specifying \fB--live-port=tcp://0.0.0.0:5344\fR\&.
+.sp
+Once a trace has been streamed completely, the trace can be processed by any tool that can process an LTTng trace located on the local file system\&.
+.SS "Output directory"
+.sp
+By default, the relay daemon writes the traces to:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+$HOME/lttng\-traces/\fIHOSTNAME\fR/\fISESSION\fR/\fIDOMAIN\fR
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+with:
 .PP
-The LTTng project aims at providing highly efficient tracing tools for Linux.
-It's tracers help tracking down performance issues and debugging problems
-involving multiple concurrent processes and threads. Tracing across multiple
-systems is also possible.
-
-The relay daemon listens by default on all network interfaces to gather
-trace data, but only on localhost for viewer connections. This daemon
-does not require any particular permissions as long as it can write in
-the output folder and listen on the ports. If a user is within a secured
-network and/or has proper firewall settings, lttng-relayd can listen to
-viewer connections from all network interfaces by specifying '-L
-tcp://0.0.0.0:5344'.
-
-Traces can be either viewed "live" (as they are produced) by attaching
-to the live viewer port using LTTng live protocol, or after tracing has
-been stopped. Once a trace has been streamed completely, the trace can
-be processed by any tool that can process a local LTTng CTF trace.
-
-By default, the relayd outputs the traces in :
-~/lttng-traces/hostname/session-name/domain-name
-
-The prefix (~/lttng-traces) can be configured on the relayd side (see below for
-the option), the other folders can be configured when creating the trace on the
-sessiond side.
+\fIHOSTNAME\fR
+.RS 4
+Remote hostname\&.
+.RE
+.PP
+\fISESSION\fR
+.RS 4
+Full session name\&.
+.RE
+.PP
+\fIDOMAIN\fR
+.RS 4
+Tracing domain\&.
+.RE
+.sp
+You can override the default output directory prefix (\fB$HOME/lttng-traces\fR) with the \fB--output\fR option\&. The other parts depend on the remote configuration\&.
+.SS "URL format"
+.sp
+The \fB--control-port\fR, \fB--data-port\fR, and \fB--live-port\fR options specify URLs\&.
+.sp
+The format of those URLs is:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+tcp://(\fIHOST\fR | \fIIPADDR\fR):\fIPORT\fR
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+with:
+.PP
+(\fIHOST\fR | \fIIPADDR\fR)
+.RS 4
+Binding hostname or IP address (IPv6 address
+\fBmust\fR
+be enclosed in brackets (\fB[\fR
+and
+\fB]\fR); see
+RFC 2732)\&.
+.RE
+.PP
+\fIPORT\fR
+.RS 4
+TCP port\&.
+.RE
 .SH "OPTIONS"
-
+.SS "Daemon"
 .PP
-This program follows the usual GNU command line syntax with long options starting
-with two dashes. Below is a summary of the available options.
+\fB-b\fR, \fB--background\fR
+.RS 4
+Start as Unix daemon, but keep file descriptors (console) open\&. Use the
+\fB--daemonize\fR
+option instead to close the file descriptors\&.
+.RE
 .PP
-
-.TP
-.BR "-h, --help"
-Show summary of possible options and commands
-.TP
-.BR "\-V, \-\-version"
-Show version.
-.TP
-.BR "-v, --verbose"
-Increase verbosity
-
-There is three debugging level which will print on stderr. Maximum verbosity is
-\fB-vvv\fP.
-.TP
-.BR "-d, --daemonize"
-Start as a daemon
-.TP
-.BR "-b, --background"
-Start as a daemon, keeping console open
-.TP
-.BR "-g, --group NAME"
-Specify the tracing group name. (default: tracing)
-.TP
-.BR "-C, --control-port"
-Control port URL (tcp://0.0.0.0:5342 is the default)
-.TP
-.BR "-D, --data-port"
-Data port URL (tcp://0.0.0.0:5343 is the default)
-.TP
-.BR "-L, --live-port URL"
-Live view port URL (tcp://localhost:5344 is the default).
-.TP
-.BR "-o, --output"
-Output base directory. Must use an absolute path (~/lttng-traces is the default)
-.TP
-.BR "-V, --version"
-Show version number
+\fB-d\fR, \fB--daemonize\fR
+.RS 4
+Start as Unix daemon, and close file descriptors (console)\&. Use the
+\fB--background\fR
+option instead to keep the file descriptors open\&.
+.RE
+.PP
+\fB-g\fR, \fB--group\fR=\fIGROUP\fR
+.RS 4
+Use
+\fIGROUP\fR
+as Unix tracing group (default:
+\fBtracing\fR)\&.
+.RE
+.PP
+\fB-o\fR, \fB--output\fR=\fIPATH\fR
+.RS 4
+Set base directory of written trace data to
+\fIPATH\fR\&.
+.sp
+See the
+Output directory
+section above for more information\&.
+.RE
+.PP
+\fB-v\fR, \fB--verbose\fR
+.RS 4
+Increase verbosity\&.
+.sp
+Three levels of verbosity are available, which are triggered by appending additional
+\fBv\fR
+letters to the option (that is,
+\fB-vv\fR
+and
+\fB-vvv\fR)\&.
+.RE
+.SS "Ports"
+.sp
+See the URL format section above for more information about the syntax of the following options\*(Aq \fIURL\fR argument\&.
+.PP
+\fB-C\fR, \fB--control-port\fR=\fIURL\fR
+.RS 4
+Listen to control data on URL
+\fIURL\fR
+(default:
+\fBtcp://0.0.0.0:5342\fR)\&.
+.RE
+.PP
+\fB-D\fR, \fB--data-port\fR=\fIURL\fR
+.RS 4
+Listen to trace data on URL
+\fIURL\fR
+(default:
+\fBtcp://0.0.0.0:5343\fR)\&.
+.RE
+.PP
+\fB-L\fR, \fB--live-port\fR=\fIURL\fR
+.RS 4
+Listen to LTTng live connections on URL
+\fIURL\fR
+(default:
+\fBtcp://0.0.0.0:5344\fR)\&.
+.RE
+.SS "Program information"
+.PP
+\fB-h\fR, \fB--help\fR
+.RS 4
+Show help\&.
+.RE
+.PP
+\fB-V\fR, \fB--version\fR
+.RS 4
+Show version\&.
+.RE
 .SH "ENVIRONMENT VARIABLES"
-
 .PP
-.IP "LTTNG_NETWORK_SOCKET_TIMEOUT"
-Control timeout of socket connection, receive and send. Takes an integer
-parameter: the timeout value, in milliseconds. A value of 0 or -1 uses
-the timeout of the operating system (this is the default).
-.IP "LTTNG_RELAYD_HEALTH"
-File path used for relay daemon health check communication.
+\fBLTTNG_NETWORK_SOCKET_TIMEOUT\fR
+.RS 4
+Socket connection, receive and send timeout (milliseconds)\&. A value of 0 or \-1 uses the timeout of the operating system (default)\&.
+.RE
 .PP
-
-.SH "SEE ALSO"
-
+\fBLTTNG_RELAYD_HEALTH\fR
+.RS 4
+Path to relay daemon health\(cqs socket\&.
+.RE
+.SH "EXIT STATUS"
 .PP
-babeltrace(1), lttng-sessiond(8), lttng-ust(3), lttng(1)
+\fB0\fR
+.RS 4
+Success
+.RE
 .PP
-
+\fB1\fR
+.RS 4
+Error
+.RE
+.PP
+\fB3\fR
+.RS 4
+Fatal error
+.RE
 .SH "LIMITATIONS"
-
-.PP
-For now only TCP is supported on both control and data port.
-Control will always remain TCP-only since it is low-volume and needs absolutely
-to be reliable, but eventually the data connection could support UDP.
-
-For unprivileged user running lttng-relayd, the maximum number of file
-descriptors per process is usually 1024. This limits the number of connections
-and tracefiles opened. This limit can be configured see ulimit(3).
-.PP
-
+.sp
+As of this version, only the TCP protocol is supported for both control and data ports\&. In future versions, TCP will remain the sole available protocol for control data since those communications are low\-volume and need absolute reliability; trace data could be carried over UDP\&.
+.sp
+For an unprivileged user running \fBlttng-relayd\fR, the maximum number of file descriptors per process is usually 1024\&. This limits the number of connections and opened trace files\&. This limit can be configured with \fBulimit\fR(3)\&.
 .SH "BUGS"
-
-.PP
-No show stopper bugs are known yet in this version.
-
-If you encounter any issues or usability problem, please report it on our
-mailing list <lttng-dev@lists.lttng.org> to help improve this project.
-.SH "CREDITS"
-
-.PP
-lttng-relayd is distributed under the GNU General Public License version 2. See the
-file COPYING for details.
-.PP
-A Web site is available at http://lttng.org for more information on the LTTng
-project.
-.PP
-You can also find our git tree at http://git.lttng.org.
-.PP
-Mailing lists for support and development: <lttng-dev@lists.lttng.org>.
-.PP
-You can find us on IRC server irc.oftc.net (OFTC) in #lttng.
-.PP
+.sp
+If you encounter any issue or usability problem, please report it on the LTTng bug tracker: \fBhttps://bugs\&.lttng\&.org/projects/lttng\-tools\fR\&.
+.SH "RESOURCES"
+.sp
+LTTng project website: \fBhttp://lttng\&.org\fR\&.
+.sp
+LTTng documentation: \fBhttp://lttng\&.org/docs\fR\&.
+.sp
+Git repositories: \fBhttp://git\&.lttng\&.org\fR\&.
+.sp
+Mailing list for support and development: \fBlttng-dev@lists.lttng.org\fR\&.
+.sp
+IRC channel: \fB#lttng\fR on \fBirc.oftc.net\fR (OFTC)\&.
+.SH "COPYRIGHTS"
+.sp
+This program is part of the LTTng\-tools project\&.
+.sp
+LTTng\-tools is distributed under the GNU General Public License version 2\&. See the \fBLICENSE\fR file for details\&.
+.SH "THANKS"
+.sp
+Special thanks to Michel Dagenais and the DORSAL laboratory at \('Ecole Polytechnique de Montr\('eal for the LTTng journey\&.
+.sp
+Also thanks to the Ericsson teams working on tracing which helped us greatly with detailed bug reports and unusual test cases\&.
 .SH "AUTHORS"
-
-.PP
-lttng-relay was originally written by Julien Desfossez and
-David Goulet. More people have since contributed to it. It is currently
-maintained by Julien Desfossez <jdesfossez@efficios.com>.
-.PP
+.sp
+LTTng\-tools was originally written by Mathieu Desnoyers, Julien Desfossez, and David Goulet\&. More people have since contributed to it\&.
+.sp
+LTTng\-tools is currently maintained by J\('er\('emie Galarneau (\fBjeremie\&.galarneau@efficios\&.com\fR)\&.
+.SH "SEE ALSO"
+.sp
+\fBlttng\fR(1), \fBlttng-sessiond\fR(8), \fBlttng-crash\fR(1), \fBlttng-ust\fR(3), \fBbabeltrace\fR(1)

@@ -16,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <lttng/ust-ctl.h>
@@ -39,9 +38,9 @@
 #include <common/relayd/relayd.h>
 #include <common/compat/fcntl.h>
 #include <common/compat/endian.h>
-#include <common/consumer-metadata-cache.h>
-#include <common/consumer-stream.h>
-#include <common/consumer-timer.h>
+#include <common/consumer/consumer-metadata-cache.h>
+#include <common/consumer/consumer-stream.h>
+#include <common/consumer/consumer-timer.h>
 #include <common/utils.h>
 #include <common/index/index.h>
 
@@ -1030,6 +1029,8 @@ static int snapshot_channel(uint64_t key, char *path, uint64_t relayd_id,
 	DBG("UST consumer snapshot channel %" PRIu64, key);
 
 	cds_list_for_each_entry(stream, &channel->streams.head, send_node) {
+		/* Are we at a position _before_ the first available packet ? */
+		bool before_first_packet = true;
 
 		health_code_update();
 
@@ -1096,6 +1097,7 @@ static int snapshot_channel(uint64_t key, char *path, uint64_t relayd_id,
 		while (consumed_pos < produced_pos) {
 			ssize_t read_len;
 			unsigned long len, padded_len;
+			int lost_packet = 0;
 
 			health_code_update();
 
@@ -1109,6 +1111,15 @@ static int snapshot_channel(uint64_t key, char *path, uint64_t relayd_id,
 				}
 				DBG("UST consumer get subbuf failed. Skipping it.");
 				consumed_pos += stream->max_sb_size;
+
+				/*
+				 * Start accounting lost packets only when we
+				 * already have extracted packets (to match the
+				 * content of the final snapshot).
+				 */
+				if (!before_first_packet) {
+					lost_packet = 1;
+				}
 				continue;
 			}
 
@@ -1144,6 +1155,16 @@ static int snapshot_channel(uint64_t key, char *path, uint64_t relayd_id,
 				goto error_close_stream;
 			}
 			consumed_pos += stream->max_sb_size;
+
+			/*
+			 * Only account lost packets located between
+			 * succesfully extracted packets (do not account before
+			 * and after since they are not visible in the
+			 * resulting snapshot).
+			 */
+			stream->chan->lost_packets += lost_packet;
+			lost_packet = 0;
+			before_first_packet = false;
 		}
 
 		/* Simply close the stream so we can use it on the next snapshot. */
@@ -1176,8 +1197,8 @@ error:
  * complete.
  */
 int lttng_ustconsumer_recv_metadata(int sock, uint64_t key, uint64_t offset,
-		uint64_t len, struct lttng_consumer_channel *channel,
-		int timer, int wait)
+		uint64_t len, uint64_t version,
+		struct lttng_consumer_channel *channel, int timer, int wait)
 {
 	int ret, ret_code = LTTCOMM_CONSUMERD_SUCCESS;
 	char *metadata_str;
@@ -1204,7 +1225,8 @@ int lttng_ustconsumer_recv_metadata(int sock, uint64_t key, uint64_t offset,
 	health_code_update();
 
 	pthread_mutex_lock(&channel->metadata_cache->lock);
-	ret = consumer_metadata_cache_write(channel, offset, len, metadata_str);
+	ret = consumer_metadata_cache_write(channel, offset, len, version,
+			metadata_str);
 	if (ret < 0) {
 		/* Unable to handle metadata. Notify session daemon. */
 		ret_code = LTTCOMM_CONSUMERD_ERROR_METADATA;
@@ -1566,6 +1588,7 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		uint64_t len = msg.u.push_metadata.len;
 		uint64_t key = msg.u.push_metadata.key;
 		uint64_t offset = msg.u.push_metadata.target_offset;
+		uint64_t version = msg.u.push_metadata.version;
 		struct lttng_consumer_channel *channel;
 
 		DBG("UST consumer push metadata key %" PRIu64 " of len %" PRIu64, key,
@@ -1616,7 +1639,7 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		health_code_update();
 
 		ret = lttng_ustconsumer_recv_metadata(sock, key, offset,
-				len, channel, 0, 1);
+				len, version, channel, 0, 1);
 		if (ret < 0) {
 			/* error receiving from sessiond */
 			goto error_fatal;
@@ -1665,6 +1688,107 @@ int lttng_ustconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 			goto end_nosignal;
 		}
 		health_code_update();
+		break;
+	}
+	case LTTNG_CONSUMER_DISCARDED_EVENTS:
+	{
+		uint64_t ret;
+		struct lttng_ht_iter iter;
+		struct lttng_ht *ht;
+		struct lttng_consumer_stream *stream;
+		uint64_t id = msg.u.discarded_events.session_id;
+		uint64_t key = msg.u.discarded_events.channel_key;
+
+		DBG("UST consumer discarded events command for session id %"
+				PRIu64, id);
+		rcu_read_lock();
+		pthread_mutex_lock(&consumer_data.lock);
+
+		ht = consumer_data.stream_list_ht;
+
+		/*
+		 * We only need a reference to the channel, but they are not
+		 * directly indexed, so we just use the first matching stream
+		 * to extract the information we need, we default to 0 if not
+		 * found (no events are dropped if the channel is not yet in
+		 * use).
+		 */
+		ret = 0;
+		cds_lfht_for_each_entry_duplicate(ht->ht,
+				ht->hash_fct(&id, lttng_ht_seed),
+				ht->match_fct, &id,
+				&iter.iter, stream, node_session_id.node) {
+			if (stream->chan->key == key) {
+				ret = stream->chan->discarded_events;
+				break;
+			}
+		}
+		pthread_mutex_unlock(&consumer_data.lock);
+		rcu_read_unlock();
+
+		DBG("UST consumer discarded events command for session id %"
+				PRIu64 ", channel key %" PRIu64, id, key);
+
+		health_code_update();
+
+		/* Send back returned value to session daemon */
+		ret = lttcomm_send_unix_sock(sock, &ret, sizeof(ret));
+		if (ret < 0) {
+			PERROR("send discarded events");
+			goto error_fatal;
+		}
+
+		break;
+	}
+	case LTTNG_CONSUMER_LOST_PACKETS:
+	{
+	        int ret;
+		uint64_t lost_packets;
+		struct lttng_ht_iter iter;
+		struct lttng_ht *ht;
+		struct lttng_consumer_stream *stream;
+		uint64_t id = msg.u.lost_packets.session_id;
+		uint64_t key = msg.u.lost_packets.channel_key;
+
+		DBG("UST consumer lost packets command for session id %"
+				PRIu64, id);
+		rcu_read_lock();
+		pthread_mutex_lock(&consumer_data.lock);
+
+		ht = consumer_data.stream_list_ht;
+
+		/*
+		 * We only need a reference to the channel, but they are not
+		 * directly indexed, so we just use the first matching stream
+		 * to extract the information we need, we default to 0 if not
+		 * found (no packets lost if the channel is not yet in use).
+		 */
+	        lost_packets = 0;
+		cds_lfht_for_each_entry_duplicate(ht->ht,
+				ht->hash_fct(&id, lttng_ht_seed),
+				ht->match_fct, &id,
+				&iter.iter, stream, node_session_id.node) {
+			if (stream->chan->key == key) {
+			        lost_packets = stream->chan->lost_packets;
+				break;
+			}
+		}
+		pthread_mutex_unlock(&consumer_data.lock);
+		rcu_read_unlock();
+
+		DBG("UST consumer lost packets command for session id %"
+				PRIu64 ", channel key %" PRIu64, id, key);
+
+		health_code_update();
+
+		/* Send back returned value to session daemon */
+		ret = lttcomm_send_unix_sock(sock, &lost_packets,
+			        sizeof(lost_packets));
+		if (ret < 0) {
+			PERROR("send lost packets");
+			goto error_fatal;
+		}
+
 		break;
 	}
 	default:
@@ -1809,6 +1933,16 @@ int lttng_ustconsumer_get_current_timestamp(
 	return ustctl_get_current_timestamp(stream->ustream, ts);
 }
 
+int lttng_ustconsumer_get_sequence_number(
+		struct lttng_consumer_stream *stream, uint64_t *seq)
+{
+	assert(stream);
+	assert(stream->ustream);
+	assert(seq);
+
+	return ustctl_get_sequence_number(stream->ustream, seq);
+}
+
 /*
  * Called when the stream signal the consumer that it has hang up.
  */
@@ -1851,6 +1985,11 @@ void lttng_ustconsumer_del_channel(struct lttng_consumer_channel *chan)
 			}
 		}
 	}
+	/* Try to rmdir all directories under shm_path root. */
+	if (chan->root_shm_path[0]) {
+		(void) run_as_recursive_rmdir(chan->root_shm_path,
+				chan->uid, chan->gid);
+	}
 }
 
 void lttng_ustconsumer_free_channel(struct lttng_consumer_channel *chan)
@@ -1860,11 +1999,6 @@ void lttng_ustconsumer_free_channel(struct lttng_consumer_channel *chan)
 
 	consumer_metadata_cache_destroy(chan);
 	ustctl_destroy_channel(chan->uchan);
-	/* Try to rmdir all directories under shm_path root. */
-	if (chan->root_shm_path[0]) {
-		(void) run_as_recursive_rmdir(chan->root_shm_path,
-				chan->uid, chan->gid);
-	}
 	free(chan->stream_fds);
 }
 
@@ -1947,7 +2081,53 @@ static int get_index_values(struct ctf_packet_index *index,
 	}
 	index->stream_id = htobe64(index->stream_id);
 
+	ret = ustctl_get_instance_id(ustream, &index->stream_instance_id);
+	if (ret < 0) {
+		PERROR("ustctl_get_instance_id");
+		goto error;
+	}
+	index->stream_instance_id = htobe64(index->stream_instance_id);
+
+	ret = ustctl_get_sequence_number(ustream, &index->packet_seq_num);
+	if (ret < 0) {
+		PERROR("ustctl_get_sequence_number");
+		goto error;
+	}
+	index->packet_seq_num = htobe64(index->packet_seq_num);
+
 error:
+	return ret;
+}
+
+static
+void metadata_stream_reset_cache(struct lttng_consumer_stream *stream,
+		struct consumer_metadata_cache *cache)
+{
+	DBG("Metadata stream update to version %" PRIu64,
+			cache->version);
+	stream->ust_metadata_pushed = 0;
+	stream->metadata_version = cache->version;
+	stream->reset_metadata_flag = 1;
+}
+
+/*
+ * Check if the version of the metadata stream and metadata cache match.
+ * If the cache got updated, reset the metadata stream.
+ * The stream lock and metadata cache lock MUST be held.
+ * Return 0 on success, a negative value on error.
+ */
+static
+int metadata_stream_check_version(struct lttng_consumer_stream *stream)
+{
+	int ret = 0;
+	struct consumer_metadata_cache *cache = stream->chan->metadata_cache;
+
+	if (cache->version == stream->metadata_version) {
+		goto end;
+	}
+	metadata_stream_reset_cache(stream, cache);
+
+end:
 	return ret;
 }
 
@@ -1964,6 +2144,10 @@ int commit_one_metadata_packet(struct lttng_consumer_stream *stream)
 	int ret;
 
 	pthread_mutex_lock(&stream->chan->metadata_cache->lock);
+	ret = metadata_stream_check_version(stream);
+	if (ret < 0) {
+		goto end;
+	}
 	if (stream->chan->metadata_cache->max_offset
 			== stream->ust_metadata_pushed) {
 		ret = 0;
@@ -2105,6 +2289,61 @@ end:
 	return ret;
 }
 
+static
+int update_stream_stats(struct lttng_consumer_stream *stream)
+{
+	int ret;
+	uint64_t seq, discarded;
+
+	ret = ustctl_get_sequence_number(stream->ustream, &seq);
+	if (ret < 0) {
+		PERROR("ustctl_get_sequence_number");
+		goto end;
+	}
+	/*
+	 * Start the sequence when we extract the first packet in case we don't
+	 * start at 0 (for example if a consumer is not connected to the
+	 * session immediately after the beginning).
+	 */
+	if (stream->last_sequence_number == -1ULL) {
+		stream->last_sequence_number = seq;
+	} else if (seq > stream->last_sequence_number) {
+		stream->chan->lost_packets += seq -
+				stream->last_sequence_number - 1;
+	} else {
+		/* seq <= last_sequence_number */
+		ERR("Sequence number inconsistent : prev = %" PRIu64
+				", current = %" PRIu64,
+				stream->last_sequence_number, seq);
+		ret = -1;
+		goto end;
+	}
+	stream->last_sequence_number = seq;
+
+	ret = ustctl_get_events_discarded(stream->ustream, &discarded);
+	if (ret < 0) {
+		PERROR("kernctl_get_events_discarded");
+		goto end;
+	}
+	if (discarded < stream->last_discarded_events) {
+		/*
+		 * Overflow has occured. We assume only one wrap-around
+		 * has occured.
+		 */
+		stream->chan->discarded_events +=
+				(1ULL << (CAA_BITS_PER_LONG - 1)) -
+				stream->last_discarded_events + discarded;
+	} else {
+		stream->chan->discarded_events += discarded -
+				stream->last_discarded_events;
+	}
+	stream->last_discarded_events = discarded;
+	ret = 0;
+
+end:
+	return ret;
+}
+
 /*
  * Read subbuffer from the given stream.
  *
@@ -2186,6 +2425,13 @@ retry:
 		index.offset = htobe64(stream->out_fd_offset);
 		ret = get_index_values(&index, ustream);
 		if (ret < 0) {
+			goto end;
+		}
+
+		/* Update the stream's sequence and discarded events count. */
+		ret = update_stream_stats(stream);
+		if (ret < 0) {
+			PERROR("kernctl_get_events_discarded");
 			goto end;
 		}
 	} else {
@@ -2485,7 +2731,7 @@ int lttng_ustconsumer_request_metadata(struct lttng_consumer_local_data *ctx,
 	struct lttcomm_metadata_request_msg request;
 	struct lttcomm_consumer_msg msg;
 	enum lttcomm_return_code ret_code = LTTCOMM_CONSUMERD_SUCCESS;
-	uint64_t len, key, offset;
+	uint64_t len, key, offset, version;
 	int ret;
 
 	assert(channel);
@@ -2565,6 +2811,7 @@ int lttng_ustconsumer_request_metadata(struct lttng_consumer_local_data *ctx,
 	len = msg.u.push_metadata.len;
 	key = msg.u.push_metadata.key;
 	offset = msg.u.push_metadata.target_offset;
+	version = msg.u.push_metadata.version;
 
 	assert(key == channel->key);
 	if (len == 0) {
@@ -2587,7 +2834,7 @@ int lttng_ustconsumer_request_metadata(struct lttng_consumer_local_data *ctx,
 	health_code_update();
 
 	ret = lttng_ustconsumer_recv_metadata(ctx->consumer_metadata_socket,
-			key, offset, len, channel, timer, wait);
+			key, offset, len, version, channel, timer, wait);
 	if (ret >= 0) {
 		/*
 		 * Only send the status msg if the sessiond is alive meaning a positive

@@ -6,12 +6,12 @@
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
  * as published by the Free Software Foundation.
- * 
+ *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
@@ -25,7 +25,6 @@
 #ifndef _LTTNG_SESSIOND_COMM_H
 #define _LTTNG_SESSIOND_COMM_H
 
-#define _GNU_SOURCE
 #include <limits.h>
 #include <lttng/lttng.h>
 #include <lttng/snapshot-internal.h>
@@ -95,6 +94,7 @@ enum lttcomm_sessiond_command {
 	LTTNG_UNTRACK_PID                   = 33,
 	LTTNG_LIST_TRACKER_PIDS             = 34,
 	LTTNG_SET_SESSION_SHM_PATH          = 40,
+	LTTNG_METADATA_REGENERATE           = 41,
 };
 
 enum lttcomm_relayd_command {
@@ -116,6 +116,8 @@ enum lttcomm_relayd_command {
 	RELAYD_LIST_SESSIONS                = 15,
 	/* All streams of the channel have been sent to the relayd (2.4+). */
 	RELAYD_STREAMS_SENT                 = 16,
+	/* Ask the relay to reset the metadata trace file (2.8+) */
+	RELAYD_RESET_METADATA               = 17,
 };
 
 /*
@@ -219,8 +221,8 @@ struct lttcomm_proto_ops {
 	int (*listen) (struct lttcomm_sock *sock, int backlog);
 	ssize_t (*recvmsg) (struct lttcomm_sock *sock, void *buf, size_t len,
 			int flags);
-	ssize_t (*sendmsg) (struct lttcomm_sock *sock, void *buf, size_t len,
-			int flags);
+	ssize_t (*sendmsg) (struct lttcomm_sock *sock, const void *buf,
+			size_t len, int flags);
 };
 
 /*
@@ -271,6 +273,8 @@ struct lttcomm_session_msg {
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];
 			struct lttng_event_context ctx LTTNG_PACKED;
+			uint32_t provider_name_len;
+			uint32_t context_name_len;
 		} LTTNG_PACKED context;
 		/* Use by register_consumer */
 		struct {
@@ -334,7 +338,46 @@ struct lttng_filter_bytecode {
 struct lttng_event_exclusion {
 	uint32_t count;
 	char padding[LTTNG_EVENT_EXCLUSION_PADDING];
-	char names[LTTNG_SYMBOL_NAME_LEN][0];
+	char names[0][LTTNG_SYMBOL_NAME_LEN];
+} LTTNG_PACKED;
+
+#define LTTNG_EVENT_EXCLUSION_NAME_AT(_exclusion, _i) \
+	(&(_exclusion)->names[_i][0])
+
+/*
+ * Event command header.
+ */
+struct lttcomm_event_command_header {
+	/* Number of events */
+	uint32_t nb_events;
+} LTTNG_PACKED;
+
+/*
+ * Event extended info header. This is the structure preceding each
+ * extended info data.
+ */
+struct lttcomm_event_extended_header {
+	/*
+	 * Size of filter string immediately following this header.
+	 * This size includes the terminal null character.
+	 */
+	uint32_t filter_len;
+
+	/*
+	 * Number of exclusion names, immediately following the filter
+	 * string. Each exclusion name has a fixed length of
+	 * LTTNG_SYMBOL_NAME_LEN bytes, including the terminal null
+	 * character.
+	 */
+	uint32_t nb_exclusions;
+} LTTNG_PACKED;
+
+/*
+ * Channel extended info.
+ */
+struct lttcomm_channel_extended {
+	uint64_t discarded_events;
+	uint64_t lost_packets;
 } LTTNG_PACKED;
 
 /*
@@ -344,9 +387,8 @@ struct lttcomm_lttng_msg {
 	uint32_t cmd_type;	/* enum lttcomm_sessiond_command */
 	uint32_t ret_code;	/* enum lttcomm_return_code */
 	uint32_t pid;		/* pid_t */
+	uint32_t cmd_header_size;
 	uint32_t data_size;
-	/* Contains: trace_name + data */
-	char payload[];
 } LTTNG_PACKED;
 
 struct lttcomm_lttng_output_id {
@@ -447,6 +489,7 @@ struct lttcomm_consumer_msg {
 			uint64_t key;	/* Metadata channel key. */
 			uint64_t target_offset;	/* Offset in the consumer */
 			uint64_t len;	/* Length of metadata to be received. */
+			uint64_t version; /* Version of the metadata. */
 		} LTTNG_PACKED push_metadata;
 		struct {
 			uint64_t key;	/* Metadata channel key. */
@@ -470,6 +513,17 @@ struct lttcomm_consumer_msg {
 			uint64_t channel_key;
 			uint64_t net_seq_idx;
 		} LTTNG_PACKED sent_streams;
+		struct {
+			uint64_t session_id;
+			uint64_t channel_key;
+		} LTTNG_PACKED discarded_events;
+		struct {
+			uint64_t session_id;
+			uint64_t channel_key;
+		} LTTNG_PACKED lost_packets;
+		struct {
+			uint64_t session_id;
+		} LTTNG_PACKED metadata_regenerate;
 	} u;
 } LTTNG_PACKED;
 

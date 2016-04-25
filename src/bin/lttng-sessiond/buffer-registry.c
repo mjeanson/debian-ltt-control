@@ -15,7 +15,6 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <inttypes.h>
 
@@ -326,6 +325,44 @@ struct buffer_reg_pid *buffer_reg_pid_find(uint64_t session_id)
 
 end:
 	return reg;
+}
+
+/*
+ * Find the consumer channel key from a UST session per-uid channel key.
+ *
+ * Return the matching key or -1 if not found.
+ */
+int buffer_reg_uid_consumer_channel_key(
+		struct cds_list_head *buffer_reg_uid_list,
+		uint64_t usess_id, uint64_t chan_key,
+		uint64_t *consumer_chan_key)
+{
+	struct lttng_ht_iter iter;
+	struct buffer_reg_uid *uid_reg = NULL;
+	struct buffer_reg_session *session_reg = NULL;
+	struct buffer_reg_channel *reg_chan;
+	int ret = -1;
+
+	rcu_read_lock();
+	/*
+	 * For the per-uid registry, we have to iterate since we don't have the
+	 * uid and bitness key.
+	 */
+	cds_list_for_each_entry(uid_reg, buffer_reg_uid_list, lnode) {
+		session_reg = uid_reg->registry;
+		cds_lfht_for_each_entry(session_reg->channels->ht,
+				&iter.iter, reg_chan, node.node) {
+			if (reg_chan->key == chan_key) {
+				*consumer_chan_key = reg_chan->consumer_key;
+				ret = 0;
+				goto end;
+			}
+		}
+	}
+
+end:
+	rcu_read_unlock();
+	return ret;
 }
 
 /*

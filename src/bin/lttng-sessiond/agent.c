@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2013 - David Goulet <dgoulet@efficios.com>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License, version 2 only, as
@@ -15,10 +16,10 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <urcu/uatomic.h>
+#include <urcu/rculist.h>
 
 #include <common/common.h>
 #include <common/sessiond-comm/agent.h>
@@ -28,6 +29,58 @@
 #include "agent.h"
 #include "ust-app.h"
 #include "utils.h"
+#include "error.h"
+
+#define AGENT_RET_CODE_INDEX(code) (code - AGENT_RET_CODE_SUCCESS)
+
+/*
+ * Agent application context representation.
+ */
+struct agent_app_ctx {
+	char *provider_name;
+	char *ctx_name;
+
+	/* agent_app_ctx are part of the agent app_ctx_list. */
+	struct cds_list_head list_node;
+
+	/* For call_rcu teardown. */
+	struct rcu_head rcu_node;
+};
+
+/*
+ * Human readable agent return code.
+ */
+static const char *error_string_array[] = {
+	[ AGENT_RET_CODE_INDEX(AGENT_RET_CODE_SUCCESS) ] = "Success",
+	[ AGENT_RET_CODE_INDEX(AGENT_RET_CODE_INVALID) ] = "Invalid command",
+	[ AGENT_RET_CODE_INDEX(AGENT_RET_CODE_UNKNOWN_NAME) ] = "Unknown logger name",
+
+	/* Last element */
+	[ AGENT_RET_CODE_INDEX(AGENT_RET_CODE_NR) ] = "Unknown code",
+};
+
+static
+void log_reply_code(uint32_t in_reply_ret_code)
+{
+	int level = PRINT_DBG3;
+	/*
+	 * reply_ret_code and in_reply_ret_code are kept separate to have a
+	 * sanitized value (used to retrieve the human readable string) and the
+	 * original value which is logged as-is.
+	 */
+	uint32_t reply_ret_code = in_reply_ret_code;
+
+	if (reply_ret_code < AGENT_RET_CODE_SUCCESS ||
+			reply_ret_code >= AGENT_RET_CODE_NR) {
+		reply_ret_code = AGENT_RET_CODE_NR;
+		level = PRINT_ERR;
+	}
+
+	LOG(level, "Agent replied with retcode: %s (%"PRIu32")",
+			error_string_array[AGENT_RET_CODE_INDEX(
+			reply_ret_code)],
+			in_reply_ret_code);
+}
 
 /*
  * Match function for the events hash table lookup by name.
@@ -188,7 +241,7 @@ error:
  *
  * Return 0 on success or else a negative errno value of sendmsg() op.
  */
-static int send_payload(struct lttcomm_sock *sock, void *data,
+static int send_payload(struct lttcomm_sock *sock, const void *data,
 		size_t size)
 {
 	int ret;
@@ -245,6 +298,7 @@ static ssize_t list_events(struct agent_app *app, struct lttng_event **events)
 	int ret, i, len = 0, offset = 0;
 	uint32_t nb_event;
 	size_t data_size;
+	uint32_t reply_ret_code;
 	struct lttng_event *tmp_events = NULL;
 	struct lttcomm_agent_list_reply *reply = NULL;
 	struct lttcomm_agent_list_reply_hdr reply_hdr;
@@ -267,14 +321,14 @@ static ssize_t list_events(struct agent_app *app, struct lttng_event **events)
 		goto error_io;
 	}
 
-	switch (be32toh(reply_hdr.ret_code)) {
+	reply_ret_code = be32toh(reply_hdr.ret_code);
+	log_reply_code(reply_ret_code);
+	switch (reply_ret_code) {
 	case AGENT_RET_CODE_SUCCESS:
 		data_size = be32toh(reply_hdr.data_size) + sizeof(*reply);
 		break;
 	default:
-		ERR("Agent returned an unknown code: %" PRIu32,
-				be32toh(reply_hdr.ret_code));
-		ret = LTTNG_ERR_FATAL;
+		ret = LTTNG_ERR_UNK;
 		goto error;
 	}
 
@@ -329,8 +383,11 @@ error:
 static int enable_event(struct agent_app *app, struct agent_event *event)
 {
 	int ret;
+	char *bytes_to_send;
 	uint64_t data_size;
-	struct lttcomm_agent_enable msg;
+	size_t filter_expression_length;
+	uint32_t reply_ret_code;
+	struct lttcomm_agent_enable_event msg;
 	struct lttcomm_agent_generic_reply reply;
 
 	assert(app);
@@ -340,7 +397,16 @@ static int enable_event(struct agent_app *app, struct agent_event *event)
 	DBG2("Agent enabling event %s for app pid: %d and socket %d", event->name,
 			app->pid, app->sock->fd);
 
-	data_size = sizeof(msg);
+	/*
+	 * Calculate the payload's size, which is the fixed-size struct followed
+	 * by the variable-length filter expression (+1 for the ending \0).
+	 */
+	if (!event->filter_expression) {
+		filter_expression_length = 0;
+	} else {
+		filter_expression_length = strlen(event->filter_expression) + 1;
+	}
+	data_size = sizeof(msg) + filter_expression_length;
 
 	ret = send_header(app->sock, data_size, AGENT_CMD_ENABLE, 0);
 	if (ret < 0) {
@@ -348,10 +414,25 @@ static int enable_event(struct agent_app *app, struct agent_event *event)
 	}
 
 	memset(&msg, 0, sizeof(msg));
-	msg.loglevel_value = event->loglevel_value;
-	msg.loglevel_type = event->loglevel_type;
+	msg.loglevel_value = htobe32(event->loglevel_value);
+	msg.loglevel_type = htobe32(event->loglevel_type);
 	strncpy(msg.name, event->name, sizeof(msg.name));
-	ret = send_payload(app->sock, &msg, sizeof(msg));
+	msg.filter_expression_length = htobe32(filter_expression_length);
+
+	bytes_to_send = zmalloc(data_size);
+	if (!bytes_to_send) {
+		ret = LTTNG_ERR_NOMEM;
+		goto error;
+	}
+
+	memcpy(bytes_to_send, &msg, sizeof(msg));
+	if (filter_expression_length > 0) {
+		memcpy(bytes_to_send + sizeof(msg), event->filter_expression,
+				filter_expression_length);
+	}
+
+	ret = send_payload(app->sock, bytes_to_send, data_size);
+	free(bytes_to_send);
 	if (ret < 0) {
 		goto error_io;
 	}
@@ -361,16 +442,122 @@ static int enable_event(struct agent_app *app, struct agent_event *event)
 		goto error_io;
 	}
 
-	switch (be32toh(reply.ret_code)) {
+	reply_ret_code = be32toh(reply.ret_code);
+	log_reply_code(reply_ret_code);
+	switch (reply_ret_code) {
 	case AGENT_RET_CODE_SUCCESS:
 		break;
 	case AGENT_RET_CODE_UNKNOWN_NAME:
 		ret = LTTNG_ERR_UST_EVENT_NOT_FOUND;
 		goto error;
 	default:
-		ERR("Agent returned an unknown code: %" PRIu32,
-				be32toh(reply.ret_code));
-		ret = LTTNG_ERR_FATAL;
+		ret = LTTNG_ERR_UNK;
+		goto error;
+	}
+
+	return LTTNG_OK;
+
+error_io:
+	ret = LTTNG_ERR_UST_ENABLE_FAIL;
+error:
+	return ret;
+}
+
+/*
+ * Send Pascal-style string. Size is sent as a 32-bit big endian integer.
+ */
+static
+int send_pstring(struct lttcomm_sock *sock, const char *str, uint32_t len)
+{
+	int ret;
+	uint32_t len_be;
+
+	len_be = htobe32(len);
+	ret = send_payload(sock, &len_be, sizeof(len_be));
+	if (ret) {
+		goto end;
+	}
+
+	ret = send_payload(sock, str, len);
+	if (ret) {
+		goto end;
+	}
+end:
+	return ret;
+}
+
+/*
+ * Internal enable application context on an agent application. This function
+ * communicates with the agent to enable a given application context.
+ *
+ * Return LTTNG_OK on success or else a LTTNG_ERR* code.
+ */
+static int app_context_op(struct agent_app *app,
+		struct agent_app_ctx *ctx, enum lttcomm_agent_command cmd)
+{
+	int ret;
+	uint32_t reply_ret_code;
+	struct lttcomm_agent_generic_reply reply;
+	size_t app_ctx_provider_name_len, app_ctx_name_len, data_size;
+
+	assert(app);
+	assert(app->sock);
+	assert(ctx);
+	assert(cmd == AGENT_CMD_APP_CTX_ENABLE ||
+			cmd == AGENT_CMD_APP_CTX_DISABLE);
+
+	DBG2("Agent %s application %s:%s for app pid: %d and socket %d",
+			cmd == AGENT_CMD_APP_CTX_ENABLE ? "enabling" : "disabling",
+			ctx->provider_name, ctx->ctx_name,
+			app->pid, app->sock->fd);
+
+	/*
+	 * Calculate the payload's size, which consists of the size (u32, BE)
+	 * of the provider name, the NULL-terminated provider name string, the
+	 * size (u32, BE) of the context name, followed by the NULL-terminated
+	 * context name string.
+	 */
+	app_ctx_provider_name_len = strlen(ctx->provider_name) + 1;
+	app_ctx_name_len = strlen(ctx->ctx_name) + 1;
+	data_size = sizeof(uint32_t) + app_ctx_provider_name_len +
+			sizeof(uint32_t) + app_ctx_name_len;
+
+	ret = send_header(app->sock, data_size, cmd, 0);
+	if (ret < 0) {
+		goto error_io;
+	}
+
+	if (app_ctx_provider_name_len > UINT32_MAX ||
+			app_ctx_name_len > UINT32_MAX) {
+		ERR("Application context name > MAX_UINT32");
+		ret = LTTNG_ERR_INVALID;
+		goto error;
+	}
+
+	ret = send_pstring(app->sock, ctx->provider_name,
+			(uint32_t) app_ctx_provider_name_len);
+	if (ret < 0) {
+		goto error_io;
+	}
+
+	ret = send_pstring(app->sock, ctx->ctx_name,
+			(uint32_t) app_ctx_name_len);
+	if (ret < 0) {
+		goto error_io;
+	}
+
+	ret = recv_reply(app->sock, &reply, sizeof(reply));
+	if (ret < 0) {
+		goto error_io;
+	}
+
+	reply_ret_code = be32toh(reply.ret_code);
+	log_reply_code(reply_ret_code);
+	switch (reply_ret_code) {
+	case AGENT_RET_CODE_SUCCESS:
+		break;
+	default:
+		ret = LTTNG_ERR_UNK;
 		goto error;
 	}
 
@@ -392,7 +579,8 @@ static int disable_event(struct agent_app *app, struct agent_event *event)
 {
 	int ret;
 	uint64_t data_size;
-	struct lttcomm_agent_disable msg;
+	uint32_t reply_ret_code;
+	struct lttcomm_agent_disable_event msg;
 	struct lttcomm_agent_generic_reply reply;
 
 	assert(app);
@@ -421,16 +609,16 @@ static int disable_event(struct agent_app *app, struct agent_event *event)
 		goto error_io;
 	}
 
-	switch (be32toh(reply.ret_code)) {
+	reply_ret_code = be32toh(reply.ret_code);
+	log_reply_code(reply_ret_code);
+	switch (reply_ret_code) {
 	case AGENT_RET_CODE_SUCCESS:
 		break;
 	case AGENT_RET_CODE_UNKNOWN_NAME:
 		ret = LTTNG_ERR_UST_EVENT_NOT_FOUND;
 		goto error;
 	default:
-		ERR("Agent returned an unknown code: %" PRIu32,
-				be32toh(reply.ret_code));
-		ret = LTTNG_ERR_FATAL;
+		ret = LTTNG_ERR_UNK;
 		goto error;
 	}
 
@@ -495,8 +683,92 @@ error:
 	return ret;
 }
 
+static
+void destroy_app_ctx(struct agent_app_ctx *ctx)
+{
+	free(ctx->provider_name);
+	free(ctx->ctx_name);
+	free(ctx);
+}
+
+static
+struct agent_app_ctx *create_app_ctx(struct lttng_event_context *ctx)
+{
+	struct agent_app_ctx *agent_ctx = NULL;
+
+	if (!ctx) {
+		goto end;
+	}
+
+	assert(ctx->ctx == LTTNG_EVENT_CONTEXT_APP_CONTEXT);
+	agent_ctx = zmalloc(sizeof(*ctx));
+	if (!agent_ctx) {
+		goto end;
+	}
+
+	agent_ctx->provider_name = strdup(ctx->u.app_ctx.provider_name);
+	agent_ctx->ctx_name = strdup(ctx->u.app_ctx.ctx_name);
+	if (!agent_ctx->provider_name || !agent_ctx->ctx_name) {
+		destroy_app_ctx(agent_ctx);
+		agent_ctx = NULL;
+	}
+end:
+	return agent_ctx;
+}
+
 /*
- * Disable agent event on every agent applications registered with the session
+ * Enable agent context on every agent applications registered with the session
+ * daemon.
+ *
+ * Return LTTNG_OK on success or else a LTTNG_ERR* code.
+ */
+int agent_enable_context(struct lttng_event_context *ctx,
+		enum lttng_domain_type domain)
+{
+	int ret;
+	struct agent_app *app;
+	struct lttng_ht_iter iter;
+
+	assert(ctx);
+	if (ctx->ctx != LTTNG_EVENT_CONTEXT_APP_CONTEXT) {
+		ret = LTTNG_ERR_INVALID;
+		goto error;
+	}
+
+	rcu_read_lock();
+
+	cds_lfht_for_each_entry(agent_apps_ht_by_sock->ht, &iter.iter, app,
+			node.node) {
+		struct agent_app_ctx *agent_ctx;
+
+		if (app->domain != domain) {
+			continue;
+		}
+
+		agent_ctx = create_app_ctx(ctx);
+		if (!agent_ctx) {
+			ret = LTTNG_ERR_NOMEM;
+			goto error_unlock;
+		}
+
+		/* Enable event on agent application through TCP socket. */
+		ret = app_context_op(app, agent_ctx, AGENT_CMD_APP_CTX_ENABLE);
+		destroy_app_ctx(agent_ctx);
+		if (ret != LTTNG_OK) {
+			goto error_unlock;
+		}
+	}
+
+	ret = LTTNG_OK;
+
+error_unlock:
+	rcu_read_unlock();
+error:
+	return ret;
+}
+
+/*
+ * Disable agent event on every agent application registered with the session
  * daemon.
  *
  * Return LTTNG_OK on success or else a LTTNG_ERR* code.
@@ -533,6 +805,39 @@ int agent_disable_event(struct agent_event *event,
 error:
 	rcu_read_unlock();
 end:
+	return ret;
+}
+
+/*
+ * Disable agent context on every agent application registered with the session
+ * daemon.
+ *
+ * Return LTTNG_OK on success or else a LTTNG_ERR* code.
+ */
+int disable_context(struct agent_app_ctx *ctx, enum lttng_domain_type domain)
+{
+	int ret = LTTNG_OK;
+	struct agent_app *app;
+	struct lttng_ht_iter iter;
+
+	assert(ctx);
+
+	rcu_read_lock();
+	DBG2("Disabling agent application context %s:%s",
+			ctx->provider_name, ctx->ctx_name);
+	cds_lfht_for_each_entry(agent_apps_ht_by_sock->ht, &iter.iter, app,
+			node.node) {
+		if (app->domain != domain) {
+			continue;
+		}
+
+		ret = app_context_op(app, ctx, AGENT_CMD_APP_CTX_DISABLE);
+		if (ret != LTTNG_OK) {
+			goto end;
+		}
+	}
+end:
+	rcu_read_unlock();
 	return ret;
 }
 
@@ -685,10 +990,7 @@ void agent_add_app(struct agent_app *app)
 	assert(app);
 
 	DBG3("Agent adding app sock: %d and pid: %d to ht", app->sock->fd, app->pid);
-
-	rcu_read_lock();
 	lttng_ht_add_unique_ulong(agent_apps_ht_by_sock, &app->node);
-	rcu_read_unlock();
 }
 
 /*
@@ -711,7 +1013,7 @@ void agent_delete_app(struct agent_app *app)
 }
 
 /*
- * Destroy a agent application object by detaching it from its corresponding
+ * Destroy an agent application object by detaching it from its corresponding
  * UST app if one is connected by closing the socket. Finally, perform a
  * delayed memory reclaim.
  */
@@ -745,6 +1047,7 @@ int agent_init(struct agent *agt)
 	}
 	lttng_ht_node_init_u64(&agt->node, agt->domain);
 
+	CDS_INIT_LIST_HEAD(&agt->app_ctx_list);
 	return 0;
 
 error:
@@ -761,9 +1064,7 @@ void agent_add(struct agent *agt, struct lttng_ht *ht)
 
 	DBG3("Agent adding from domain %d", agt->domain);
 
-	rcu_read_lock();
 	lttng_ht_add_unique_u64(ht, &agt->node);
-	rcu_read_unlock();
 }
 
 /*
@@ -776,7 +1077,7 @@ struct agent *agent_create(enum lttng_domain_type domain)
 	int ret;
 	struct agent *agt;
 
-	agt = zmalloc(sizeof(*agt));
+	agt = zmalloc(sizeof(struct agent));
 	if (!agt) {
 		goto error;
 	}
@@ -842,11 +1143,34 @@ void agent_add_event(struct agent_event *event, struct agent *agt)
 	assert(agt->events);
 
 	DBG3("Agent adding event %s", event->name);
-
-	rcu_read_lock();
 	add_unique_agent_event(agt->events, event);
-	rcu_read_unlock();
 	agt->being_used = 1;
+}
+
+/*
+ * Unique add of a agent context to an agent object.
+ */
+int agent_add_context(struct lttng_event_context *ctx, struct agent *agt)
+{
+	int ret = LTTNG_OK;
+	struct agent_app_ctx *agent_ctx = NULL;
+
+	assert(ctx);
+	assert(agt);
+	assert(agt->events);
+	assert(ctx->ctx == LTTNG_EVENT_CONTEXT_APP_CONTEXT);
+
+	agent_ctx = create_app_ctx(ctx);
+	if (!agent_ctx) {
+		ret = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	DBG3("Agent adding context %s:%s", ctx->u.app_ctx.provider_name,
+			ctx->u.app_ctx.ctx_name);
+	cds_list_add_tail_rcu(&agent_ctx->list_node, &agt->app_ctx_list);
+end:
+	return ret;
 }
 
 /*
@@ -896,7 +1220,8 @@ void agent_event_next_duplicate(const char *name,
 /*
  * Find a agent event in the given agent using name, loglevel and filter.
  *
- * RCU read side lock MUST be acquired.
+ * RCU read side lock MUST be acquired. It must be kept for as long as
+ * the returned agent_event is used.
  *
  * Return object if found else NULL.
  */
@@ -949,6 +1274,15 @@ void agent_destroy_event(struct agent_event *event)
 	free(event);
 }
 
+static
+void destroy_app_ctx_rcu(struct rcu_head *head)
+{
+	struct agent_app_ctx *ctx =
+			caa_container_of(head, struct agent_app_ctx, rcu_node);
+
+	destroy_app_ctx(ctx);
+}
+
 /*
  * Destroy an agent completely.
  */
@@ -956,18 +1290,11 @@ void agent_destroy(struct agent *agt)
 {
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
+	struct agent_app_ctx *ctx;
 
 	assert(agt);
 
 	DBG3("Agent destroy");
-
-	/*
-	 * Just ignore if no events hash table exists. This is possible if for
-	 * instance an agent object was allocated but not initialized.
-	 */
-	if (!agt->events) {
-		return;
-	}
 
 	rcu_read_lock();
 	cds_lfht_for_each_entry(agt->events->ht, &iter.iter, node, node) {
@@ -975,9 +1302,10 @@ void agent_destroy(struct agent *agt)
 		struct agent_event *event;
 
 		/*
-		 * When destroying an event, we have to try to disable it on the agent
-		 * side so the event stops generating data. The return value is not
-		 * important since we have to continue anyway destroying the object.
+		 * When destroying an event, we have to try to disable it on the
+		 * agent side so the event stops generating data. The return
+		 * value is not important since we have to continue anyway
+		 * destroying the object.
 		 */
 		event = caa_container_of(node, struct agent_event, node);
 		(void) agent_disable_event(event, agt->domain);
@@ -986,8 +1314,13 @@ void agent_destroy(struct agent *agt)
 		assert(!ret);
 		call_rcu(&node->head, destroy_event_agent_rcu);
 	}
-	rcu_read_unlock();
 
+	cds_list_for_each_entry_rcu(ctx, &agt->app_ctx_list, list_node) {
+		(void) disable_context(ctx, agt->domain);
+		cds_list_del(&ctx->list_node);
+		call_rcu(&ctx->rcu_node, destroy_app_ctx_rcu);
+	}
+	rcu_read_unlock();
 	ht_cleanup_push(agt->events);
 	free(agt);
 }
@@ -1068,6 +1401,7 @@ void agent_update(struct agent *agt, int sock)
 	struct agent_app *app;
 	struct agent_event *event;
 	struct lttng_ht_iter iter;
+	struct agent_app_ctx *ctx;
 
 	assert(agt);
 	assert(sock >= 0);
@@ -1075,18 +1409,17 @@ void agent_update(struct agent *agt, int sock)
 	DBG("Agent updating app socket %d", sock);
 
 	rcu_read_lock();
+	app = agent_find_app_by_sock(sock);
+	/*
+	 * We are in the registration path thus if the application is gone,
+	 * there is a serious code flow error.
+	 */
+	assert(app);
 	cds_lfht_for_each_entry(agt->events->ht, &iter.iter, event, node.node) {
 		/* Skip event if disabled. */
 		if (!event->enabled) {
 			continue;
 		}
-
-		app = agent_find_app_by_sock(sock);
-		/*
-		 * We are in the registration path thus if the application is gone,
-		 * there is a serious code flow error.
-		 */
-		assert(app);
 
 		ret = enable_event(app, event);
 		if (ret != LTTNG_OK) {
@@ -1096,5 +1429,16 @@ void agent_update(struct agent *agt, int sock)
 			continue;
 		}
 	}
+
+	cds_list_for_each_entry_rcu(ctx, &agt->app_ctx_list, list_node) {
+		ret = app_context_op(app, ctx, AGENT_CMD_APP_CTX_ENABLE);
+		if (ret != LTTNG_OK) {
+			DBG2("Agent update unable to add application context %s:%s on app pid: %d sock %d",
+					ctx->provider_name, ctx->ctx_name,
+					app->pid, app->sock->fd);
+			continue;
+		}
+	}
+
 	rcu_read_unlock();
 }

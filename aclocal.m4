@@ -21,7 +21,7 @@ If you have problems, you may need to regenerate the build system entirely.
 To do so, use the procedure documented by the package, typically 'autoreconf'.])])
 
 dnl pkg.m4 - Macros to locate and utilise pkg-config.   -*- Autoconf -*-
-dnl serial 11 (pkg-config-0.29.1)
+dnl serial 11 (pkg-config-0.29)
 dnl
 dnl Copyright © 2004 Scott James Remnant <scott@netsplit.com>.
 dnl Copyright © 2012-2015 Dan Nicholson <dbn.lists@gmail.com>
@@ -63,7 +63,7 @@ dnl
 dnl See the "Since" comment for each macro you use to see what version
 dnl of the macros you require.
 m4_defun([PKG_PREREQ],
-[m4_define([PKG_MACROS_VERSION], [0.29.1])
+[m4_define([PKG_MACROS_VERSION], [0.29])
 m4_if(m4_version_compare(PKG_MACROS_VERSION, [$1]), -1,
     [m4_fatal([pkg.m4 version $1 or higher is required but ]PKG_MACROS_VERSION[ found])])
 ])dnl PKG_PREREQ
@@ -1697,25 +1697,29 @@ AC_SUBST([am__tar])
 AC_SUBST([am__untar])
 ]) # _AM_PROG_TAR
 
-m4_include([config/ac_define_dir.m4])
-m4_include([config/ax_check_class.m4])
-m4_include([config/ax_check_classpath.m4])
-m4_include([config/ax_compare_version.m4])
-m4_include([config/ax_java_options.m4])
-m4_include([config/ax_pkg_swig.m4])
-m4_include([config/ax_prog_bison_version.m4])
-m4_include([config/ax_prog_flex_version.m4])
-m4_include([config/ax_prog_jar.m4])
-m4_include([config/ax_prog_java.m4])
-m4_include([config/ax_prog_java_works.m4])
-m4_include([config/ax_prog_javac.m4])
-m4_include([config/ax_prog_javac_works.m4])
-m4_include([config/ax_try_compile_java.m4])
-m4_include([config/config_feature.m4])
-m4_include([config/epoll.m4])
-m4_include([config/libtool.m4])
-m4_include([config/libxml.m4])
-m4_include([config/ltoptions.m4])
-m4_include([config/ltsugar.m4])
-m4_include([config/ltversion.m4])
-m4_include([config/lt~obsolete.m4])
+m4_include([m4/ac_define_dir.m4])
+m4_include([m4/ax_c___attribute__.m4])
+m4_include([m4/ax_check_class.m4])
+m4_include([m4/ax_check_classpath.m4])
+m4_include([m4/ax_compare_version.m4])
+m4_include([m4/ax_java_options.m4])
+m4_include([m4/ax_lib_socket_nsl.m4])
+m4_include([m4/ax_pkg_swig.m4])
+m4_include([m4/ax_prog_bison_version.m4])
+m4_include([m4/ax_prog_flex_version.m4])
+m4_include([m4/ax_prog_jar.m4])
+m4_include([m4/ax_prog_java.m4])
+m4_include([m4/ax_prog_java_works.m4])
+m4_include([m4/ax_prog_javac.m4])
+m4_include([m4/ax_prog_javac_works.m4])
+m4_include([m4/ax_pthread.m4])
+m4_include([m4/ax_try_compile_java.m4])
+m4_include([m4/config_feature.m4])
+m4_include([m4/epoll.m4])
+m4_include([m4/libtool.m4])
+m4_include([m4/libxml.m4])
+m4_include([m4/ltoptions.m4])
+m4_include([m4/ltsugar.m4])
+m4_include([m4/ltversion.m4])
+m4_include([m4/lt~obsolete.m4])
+m4_include([m4/pprint.m4])

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2012 - David Goulet <dgoulet@efficios.com>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License, version 2 only, as
@@ -15,10 +16,8 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
-#include <string.h>
 #include <inttypes.h>
 #include <urcu/list.h>
 #include <urcu/uatomic.h>
@@ -28,6 +27,8 @@
 #include <common/sessiond-comm/sessiond-comm.h>
 #include <common/relayd/relayd.h>
 #include <common/utils.h>
+#include <common/compat/string.h>
+#include <common/kernel-ctl/kernel-ctl.h>
 
 #include "channel.h"
 #include "consumer.h"
@@ -38,6 +39,8 @@
 #include "lttng-sessiond.h"
 #include "utils.h"
 #include "syscall.h"
+#include "agent.h"
+#include "buffer-registry.h"
 
 #include "cmd.h"
 
@@ -139,12 +142,97 @@ error:
 }
 
 /*
+ * Get run-time attributes if the session has been started (discarded events,
+ * lost packets).
+ */
+static int get_kernel_runtime_stats(struct ltt_session *session,
+		struct ltt_kernel_channel *kchan, uint64_t *discarded_events,
+		uint64_t *lost_packets)
+{
+	int ret;
+
+	if (!session->has_been_started) {
+		ret = 0;
+		*discarded_events = 0;
+		*lost_packets = 0;
+		goto end;
+	}
+
+	ret = consumer_get_discarded_events(session->id, kchan->fd,
+			session->kernel_session->consumer,
+			discarded_events);
+	if (ret < 0) {
+		goto end;
+	}
+
+	ret = consumer_get_lost_packets(session->id, kchan->fd,
+			session->kernel_session->consumer,
+			lost_packets);
+	if (ret < 0) {
+		goto end;
+	}
+
+end:
+	return ret;
+}
+
+/*
+ * Get run-time attributes if the session has been started (discarded events,
+ * lost packets).
+ */
+static int get_ust_runtime_stats(struct ltt_session *session,
+		struct ltt_ust_channel *uchan, uint64_t *discarded_events,
+		uint64_t *lost_packets)
+{
+	int ret;
+	struct ltt_ust_session *usess;
+
+	usess = session->ust_session;
+
+	if (!usess || !session->has_been_started) {
+		*discarded_events = 0;
+		*lost_packets = 0;
+		ret = 0;
+		goto end;
+	}
+
+	if (usess->buffer_type == LTTNG_BUFFER_PER_UID) {
+		ret = ust_app_uid_get_channel_runtime_stats(usess->id,
+				&usess->buffer_reg_uid_list,
+				usess->consumer, uchan->id,
+				uchan->attr.overwrite,
+				discarded_events,
+				lost_packets);
+	} else if (usess->buffer_type == LTTNG_BUFFER_PER_PID) {
+		ret = ust_app_pid_get_channel_runtime_stats(usess,
+				uchan, usess->consumer,
+				uchan->attr.overwrite,
+				discarded_events,
+				lost_packets);
+		if (ret < 0) {
+			goto end;
+		}
+		*discarded_events += uchan->per_pid_closed_app_discarded;
+		*lost_packets += uchan->per_pid_closed_app_lost;
+	} else {
+		ERR("Unsupported buffer type");
+		assert(0);
+		ret = -1;
+		goto end;
+	}
+
+end:
+	return ret;
+}
+
+/*
  * Fill lttng_channel array of all channels.
  */
-static void list_lttng_channels(int domain, struct ltt_session *session,
-		struct lttng_channel *channels)
+static void list_lttng_channels(enum lttng_domain_type domain,
+		struct ltt_session *session, struct lttng_channel *channels,
+		struct lttcomm_channel_extended *chan_exts)
 {
-	int i = 0;
+	int i = 0, ret;
 	struct ltt_kernel_channel *kchan;
 
 	DBG("Listing channels for session %s", session->name);
@@ -155,9 +243,19 @@ static void list_lttng_channels(int domain, struct ltt_session *session,
 		if (session->kernel_session != NULL) {
 			cds_list_for_each_entry(kchan,
 					&session->kernel_session->channel_list.head, list) {
+				uint64_t discarded_events, lost_packets;
+
+				ret = get_kernel_runtime_stats(session, kchan,
+						&discarded_events, &lost_packets);
+				if (ret < 0) {
+					goto end;
+				}
 				/* Copy lttng_channel struct to array */
 				memcpy(&channels[i], kchan->channel, sizeof(struct lttng_channel));
 				channels[i].enabled = kchan->enabled;
+				chan_exts[i].discarded_events =
+						discarded_events;
+				chan_exts[i].lost_packets = lost_packets;
 				i++;
 			}
 		}
@@ -170,6 +268,8 @@ static void list_lttng_channels(int domain, struct ltt_session *session,
 		rcu_read_lock();
 		cds_lfht_for_each_entry(session->ust_session->domain_global.channels->ht,
 				&iter.iter, uchan, node.node) {
+			uint64_t discarded_events, lost_packets;
+
 			strncpy(channels[i].name, uchan->name, LTTNG_SYMBOL_NAME_LEN);
 			channels[i].attr.overwrite = uchan->attr.overwrite;
 			channels[i].attr.subbuf_size = uchan->attr.subbuf_size;
@@ -181,12 +281,30 @@ static void list_lttng_channels(int domain, struct ltt_session *session,
 			channels[i].enabled = uchan->enabled;
 			channels[i].attr.tracefile_size = uchan->tracefile_size;
 			channels[i].attr.tracefile_count = uchan->tracefile_count;
+
+			/*
+			 * Map enum lttng_ust_output to enum lttng_event_output.
+			 */
 			switch (uchan->attr.output) {
 			case LTTNG_UST_MMAP:
-			default:
 				channels[i].attr.output = LTTNG_EVENT_MMAP;
 				break;
+			default:
+				/*
+				 * LTTNG_UST_MMAP is the only supported UST
+				 * output mode.
+				 */
+				assert(0);
+				break;
 			}
+
+			ret = get_ust_runtime_stats(session, uchan,
+					&discarded_events, &lost_packets);
+			if (ret < 0) {
+				break;
+			}
+			chan_exts[i].discarded_events = discarded_events;
+			chan_exts[i].lost_packets = lost_packets;
 			i++;
 		}
 		rcu_read_unlock();
@@ -194,6 +312,61 @@ static void list_lttng_channels(int domain, struct ltt_session *session,
 	}
 	default:
 		break;
+	}
+
+end:
+	return;
+}
+
+static void increment_extended_len(const char *filter_expression,
+		struct lttng_event_exclusion *exclusion, size_t *extended_len)
+{
+	*extended_len += sizeof(struct lttcomm_event_extended_header);
+
+	if (filter_expression) {
+		*extended_len += strlen(filter_expression) + 1;
+	}
+
+	if (exclusion) {
+		*extended_len += exclusion->count * LTTNG_SYMBOL_NAME_LEN;
+	}
+}
+
+static void append_extended_info(const char *filter_expression,
+		struct lttng_event_exclusion *exclusion, void **extended_at)
+{
+	struct lttcomm_event_extended_header extended_header;
+	size_t filter_len = 0;
+	size_t nb_exclusions = 0;
+
+	if (filter_expression) {
+		filter_len = strlen(filter_expression) + 1;
+	}
+
+	if (exclusion) {
+		nb_exclusions = exclusion->count;
+	}
+
+	/* Set header fields */
+	extended_header.filter_len = filter_len;
+	extended_header.nb_exclusions = nb_exclusions;
+
+	/* Copy header */
+	memcpy(*extended_at, &extended_header, sizeof(extended_header));
+	*extended_at += sizeof(extended_header);
+
+	/* Copy filter string */
+	if (filter_expression) {
+		memcpy(*extended_at, filter_expression, filter_len);
+		*extended_at += filter_len;
+	}
+
+	/* Copy exclusion names */
+	if (exclusion) {
+		size_t len = nb_exclusions * LTTNG_SYMBOL_NAME_LEN;
+
+		memcpy(*extended_at, &exclusion->names, len);
+		*extended_at += len;
 	}
 }
 
@@ -203,13 +376,15 @@ static void list_lttng_channels(int domain, struct ltt_session *session,
  * Return number of events in list on success or else a negative value.
  */
 static int list_lttng_agent_events(struct agent *agt,
-		struct lttng_event **events)
+		struct lttng_event **events, size_t *total_size)
 {
 	int i = 0, ret = 0;
 	unsigned int nb_event = 0;
 	struct agent_event *event;
 	struct lttng_event *tmp_events;
 	struct lttng_ht_iter iter;
+	size_t extended_len = 0;
+	void *extended_at;
 
 	assert(agt);
 	assert(events);
@@ -221,15 +396,34 @@ static int list_lttng_agent_events(struct agent *agt,
 	rcu_read_unlock();
 	if (nb_event == 0) {
 		ret = nb_event;
+		*total_size = 0;
 		goto error;
 	}
 
-	tmp_events = zmalloc(nb_event * sizeof(*tmp_events));
+	/* Compute required extended infos size */
+	extended_len = nb_event * sizeof(struct lttcomm_event_extended_header);
+
+	/*
+	 * This is only valid because the commands which add events are
+	 * processed in the same thread as the listing.
+	 */
+	rcu_read_lock();
+	cds_lfht_for_each_entry(agt->events->ht, &iter.iter, event, node.node) {
+		increment_extended_len(event->filter_expression, NULL,
+				&extended_len);
+	}
+	rcu_read_unlock();
+
+	*total_size = nb_event * sizeof(*tmp_events) + extended_len;
+	tmp_events = zmalloc(*total_size);
 	if (!tmp_events) {
 		PERROR("zmalloc agent events session");
 		ret = -LTTNG_ERR_FATAL;
 		goto error;
 	}
+
+	extended_at = ((uint8_t *) tmp_events) +
+		nb_event * sizeof(struct lttng_event);
 
 	rcu_read_lock();
 	cds_lfht_for_each_entry(agt->events->ht, &iter.iter, event, node.node) {
@@ -239,6 +433,10 @@ static int list_lttng_agent_events(struct agent *agt,
 		tmp_events[i].loglevel = event->loglevel_value;
 		tmp_events[i].loglevel_type = event->loglevel_type;
 		i++;
+
+		/* Append extended info */
+		append_extended_info(event->filter_expression, NULL,
+				&extended_at);
 	}
 	rcu_read_unlock();
 
@@ -254,7 +452,8 @@ error:
  * Create a list of ust global domain events.
  */
 static int list_lttng_ust_global_events(char *channel_name,
-		struct ltt_ust_domain_global *ust_global, struct lttng_event **events)
+		struct ltt_ust_domain_global *ust_global,
+		struct lttng_event **events, size_t *total_size)
 {
 	int i = 0, ret = 0;
 	unsigned int nb_event = 0;
@@ -263,6 +462,8 @@ static int list_lttng_ust_global_events(char *channel_name,
 	struct ltt_ust_channel *uchan;
 	struct ltt_ust_event *uevent;
 	struct lttng_event *tmp;
+	size_t extended_len = 0;
+	void *extended_at;
 
 	DBG("Listing UST global events for channel %s", channel_name);
 
@@ -272,7 +473,7 @@ static int list_lttng_ust_global_events(char *channel_name,
 	node = lttng_ht_iter_get_node_str(&iter);
 	if (node == NULL) {
 		ret = LTTNG_ERR_UST_CHAN_NOT_FOUND;
-		goto error;
+		goto end;
 	}
 
 	uchan = caa_container_of(&node->node, struct ltt_ust_channel, node.node);
@@ -280,21 +481,41 @@ static int list_lttng_ust_global_events(char *channel_name,
 	nb_event = lttng_ht_get_count(uchan->events);
 	if (nb_event == 0) {
 		ret = nb_event;
-		goto error;
+		*total_size = 0;
+		goto end;
 	}
 
 	DBG3("Listing UST global %d events", nb_event);
 
-	tmp = zmalloc(nb_event * sizeof(struct lttng_event));
-	if (tmp == NULL) {
-		ret = LTTNG_ERR_FATAL;
-		goto error;
+	/* Compute required extended infos size */
+	cds_lfht_for_each_entry(uchan->events->ht, &iter.iter, uevent, node.node) {
+		if (uevent->internal) {
+			nb_event--;
+			continue;
+		}
+
+		increment_extended_len(uevent->filter_expression,
+			uevent->exclusion, &extended_len);
 	}
+	if (nb_event == 0) {
+		/* All events are internal, skip. */
+		ret = 0;
+		*total_size = 0;
+		goto end;
+	}
+
+	*total_size = nb_event * sizeof(struct lttng_event) + extended_len;
+	tmp = zmalloc(*total_size);
+	if (tmp == NULL) {
+		ret = -LTTNG_ERR_FATAL;
+		goto end;
+	}
+
+	extended_at = ((uint8_t *) tmp) + nb_event * sizeof(struct lttng_event);
 
 	cds_lfht_for_each_entry(uchan->events->ht, &iter.iter, uevent, node.node) {
 		if (uevent->internal) {
 			/* This event should remain hidden from clients */
-			nb_event--;
 			continue;
 		}
 		strncpy(tmp[i].name, uevent->attr.name, LTTNG_SYMBOL_NAME_LEN);
@@ -332,12 +553,15 @@ static int list_lttng_ust_global_events(char *channel_name,
 			tmp[i].exclusion = 1;
 		}
 		i++;
+
+		/* Append extended info */
+		append_extended_info(uevent->filter_expression,
+			uevent->exclusion, &extended_at);
 	}
 
 	ret = nb_event;
 	*events = tmp;
-
-error:
+end:
 	rcu_read_unlock();
 	return ret;
 }
@@ -346,12 +570,15 @@ error:
  * Fill lttng_event array of all kernel events in the channel.
  */
 static int list_lttng_kernel_events(char *channel_name,
-		struct ltt_kernel_session *kernel_session, struct lttng_event **events)
+		struct ltt_kernel_session *kernel_session,
+		struct lttng_event **events, size_t *total_size)
 {
 	int i = 0, ret;
 	unsigned int nb_event;
 	struct ltt_kernel_event *event;
 	struct ltt_kernel_channel *kchan;
+	size_t extended_len = 0;
+	void *extended_at;
 
 	kchan = trace_kernel_get_channel_by_name(channel_name, kernel_session);
 	if (kchan == NULL) {
@@ -364,15 +591,26 @@ static int list_lttng_kernel_events(char *channel_name,
 	DBG("Listing events for channel %s", kchan->channel->name);
 
 	if (nb_event == 0) {
+		*total_size = 0;
 		*events = NULL;
 		goto end;
 	}
 
-	*events = zmalloc(nb_event * sizeof(struct lttng_event));
+	/* Compute required extended infos size */
+	cds_list_for_each_entry(event, &kchan->events_list.head, list) {
+		increment_extended_len(event->filter_expression, NULL,
+			&extended_len);
+	}
+
+	*total_size = nb_event * sizeof(struct lttng_event) + extended_len;
+	*events = zmalloc(*total_size);
 	if (*events == NULL) {
 		ret = LTTNG_ERR_FATAL;
 		goto error;
 	}
+
+	extended_at = ((void *) *events) +
+		nb_event * sizeof(struct lttng_event);
 
 	/* Kernel channels */
 	cds_list_for_each_entry(event, &kchan->events_list.head , list) {
@@ -412,6 +650,10 @@ static int list_lttng_kernel_events(char *channel_name,
 			break;
 		}
 		i++;
+
+		/* Append extended info */
+		append_extended_info(event->filter_expression, NULL,
+			&extended_at);
 	}
 
 end:
@@ -427,7 +669,8 @@ error:
  * domain adding the default trace directory.
  */
 static int add_uri_to_consumer(struct consumer_output *consumer,
-		struct lttng_uri *uri, int domain, const char *session_name)
+		struct lttng_uri *uri, enum lttng_domain_type domain,
+		const char *session_name)
 {
 	int ret = LTTNG_OK;
 	const char *default_trace_dir;
@@ -563,7 +806,8 @@ error:
  * Else, it's stays untouched and a lttcomm error code is returned.
  */
 static int create_connect_relayd(struct lttng_uri *uri,
-		struct lttcomm_relayd_sock **relayd_sock)
+		struct lttcomm_relayd_sock **relayd_sock,
+		struct consumer_output *consumer)
 {
 	int ret;
 	struct lttcomm_relayd_sock *rsock;
@@ -599,6 +843,8 @@ static int create_connect_relayd(struct lttng_uri *uri,
 			ret = LTTNG_ERR_RELAYD_VERSION_FAIL;
 			goto close_sock;
 		}
+		consumer->relay_major_version = rsock->major;
+		consumer->relay_minor_version = rsock->minor;
 	} else if (uri->stype == LTTNG_STREAM_DATA) {
 		DBG3("Creating relayd data socket from URI");
 	} else {
@@ -624,8 +870,9 @@ error:
 /*
  * Connect to the relayd using URI and send the socket to the right consumer.
  */
-static int send_consumer_relayd_socket(int domain, unsigned int session_id,
-		struct lttng_uri *relayd_uri, struct consumer_output *consumer,
+static int send_consumer_relayd_socket(enum lttng_domain_type domain,
+		unsigned int session_id, struct lttng_uri *relayd_uri,
+		struct consumer_output *consumer,
 		struct consumer_socket *consumer_sock,
 		char *session_name, char *hostname, int session_live_timer)
 {
@@ -633,7 +880,7 @@ static int send_consumer_relayd_socket(int domain, unsigned int session_id,
 	struct lttcomm_relayd_sock *rsock = NULL;
 
 	/* Connect to relayd and make version check if uri is the control. */
-	ret = create_connect_relayd(relayd_uri, &rsock);
+	ret = create_connect_relayd(relayd_uri, &rsock, consumer);
 	if (ret != LTTNG_OK) {
 		goto error;
 	}
@@ -695,9 +942,10 @@ error:
  * helper function to facilitate sending the information to the consumer for a
  * session.
  */
-static int send_consumer_relayd_sockets(int domain, unsigned int session_id,
-		struct consumer_output *consumer, struct consumer_socket *sock,
-		char *session_name, char *hostname, int session_live_timer)
+static int send_consumer_relayd_sockets(enum lttng_domain_type domain,
+		unsigned int session_id, struct consumer_output *consumer,
+		struct consumer_socket *sock, char *session_name,
+		char *hostname, int session_live_timer)
 {
 	int ret = LTTNG_OK;
 
@@ -767,6 +1015,10 @@ int cmd_setup_relayd(struct ltt_session *session)
 			/* Session is now ready for network streaming. */
 			session->net_handle = 1;
 		}
+		session->consumer->relay_major_version =
+			usess->consumer->relay_major_version;
+		session->consumer->relay_minor_version =
+			usess->consumer->relay_minor_version;
 	}
 
 	if (ksess && ksess->consumer && ksess->consumer->type == CONSUMER_DST_NET
@@ -785,6 +1037,10 @@ int cmd_setup_relayd(struct ltt_session *session)
 			/* Session is now ready for network streaming. */
 			session->net_handle = 1;
 		}
+		session->consumer->relay_major_version =
+			ksess->consumer->relay_major_version;
+		session->consumer->relay_minor_version =
+			ksess->consumer->relay_minor_version;
 	}
 
 error:
@@ -860,8 +1116,8 @@ error:
 /*
  * Command LTTNG_DISABLE_CHANNEL processed by the client thread.
  */
-int cmd_disable_channel(struct ltt_session *session, int domain,
-		char *channel_name)
+int cmd_disable_channel(struct ltt_session *session,
+		enum lttng_domain_type domain, char *channel_name)
 {
 	int ret;
 	struct ltt_ust_session *usess;
@@ -918,7 +1174,8 @@ error:
  *
  * Called with session lock held.
  */
-int cmd_track_pid(struct ltt_session *session, int domain, int pid)
+int cmd_track_pid(struct ltt_session *session, enum lttng_domain_type domain,
+		int pid)
 {
 	int ret;
 
@@ -968,7 +1225,8 @@ error:
  *
  * Called with session lock held.
  */
-int cmd_untrack_pid(struct ltt_session *session, int domain, int pid)
+int cmd_untrack_pid(struct ltt_session *session, enum lttng_domain_type domain,
+		int pid)
 {
 	int ret;
 
@@ -1030,7 +1288,7 @@ int cmd_enable_channel(struct ltt_session *session,
 	assert(attr);
 	assert(domain);
 
-	len = strnlen(attr->name, sizeof(attr->name));
+	len = lttng_strnlen(attr->name, sizeof(attr->name));
 
 	/* Validate channel name */
 	if (attr->name[0] == '.' ||
@@ -1157,8 +1415,8 @@ end:
 /*
  * Command LTTNG_DISABLE_EVENT processed by the client thread.
  */
-int cmd_disable_event(struct ltt_session *session, int domain,
-		char *channel_name,
+int cmd_disable_event(struct ltt_session *session,
+		enum lttng_domain_type domain, char *channel_name,
 		struct lttng_event *event)
 {
 	int ret;
@@ -1338,10 +1596,16 @@ error:
 /*
  * Command LTTNG_ADD_CONTEXT processed by the client thread.
  */
-int cmd_add_context(struct ltt_session *session, int domain,
+int cmd_add_context(struct ltt_session *session, enum lttng_domain_type domain,
 		char *channel_name, struct lttng_event_context *ctx, int kwpipe)
 {
 	int ret, chan_kern_created = 0, chan_ust_created = 0;
+	char *app_ctx_provider_name = NULL, *app_ctx_name = NULL;
+
+	if (ctx->ctx == LTTNG_EVENT_CONTEXT_APP_CONTEXT) {
+		app_ctx_provider_name = ctx->u.app_ctx.provider_name;
+		app_ctx_name = ctx->u.app_ctx.ctx_name;
+	}
 
 	switch (domain) {
 	case LTTNG_DOMAIN_KERNEL:
@@ -1361,6 +1625,29 @@ int cmd_add_context(struct ltt_session *session, int domain,
 			goto error;
 		}
 		break;
+	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_LOG4J:
+	{
+		/*
+		 * Validate channel name.
+		 * If no channel name is given and the domain is JUL or LOG4J,
+		 * set it to the appropriate domain-specific channel name. If
+		 * a name is provided but does not match the expexted channel
+		 * name, return an error.
+		 */
+		if (domain == LTTNG_DOMAIN_JUL && *channel_name &&
+				strcmp(channel_name,
+				DEFAULT_JUL_CHANNEL_NAME)) {
+			ret = LTTNG_ERR_UST_CHAN_NOT_FOUND;
+			goto error;
+		} else if (domain == LTTNG_DOMAIN_LOG4J && *channel_name &&
+				strcmp(channel_name,
+				DEFAULT_LOG4J_CHANNEL_NAME)) {
+			ret = LTTNG_ERR_UST_CHAN_NOT_FOUND;
+			goto error;
+		}
+		/* break is _not_ missing here. */
+	}
 	case LTTNG_DOMAIN_UST:
 	{
 		struct ltt_ust_session *usess = session->ust_session;
@@ -1388,6 +1675,10 @@ int cmd_add_context(struct ltt_session *session, int domain,
 		}
 
 		ret = context_ust_add(usess, domain, ctx, channel_name);
+		free(app_ctx_provider_name);
+		free(app_ctx_name);
+		app_ctx_name = NULL;
+		app_ctx_provider_name = NULL;
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
@@ -1398,7 +1689,8 @@ int cmd_add_context(struct ltt_session *session, int domain,
 		goto error;
 	}
 
-	return LTTNG_OK;
+	ret = LTTNG_OK;
+	goto end;
 
 error:
 	if (chan_kern_created) {
@@ -1422,6 +1714,9 @@ error:
 				uchan);
 		trace_ust_destroy_channel(uchan);
 	}
+end:
+	free(app_ctx_provider_name);
+	free(app_ctx_name);
 	return ret;
 }
 
@@ -1430,6 +1725,7 @@ static int validate_event_name(const char *name)
 	int ret = 0;
 	const char *c = name;
 	const char *event_name_end = c + LTTNG_SYMBOL_NAME_LEN;
+	bool null_terminated = false;
 
 	/*
 	 * Make sure that unescaped wildcards are only used as the last
@@ -1438,6 +1734,7 @@ static int validate_event_name(const char *name)
 	while (c < event_name_end) {
 		switch (*c) {
 		case '\0':
+		        null_terminated = true;
 			goto end;
 		case '\\':
 			c++;
@@ -1454,6 +1751,9 @@ static int validate_event_name(const char *name)
 		c++;
 	}
 end:
+	if (!ret && !null_terminated) {
+		ret = LTTNG_ERR_INVALID_EVENT_NAME;
+	}
 	return ret;
 }
 
@@ -1508,6 +1808,9 @@ static int _cmd_enable_event(struct ltt_session *session,
 	assert(session);
 	assert(event);
 	assert(channel_name);
+
+	/* If we have a filter, we must have its filter expression */
+	assert(!(!!filter_expression ^ !!filter));
 
 	DBG("Enable event command for event \'%s\'", event->name);
 
@@ -1789,7 +2092,7 @@ static int _cmd_enable_event(struct ltt_session *session,
 			default_chan_name = DEFAULT_PYTHON_CHANNEL_NAME;
 			break;
 		default:
-			/* The switch/case we are in should avoid this else big problem */
+			/* The switch/case we are in makes this impossible */
 			assert(0);
 		}
 
@@ -1901,7 +2204,8 @@ static int cmd_enable_event_internal(struct ltt_session *session,
 /*
  * Command LTTNG_LIST_TRACEPOINTS processed by the client thread.
  */
-ssize_t cmd_list_tracepoints(int domain, struct lttng_event **events)
+ssize_t cmd_list_tracepoints(enum lttng_domain_type domain,
+		struct lttng_event **events)
 {
 	int ret;
 	ssize_t nb_events = 0;
@@ -1945,7 +2249,7 @@ error:
 /*
  * Command LTTNG_LIST_TRACEPOINT_FIELDS processed by the client thread.
  */
-ssize_t cmd_list_tracepoint_fields(int domain,
+ssize_t cmd_list_tracepoint_fields(enum lttng_domain_type domain,
 		struct lttng_event_field **fields)
 {
 	int ret;
@@ -1983,7 +2287,7 @@ ssize_t cmd_list_syscalls(struct lttng_event **events)
  * Called with session lock held.
  */
 ssize_t cmd_list_tracker_pids(struct ltt_session *session,
-		int domain, int32_t **pids)
+		enum lttng_domain_type domain, int32_t **pids)
 {
 	int ret;
 	ssize_t nr_pids = 0;
@@ -2057,9 +2361,7 @@ int cmd_start_trace(struct ltt_session *session)
 	 * possible to enable channel thus inform the client.
 	 */
 	if (usess && usess->domain_global.channels) {
-		rcu_read_lock();
 		nb_chan += lttng_ht_get_count(usess->domain_global.channels);
-		rcu_read_unlock();
 	}
 	if (ksession) {
 		nb_chan += ksession->channel_count;
@@ -2442,7 +2744,8 @@ int cmd_destroy_session(struct ltt_session *session, int wpipe)
 /*
  * Command LTTNG_CALIBRATE processed by the client thread.
  */
-int cmd_calibrate(int domain, struct lttng_calibrate *calibrate)
+int cmd_calibrate(enum lttng_domain_type domain,
+		struct lttng_calibrate *calibrate)
 {
 	int ret;
 
@@ -2499,8 +2802,9 @@ error:
 /*
  * Command LTTNG_REGISTER_CONSUMER processed by the client thread.
  */
-int cmd_register_consumer(struct ltt_session *session, int domain,
-		const char *sock_path, struct consumer_data *cdata)
+int cmd_register_consumer(struct ltt_session *session,
+		enum lttng_domain_type domain, const char *sock_path,
+		struct consumer_data *cdata)
 {
 	int ret, sock;
 	struct consumer_socket *socket = NULL;
@@ -2651,11 +2955,10 @@ error:
 /*
  * Command LTTNG_LIST_CHANNELS processed by the client thread.
  */
-ssize_t cmd_list_channels(int domain, struct ltt_session *session,
-		struct lttng_channel **channels)
+ssize_t cmd_list_channels(enum lttng_domain_type domain,
+		struct ltt_session *session, struct lttng_channel **channels)
 {
-	int ret;
-	ssize_t nb_chan = 0;
+	ssize_t nb_chan = 0, payload_size = 0, ret;
 
 	switch (domain) {
 	case LTTNG_DOMAIN_KERNEL:
@@ -2664,7 +2967,8 @@ ssize_t cmd_list_channels(int domain, struct ltt_session *session,
 		}
 		DBG3("Number of kernel channels %zd", nb_chan);
 		if (nb_chan <= 0) {
-			ret = LTTNG_ERR_KERN_CHAN_NOT_FOUND;
+			ret = -LTTNG_ERR_KERN_CHAN_NOT_FOUND;
+			goto end;
 		}
 		break;
 	case LTTNG_DOMAIN_UST:
@@ -2676,37 +2980,45 @@ ssize_t cmd_list_channels(int domain, struct ltt_session *session,
 		}
 		DBG3("Number of UST global channels %zd", nb_chan);
 		if (nb_chan < 0) {
-			ret = LTTNG_ERR_UST_CHAN_NOT_FOUND;
-			goto error;
+			ret = -LTTNG_ERR_UST_CHAN_NOT_FOUND;
+			goto end;
 		}
 		break;
 	default:
-		ret = LTTNG_ERR_UND;
-		goto error;
+		ret = -LTTNG_ERR_UND;
+		goto end;
 	}
 
 	if (nb_chan > 0) {
-		*channels = zmalloc(nb_chan * sizeof(struct lttng_channel));
+		const size_t channel_size = sizeof(struct lttng_channel) +
+			sizeof(struct lttcomm_channel_extended);
+		struct lttcomm_channel_extended *channel_exts;
+
+		payload_size = nb_chan * channel_size;
+		*channels = zmalloc(payload_size);
 		if (*channels == NULL) {
-			ret = LTTNG_ERR_FATAL;
-			goto error;
+			ret = -LTTNG_ERR_FATAL;
+			goto end;
 		}
 
-		list_lttng_channels(domain, session, *channels);
+		channel_exts = ((void *) *channels) +
+				(nb_chan * sizeof(struct lttng_channel));
+		list_lttng_channels(domain, session, *channels, channel_exts);
+	} else {
+		*channels = NULL;
 	}
 
-	return nb_chan;
-
-error:
-	/* Return negative value to differentiate return code */
-	return -ret;
+	ret = payload_size;
+end:
+	return ret;
 }
 
 /*
  * Command LTTNG_LIST_EVENTS processed by the client thread.
  */
-ssize_t cmd_list_events(int domain, struct ltt_session *session,
-		char *channel_name, struct lttng_event **events)
+ssize_t cmd_list_events(enum lttng_domain_type domain,
+		struct ltt_session *session, char *channel_name,
+		struct lttng_event **events, size_t *total_size)
 {
 	int ret = 0;
 	ssize_t nb_event = 0;
@@ -2715,14 +3027,16 @@ ssize_t cmd_list_events(int domain, struct ltt_session *session,
 	case LTTNG_DOMAIN_KERNEL:
 		if (session->kernel_session != NULL) {
 			nb_event = list_lttng_kernel_events(channel_name,
-					session->kernel_session, events);
+					session->kernel_session, events,
+					total_size);
 		}
 		break;
 	case LTTNG_DOMAIN_UST:
 	{
 		if (session->ust_session != NULL) {
 			nb_event = list_lttng_ust_global_events(channel_name,
-					&session->ust_session->domain_global, events);
+					&session->ust_session->domain_global, events,
+					total_size);
 		}
 		break;
 	}
@@ -2738,7 +3052,8 @@ ssize_t cmd_list_events(int domain, struct ltt_session *session,
 					&iter.iter, agt, node.node) {
 				if (agt->domain == domain) {
 					nb_event = list_lttng_agent_events(
-							agt, events);
+							agt, events,
+							total_size);
 					break;
 				}
 			}
@@ -3059,6 +3374,156 @@ error:
 	rcu_read_unlock();
 	return ret;
 }
+
+/*
+ * Check if we can regenerate the metadata for this session.
+ * Only kernel, UST per-uid and non-live sessions are supported.
+ *
+ * Return 0 if the metadata can be generated, a LTTNG_ERR code otherwise.
+ */
+static
+int check_metadata_regenerate_support(struct ltt_session *session)
+{
+	int ret;
+
+	assert(session);
+
+	if (session->live_timer != 0) {
+		ret = LTTNG_ERR_LIVE_SESSION;
+		goto end;
+	}
+	if (!session->active) {
+		ret = LTTNG_ERR_SESSION_NOT_STARTED;
+		goto end;
+	}
+	if (session->ust_session) {
+		switch (session->ust_session->buffer_type) {
+		case LTTNG_BUFFER_PER_UID:
+			break;
+		case LTTNG_BUFFER_PER_PID:
+			ret = LTTNG_ERR_PER_PID_SESSION;
+			goto end;
+		default:
+			assert(0);
+			ret = LTTNG_ERR_UNK;
+			goto end;
+		}
+	}
+	if (session->consumer->type == CONSUMER_DST_NET &&
+			session->consumer->relay_minor_version < 8) {
+		ret = LTTNG_ERR_RELAYD_VERSION_FAIL;
+		goto end;
+	}
+	ret = 0;
+
+end:
+	return ret;
+}
+
+static
+int ust_metadata_regenerate(struct ltt_ust_session *usess)
+{
+	int ret = 0;
+	struct buffer_reg_uid *uid_reg = NULL;
+	struct buffer_reg_session *session_reg = NULL;
+
+	rcu_read_lock();
+	cds_list_for_each_entry(uid_reg, &usess->buffer_reg_uid_list, lnode) {
+		struct ust_registry_session *registry;
+		struct ust_registry_channel *chan;
+		struct lttng_ht_iter iter_chan;
+
+		session_reg = uid_reg->registry;
+		registry = session_reg->reg.ust;
+
+		pthread_mutex_lock(&registry->lock);
+		registry->metadata_len_sent = 0;
+		memset(registry->metadata, 0, registry->metadata_alloc_len);
+		registry->metadata_len = 0;
+		registry->metadata_version++;
+		ret = ust_metadata_session_statedump(registry, NULL,
+				registry->major, registry->minor);
+		if (ret) {
+			pthread_mutex_unlock(&registry->lock);
+			ERR("Failed to generate session metadata (err = %d)",
+					ret);
+			goto end;
+		}
+		cds_lfht_for_each_entry(registry->channels->ht, &iter_chan.iter,
+				chan, node.node) {
+			struct ust_registry_event *event;
+			struct lttng_ht_iter iter_event;
+
+			ret = ust_metadata_channel_statedump(registry, chan);
+			if (ret) {
+				pthread_mutex_unlock(&registry->lock);
+				ERR("Failed to generate channel metadata "
+						"(err = %d)", ret);
+				goto end;
+			}
+			cds_lfht_for_each_entry(chan->ht->ht, &iter_event.iter,
+					event, node.node) {
+				ret = ust_metadata_event_statedump(registry,
+						chan, event);
+				if (ret) {
+					pthread_mutex_unlock(&registry->lock);
+					ERR("Failed to generate event metadata "
+							"(err = %d)", ret);
+					goto end;
+				}
+			}
+		}
+		pthread_mutex_unlock(&registry->lock);
+	}
+
+end:
+	rcu_read_unlock();
+	return ret;
+}
+
+/*
+ * Command LTTNG_METADATA_REGENERATE from the lttng-ctl library.
+ *
+ * Ask the consumer to truncate the existing metadata file(s) and
+ * then regenerate the metadata. Live and per-pid sessions are not
+ * supported and return an error.
+ *
+ * Return 0 on success or else a LTTNG_ERR code.
+ */
+int cmd_metadata_regenerate(struct ltt_session *session)
+{
+	int ret;
+
+	assert(session);
+
+	ret = check_metadata_regenerate_support(session);
+	if (ret) {
+		goto end;
+	}
+
+	if (session->kernel_session) {
+		ret = kernctl_session_metadata_regenerate(
+				session->kernel_session->fd);
+		if (ret < 0) {
+			ERR("Failed to regenerate the kernel metadata");
+			goto end;
+		}
+	}
+
+	if (session->ust_session) {
+		ret = ust_metadata_regenerate(session->ust_session);
+		if (ret < 0) {
+			ERR("Failed to regenerate the UST metadata");
+			goto end;
+		}
+	}
+	DBG("Cmd metadata regenerate for session %s", session->name);
+	ret = LTTNG_OK;
+
+end:
+	return ret;
+}
+
 
 /*
  * Send relayd sockets from snapshot output to consumer. Ignore request if the

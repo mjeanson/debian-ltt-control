@@ -16,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <poll.h>
@@ -40,9 +39,9 @@
 #include <common/pipe.h>
 #include <common/relayd/relayd.h>
 #include <common/utils.h>
-#include <common/consumer-stream.h>
+#include <common/consumer/consumer-stream.h>
 #include <common/index/index.h>
-#include <common/consumer-timer.h>
+#include <common/consumer/consumer-timer.h>
 
 #include "kernel-consumer.h"
 
@@ -142,6 +141,8 @@ int lttng_kconsumer_snapshot_channel(uint64_t key, char *path,
 	}
 
 	cds_list_for_each_entry(stream, &channel->streams.head, send_node) {
+		/* Are we at a position _before_ the first available packet ? */
+		bool before_first_packet = true;
 
 		health_code_update();
 
@@ -228,6 +229,7 @@ int lttng_kconsumer_snapshot_channel(uint64_t key, char *path,
 		while (consumed_pos < produced_pos) {
 			ssize_t read_len;
 			unsigned long len, padded_len;
+			int lost_packet = 0;
 
 			health_code_update();
 
@@ -242,6 +244,15 @@ int lttng_kconsumer_snapshot_channel(uint64_t key, char *path,
 				}
 				DBG("Kernel consumer get subbuf failed. Skipping it.");
 				consumed_pos += stream->max_sb_size;
+
+				/*
+				 * Start accounting lost packets only when we
+				 * already have extracted packets (to match the
+				 * content of the final snapshot).
+				 */
+				if (!before_first_packet) {
+					lost_packet = 1;
+				}
 				continue;
 			}
 
@@ -285,6 +296,16 @@ int lttng_kconsumer_snapshot_channel(uint64_t key, char *path,
 				goto end_unlock;
 			}
 			consumed_pos += stream->max_sb_size;
+
+			/*
+			 * Only account lost packets located between
+			 * succesfully extracted packets (do not account before
+			 * and after since they are not visible in the
+			 * resulting snapshot).
+			 */
+			stream->chan->lost_packets += lost_packet;
+			lost_packet = 0;
+			before_first_packet = false;
 		}
 
 		if (relayd_id == (uint64_t) -1ULL) {
@@ -941,6 +962,66 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 
 		goto end_nosignal;
 	}
+	case LTTNG_CONSUMER_DISCARDED_EVENTS:
+	{
+		uint64_t ret;
+		struct lttng_consumer_channel *channel;
+		uint64_t id = msg.u.discarded_events.session_id;
+		uint64_t key = msg.u.discarded_events.channel_key;
+
+		channel = consumer_find_channel(key);
+		if (!channel) {
+			ERR("Kernel consumer discarded events channel %"
+					PRIu64 " not found", key);
+			ret_code = LTTCOMM_CONSUMERD_CHAN_NOT_FOUND;
+		}
+
+		DBG("Kernel consumer discarded events command for session id %"
+				PRIu64 ", channel key %" PRIu64, id, key);
+
+		ret = channel->discarded_events;
+
+		health_code_update();
+
+		/* Send back returned value to session daemon */
+		ret = lttcomm_send_unix_sock(sock, &ret, sizeof(ret));
+		if (ret < 0) {
+			PERROR("send discarded events");
+			goto error_fatal;
+		}
+
+		break;
+	}
+	case LTTNG_CONSUMER_LOST_PACKETS:
+	{
+		uint64_t ret;
+		struct lttng_consumer_channel *channel;
+		uint64_t id = msg.u.lost_packets.session_id;
+		uint64_t key = msg.u.lost_packets.channel_key;
+
+		channel = consumer_find_channel(key);
+		if (!channel) {
+			ERR("Kernel consumer lost packets channel %"
+					PRIu64 " not found", key);
+			ret_code = LTTCOMM_CONSUMERD_CHAN_NOT_FOUND;
+		}
+
+		DBG("Kernel consumer lost packets command for session id %"
+				PRIu64 ", channel key %" PRIu64, id, key);
+
+		ret = channel->lost_packets;
+
+		health_code_update();
+
+		/* Send back returned value to session daemon */
+		ret = lttcomm_send_unix_sock(sock, &ret, sizeof(ret));
+		if (ret < 0) {
+			PERROR("send lost packets");
+			goto error_fatal;
+		}
+
+		break;
+	}
 	default:
 		goto end_nosignal;
 	}
@@ -1012,6 +1093,20 @@ static int get_index_values(struct ctf_packet_index *index, int infd)
 	}
 	index->stream_id = htobe64(index->stream_id);
 
+	ret = kernctl_get_instance_id(infd, &index->stream_instance_id);
+	if (ret < 0) {
+		PERROR("kernctl_get_instance_id");
+		goto error;
+	}
+	index->stream_instance_id = htobe64(index->stream_instance_id);
+
+	ret = kernctl_get_sequence_number(infd, &index->packet_seq_num);
+	if (ret < 0) {
+		PERROR("kernctl_get_sequence_number");
+		goto error;
+	}
+	index->packet_seq_num = htobe64(index->packet_seq_num);
+
 error:
 	return ret;
 }
@@ -1047,6 +1142,92 @@ int lttng_kconsumer_sync_metadata(struct lttng_consumer_stream *metadata)
 		ret = ENODATA;
 		goto end;
 	}
+
+end:
+	return ret;
+}
+
+static
+int update_stream_stats(struct lttng_consumer_stream *stream)
+{
+	int ret;
+	uint64_t seq, discarded;
+
+	ret = kernctl_get_sequence_number(stream->wait_fd, &seq);
+	if (ret < 0) {
+		PERROR("kernctl_get_sequence_number");
+		goto end;
+	}
+
+	/*
+	 * Start the sequence when we extract the first packet in case we don't
+	 * start at 0 (for example if a consumer is not connected to the
+	 * session immediately after the beginning).
+	 */
+	if (stream->last_sequence_number == -1ULL) {
+		stream->last_sequence_number = seq;
+	} else if (seq > stream->last_sequence_number) {
+		stream->chan->lost_packets += seq -
+				stream->last_sequence_number - 1;
+	} else {
+		/* seq <= last_sequence_number */
+		ERR("Sequence number inconsistent : prev = %" PRIu64
+				", current = %" PRIu64,
+				stream->last_sequence_number, seq);
+		ret = -1;
+		goto end;
+	}
+	stream->last_sequence_number = seq;
+
+	ret = kernctl_get_events_discarded(stream->wait_fd, &discarded);
+	if (ret < 0) {
+		PERROR("kernctl_get_events_discarded");
+		goto end;
+	}
+	if (discarded < stream->last_discarded_events) {
+		/*
+		 * Overflow has occured. We assume only one wrap-around
+		 * has occured.
+		 */
+		stream->chan->discarded_events += (1ULL << (CAA_BITS_PER_LONG - 1)) -
+			stream->last_discarded_events + discarded;
+	} else {
+		stream->chan->discarded_events += discarded -
+			stream->last_discarded_events;
+	}
+	stream->last_discarded_events = discarded;
+	ret = 0;
+
+end:
+	return ret;
+}
+
+/*
+ * Check if the local version of the metadata stream matches with the version
+ * of the metadata stream in the kernel. If it was updated, set the reset flag
+ * on the stream.
+ */
+static
+int metadata_stream_check_version(int infd, struct lttng_consumer_stream *stream)
+{
+	int ret;
+	uint64_t cur_version;
+
+	ret = kernctl_get_metadata_version(infd, &cur_version);
+	if (ret < 0) {
+		ERR("Failed to get the metadata version");
+		goto end;
+	}
+
+	if (stream->metadata_version == cur_version) {
+		ret = 0;
+		goto end;
+	}
+
+	DBG("New metadata version detected");
+	stream->metadata_version = cur_version;
+	stream->reset_metadata_flag = 1;
+	ret = 0;
 
 end:
 	return ret;
@@ -1116,8 +1297,16 @@ ssize_t lttng_kconsumer_read_subbuffer(struct lttng_consumer_stream *stream,
 			}
 			goto end;
 		}
+		ret = update_stream_stats(stream);
+		if (ret < 0) {
+			goto end;
+		}
 	} else {
 		write_index = 0;
+		ret = metadata_stream_check_version(infd, stream);
+		if (ret < 0) {
+			goto end;
+		}
 	}
 
 	switch (stream->chan->output) {

@@ -58,6 +58,8 @@ enum lttng_consumer_command {
 	LTTNG_CONSUMER_SNAPSHOT_CHANNEL,
 	LTTNG_CONSUMER_SNAPSHOT_METADATA,
 	LTTNG_CONSUMER_STREAMS_SENT,
+	LTTNG_CONSUMER_DISCARDED_EVENTS,
+	LTTNG_CONSUMER_LOST_PACKETS,
 };
 
 /* State of each fd in consumer */
@@ -211,6 +213,10 @@ struct lttng_consumer_channel {
 	int nr_stream_fds;
 	char root_shm_path[PATH_MAX];
 	char shm_path[PATH_MAX];
+	/* Total number of discarded events for that channel. */
+	uint64_t discarded_events;
+	/* Total number of missed packets due to overwriting (overwrite). */
+	uint64_t lost_packets;
 };
 
 /*
@@ -286,6 +292,11 @@ struct lttng_consumer_stream {
 
 	/* Identify if the stream is the metadata */
 	unsigned int metadata_flag;
+	/*
+	 * Last known metadata version, reset the metadata file in case
+	 * of change.
+	 */
+	uint64_t metadata_version;
 	/* Used when the stream is set for network streaming */
 	uint64_t relayd_stream_id;
 	/*
@@ -352,6 +363,13 @@ struct lttng_consumer_stream {
 	 */
 	uint64_t ust_metadata_pushed;
 	/*
+	 * Copy of the last discarded event value to detect the overflow of
+	 * the counter.
+	 */
+	uint64_t last_discarded_events;
+	/* Copy of the sequence number of the last packet extracted. */
+	uint64_t last_sequence_number;
+	/*
 	 * FD of the index file for this stream.
 	 */
 	int index_fd;
@@ -369,6 +387,11 @@ struct lttng_consumer_stream {
 
 	/* Indicate if the stream still has some data to be read. */
 	unsigned int has_data:1;
+	/*
+	 * Inform the consumer or relay to reset the metadata
+	 * file before writing in it (regeneration).
+	 */
+	unsigned int reset_metadata_flag:1;
 };
 
 /*
@@ -631,8 +654,6 @@ int consumer_add_channel(struct lttng_consumer_channel *channel,
 void consumer_del_channel(struct lttng_consumer_channel *channel);
 
 /* lttng-relayd consumer command */
-struct consumer_relayd_sock_pair *consumer_allocate_relayd_sock_pair(
-		uint64_t net_seq_idx);
 struct consumer_relayd_sock_pair *consumer_find_relayd(uint64_t key);
 int consumer_send_relayd_stream(struct lttng_consumer_stream *stream, char *path);
 int consumer_send_relayd_streams_sent(uint64_t net_seq_idx);

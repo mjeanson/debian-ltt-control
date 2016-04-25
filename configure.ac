@@ -1,18 +1,73 @@
 AC_PREREQ([2.64])
-AC_INIT([lttng-tools],[2.7.2],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
+AC_INIT([lttng-tools],[2.8.0-rc1],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
+
+AC_CONFIG_HEADERS([include/config.h])
 AC_CONFIG_AUX_DIR([config])
+AC_CONFIG_MACRO_DIR([m4])
+
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
-AC_CONFIG_MACRO_DIR([config])
-AM_INIT_AUTOMAKE([foreign dist-bzip2 no-dist-gzip])
+
+AM_INIT_AUTOMAKE([foreign dist-bzip2 no-dist-gzip tar-pax])
 AM_MAINTAINER_MODE([enable])
+
+# Enable silent rules if available (Introduced in AM 1.11)
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
-# Compute minor/major/patchlevel version numbers
+# Checks for C compiler
+AC_USE_SYSTEM_EXTENSIONS
+AC_SYS_LARGEFILE
+AC_PROG_CC
+AC_PROG_CC_STDC
+
+# Checks for programs.
+AC_PROG_GREP
+AC_PROG_LEX
+AC_PROG_MAKE_SET
 AC_PROG_SED
-major_version=$(echo AC_PACKAGE_VERSION | sed 's/^\([[0-9]]\)*\.[[0-9]]*\.[[0-9]]*.*$/\1/')
-minor_version=$(echo AC_PACKAGE_VERSION | sed 's/^[[0-9]]*\.\([[0-9]]*\)\.[[0-9]]*.*$/\1/')
-patchlevel_version=$(echo AC_PACKAGE_VERSION | sed 's/^[[0-9]]*\.[[0-9]]*\.\([[0-9]]*\).*$/\1/')
+AC_PROG_YACC
+AC_PATH_PROG(report_fold, fold)
+LT_INIT
+
+# Check for objcopy, required by the base address statedump and dynamic linker tests
+AC_CHECK_TOOL([OBJCOPY], objcopy, no)
+AS_IF([test "x$OBJCOPY" = xno],
+	[AC_MSG_WARN([Cannont find objcopy. The base address statedump and dynamic linker tests will be disabled. Install the binutils package to remediate this.])]
+)
+AM_CONDITIONAL([HAVE_OBJCOPY], [test "x$OBJCOPY" != xno])
+
+# Checks for typedefs, structures, and compiler characteristics.
+AC_C_INLINE
+AC_TYPE_INT32_T
+AC_TYPE_INT64_T
+AC_TYPE_MODE_T
+AC_TYPE_OFF_T
+AC_TYPE_PID_T
+AC_TYPE_SIZE_T
+AC_TYPE_SSIZE_T
+AC_TYPE_UID_T
+AC_TYPE_UINT16_T
+AC_TYPE_UINT32_T
+AC_TYPE_UINT64_T
+AC_TYPE_UINT8_T
+
+AX_C___ATTRIBUTE__
+AS_IF([test "x$ax_cv___attribute__" = "xyes"],
+        [:],
+        [AC_MSG_ERROR([The compiler does not support __attribute__ extensions])])
+
+AX_PTHREAD(,[AC_MSG_ERROR([Could not configure pthreads support])])
+LIBS="$PTHREAD_LIBS $LIBS"
+CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
+CC="$PTHREAD_CC"
+
+AX_LIB_SOCKET_NSL
+
+# Compute minor/major/patchlevel version numbers
+major_version=$(echo AC_PACKAGE_VERSION | $SED 's/^\([[0-9]]\)*\.[[0-9]]*\.[[0-9]]*.*$/\1/')
+minor_version=$(echo AC_PACKAGE_VERSION | $SED 's/^[[0-9]]*\.\([[0-9]]*\)\.[[0-9]]*.*$/\1/')
+patchlevel_version=$(echo AC_PACKAGE_VERSION | $SED 's/^[[0-9]]*\.[[0-9]]*\.\([[0-9]]*\).*$/\1/')
+
 AC_SUBST([MAJOR_VERSION], [$major_version])
 AC_SUBST([MINOR_VERSION], [$minor_version])
 AC_SUBST([PATCHLEVEL_VERSION], [$patchlevel_version])
@@ -20,16 +75,13 @@ AC_DEFINE_UNQUOTED([VERSION_MAJOR], $major_version, [LTTng-Tools major version n
 AC_DEFINE_UNQUOTED([VERSION_MINOR], $minor_version, [LTTng-Tools minor version number])
 AC_DEFINE_UNQUOTED([VERSION_PATCHLEVEL], $patchlevel_version, [LTTng-Tools patchlevel version number])
 
-version_name="Herbe à Détourne"
-version_description='Brewed with unrestrained amounts of Citra hop, the Herbe à Détourne is a fantastic New World Tripel brewed by "Dieu du Ciel!". Aromas of mango, cantaloupe melon and passion fruit, combined with a controlled bitter finish, unite in making this smooth golden-orange beer stand apart.'
-version_description_c=$(echo $version_description | sed 's/"/\\"/g')
+version_name="Isseki Nicho"
+version_description='The result of a collaboration between "Dieu du Ciel!" and Nagano-based "Shiga Kogen", Isseki Nicho is a strong Imperial Dark Saison offering a rich roasted malt flavor combined with a complex fruity finish typical of Saison yeasts.'
+version_description_c=$(echo $version_description | $SED 's/"/\\"/g')
 
 AC_DEFINE_UNQUOTED([VERSION_NAME], ["$version_name"], "")
 AC_DEFINE_UNQUOTED([VERSION_DESCRIPTION], ["$version_description_c"], "")
 
-AC_CONFIG_HEADERS([include/config.h])
-
-AC_PROG_GREP
 # libtool link_all_deplibs fixup. See http://bugs.lttng.org/issues/321.
 AC_ARG_ENABLE(libtool-linkdep-fixup,
 	AS_HELP_STRING([--disable-libtool-linkdep-fixup],
@@ -39,15 +91,15 @@ AC_ARG_ENABLE(libtool-linkdep-fixup,
 
 AS_IF([test "x$libtool_fixup" = "xyes"],
 	    [
-	    libtool_m4="$srcdir/config/libtool.m4"
+	    libtool_m4="$srcdir/m4/libtool.m4"
 	    libtool_flag_pattern=".*link_all_deplibs\s*,\s*\$1\s*)"
 	    AC_MSG_CHECKING([for occurence(s) of link_all_deplibs = no in $libtool_m4])
-	    libtool_flag_pattern_count=$(grep -c "$libtool_flag_pattern\s*=\s*no" $libtool_m4)
+	    libtool_flag_pattern_count=$($GREP -c "$libtool_flag_pattern\s*=\s*no" $libtool_m4)
 	    AS_IF([test $libtool_flag_pattern_count -ne 0],
 	    [
 		  AC_MSG_RESULT([$libtool_flag_pattern_count])
 		  AC_MSG_WARN([the detected libtool will not link all dependencies, forcing link_all_deplibs = unknown])
-		  sed -i "s/\($libtool_flag_pattern\)\s*=\s*no/\1=unknown/g" $libtool_m4
+		  $SED -i "s/\($libtool_flag_pattern\)\s*=\s*no/\1=unknown/g" $libtool_m4
 		  ],
 		  [
 		  AC_MSG_RESULT([none])
@@ -66,11 +118,11 @@ AC_CHECK_HEADERS([ \
 
 # Basic functions check
 AC_CHECK_FUNCS([ \
-	atexit bzero clock_gettime dup2 fdatasync ftruncate \
+	atexit bzero clock_gettime dup2 fdatasync fls ftruncate \
 	gethostbyname gethostname getpagesize localtime_r memchr memset \
 	mkdir munmap putenv realpath rmdir socket strchr strcspn strdup \
-	strncasecmp strndup strpbrk strrchr strstr strtol strtoul \
-	strtoull \
+	strncasecmp strndup strnlen strpbrk strrchr strstr strtol strtoul \
+	strtoull dirfd gethostbyname2 getipnodebyname epoll_create1 \
 ])
 
 # Babeltrace viewer check
@@ -292,9 +344,9 @@ AC_ARG_WITH(lttng-ust-prefix,
 		  ])
 
 # Check liblttng-ust-ctl library
-AC_ARG_ENABLE(lttng-ust,
-	AS_HELP_STRING([--disable-lttng-ust],[build without LTTng-UST (Userspace Tracing) support]),
-	lttng_ust_support=$enableval, lttng_ust_support=yes)
+AC_ARG_WITH(lttng-ust,
+	AS_HELP_STRING([--without-lttng-ust],[build without LTTng-UST (Userspace Tracing) support]),
+	lttng_ust_support=$withval, lttng_ust_support=yes)
 
 AS_IF([test "x$lttng_ust_support" = "xyes"], [
 	AC_CHECK_LIB([lttng-ust-ctl], [ustctl_recv_channel_from_consumer],
@@ -302,7 +354,7 @@ AS_IF([test "x$lttng_ust_support" = "xyes"], [
 			AC_DEFINE([HAVE_LIBLTTNG_UST_CTL], [1], [has LTTng-UST control support])
 			lttng_ust_ctl_found=yes
 		],
-		[AC_MSG_ERROR([Cannot find LTTng-UST >= 2.2.x. Use --with-lttng-ust-prefix=PREFIX to specify its location, or specify --disable-lttng-ust to build lttng-tools without LTTng-UST support.])],
+		[AC_MSG_ERROR([Cannot find LTTng-UST >= 2.2.x. Use --with-lttng-ust-prefix=PREFIX to specify its location, or specify --without-lttng-ust to build lttng-tools without LTTng-UST support.])],
 		[-lurcu-common -lurcu-bp -lurcu-cds -lrt -ldl]
 	)
 ])
@@ -410,24 +462,24 @@ if test "x$test_java_agent_jul" = "xyes" || test "x$test_java_agent_log4j" = "xy
 	AX_CHECK_CLASSPATH
 
 	# Check for Java UST agent common class first
-	AX_CHECK_CLASS(org.lttng.ust.agent.LTTngAgent)
-	if test "x$ac_cv_class_org_lttng_ust_agent_LTTngAgent" = "xno"; then
-		AC_MSG_ERROR([The UST Java agent common class was not found. Please specify the location of the jar via the Java CLASSPATH e.g: export CLASSPATH="/path/to/liblttng-ust-agent.jar"])
+	AX_CHECK_CLASS(org.lttng.ust.agent.AbstractLttngAgent)
+	if test "x$ac_cv_class_org_lttng_ust_agent_AbstractLttngAgent" = "xno"; then
+		AC_MSG_ERROR([The UST Java agent common class was not found. Please specify the location of the jar via the Java CLASSPATH e.g: export CLASSPATH="/path/to/lttng-ust-agent-common.jar"])
 	fi
 
 	if test "x$test_java_agent_jul" = "xyes"; then
 		# Check for JUL agent class
-		AX_CHECK_CLASS(org.lttng.ust.agent.jul.LTTngJUL)
-		if test "x$ac_cv_class_org_lttng_ust_agent_jul_LTTngJUL" = "xno"; then
-			AC_MSG_ERROR([The UST Java agent JUL class was not found. Please specify the location of the jar via the Java CLASSPATH e.g: export CLASSPATH="/path/to/liblttng-ust-jul.jar"])
+		AX_CHECK_CLASS(org.lttng.ust.agent.jul.LttngLogHandler)
+		if test "x$ac_cv_class_org_lttng_ust_agent_jul_LttngLogHandler" = "xno"; then
+			AC_MSG_ERROR([The UST Java agent JUL class was not found. Please specify the location of the jar via the Java CLASSPATH e.g: export CLASSPATH="/path/to/lttng-ust-agent-jul.jar"])
 		fi
 	fi
 
 	if test "x$test_java_agent_log4j" = "xyes"; then
 		# Check for Log4j agent class
-		AX_CHECK_CLASS(org.lttng.ust.agent.log4j.LTTngLog4j)
-		if test "x$ac_cv_class_org_lttng_ust_agent_log4j_LTTngLog4j" = "xno"; then
-			AC_MSG_ERROR([The UST Java agent Log4j class was not found. Please specify the location of the jar via the Java CLASSPATH e.g: export CLASSPATH="/path/to/liblttng-ust-agent.jar"])
+		AX_CHECK_CLASS(org.lttng.ust.agent.log4j.LttngLogAppender)
+		if test "x$ac_cv_class_org_lttng_ust_agent_log4j_LttngLogAppender" = "xno"; then
+			AC_MSG_ERROR([The UST Java agent Log4j class was not found. Please specify the location of the jar via the Java CLASSPATH e.g: export CLASSPATH="/path/to/lttng-ust-agent-log4j.jar"])
 		fi
 
 		# Check for Log4j class
@@ -437,6 +489,35 @@ if test "x$test_java_agent_jul" = "xyes" || test "x$test_java_agent_log4j" = "xy
 		fi
 	fi
 fi
+
+# set $IN_GIT_REPO if we're in the Git repository; the `bootstrap` file
+# is not distributed in tarballs
+AS_IF([test -f "$srcdir/bootstrap"], [in_git_repo=yes], [in_git_repo=no])
+AM_CONDITIONAL([IN_GIT_REPO], [test "x$in_git_repo" = "xyes"])
+
+# enable building man pages
+AC_ARG_ENABLE(
+	build-man-pages,
+	AS_HELP_STRING(
+		[--enable-build-man-pages],
+		[Build man pages (already built in a distributed tarball)]
+	),
+	[enable_build_man_pages=yes],
+	[enable_build_man_pages=no]
+)
+
+# export man page build condition
+AM_CONDITIONAL([BUILD_MAN_PAGES], [test "x$enable_build_man_pages" != "xno"])
+
+# check for asciidoc and xmlto if we enabled building the man pages
+AS_IF([test "x$enable_build_man_pages" = "xyes"], [
+	AC_PATH_PROG([ASCIIDOC], [asciidoc], [no])
+	AC_PATH_PROG([XMLTO], [xmlto], [no])
+
+	AS_IF([test "x$ASCIIDOC" = "xno" || test "x$XMLTO" = "xno"], [
+		AC_MSG_ERROR([Both asciidoc and xmlto are needed to build the LTTng man pages.])
+	])
+])
 
 # Python agent test
 UST_PYTHON_AGENT="lttngust"
@@ -531,37 +612,165 @@ AS_IF([test "x$enable_test_python3_agent" = "xyes" -o "x$test_python3_agent_auto
 
 	])
 ])
-
 AC_SUBST([RUN_PYTHON_AGENT_TEST])
 AC_SUBST([PYTHON2_AGENT])
 AC_SUBST([PYTHON3_AGENT])
 
-AC_SYS_LARGEFILE
+# Arguments for binaries build exclusion
+AC_ARG_ENABLE([bin-lttng], AS_HELP_STRING([--disable-bin-lttng],[Disable the build of lttng binaries]))
+AC_ARG_ENABLE([bin-lttng-consumerd], AS_HELP_STRING([--disable-bin-lttng-consumerd],
+	      [Disable the build of lttng-consumerd binaries]))
+AC_ARG_ENABLE([bin-lttng-crash], AS_HELP_STRING([--disable-bin-lttng-crash],[Disable the build of lttng-crash binaries]))
+AC_ARG_ENABLE([bin-lttng-relayd], AS_HELP_STRING([--disable-bin-lttng-relayd],
+	      [Disable the build of lttng-relayd binaries]))
+AC_ARG_ENABLE([bin-lttng-sessiond], AS_HELP_STRING([--disable-bin-lttng-sessiond],
+	      [Disable the build of lttng-sessiond binaries]))
+AC_ARG_ENABLE([extras], AS_HELP_STRING([--disable-extras],
+	      [Disable the build of the extra components]))
 
-# C compiler tests
-AC_PROG_CC
-AC_C_INLINE
 
-# Type availability checking
-AC_TYPE_INT32_T
-AC_TYPE_INT64_T
-AC_TYPE_MODE_T
-AC_TYPE_OFF_T
-AC_TYPE_PID_T
-AC_TYPE_SIZE_T
-AC_TYPE_SSIZE_T
-AC_TYPE_UID_T
-AC_TYPE_UINT16_T
-AC_TYPE_UINT32_T
-AC_TYPE_UINT64_T
-AC_TYPE_UINT8_T
+# Always build libconfig since it a dependency of libcommon
+build_lib_config=yes
 
-LT_INIT
-AC_PROG_YACC
-AC_PROG_LEX
+build_lib_compat=no
+build_lib_consumer=no
+build_lib_hashtable=no
+build_lib_health=no
+build_lib_index=no
+build_lib_kernel_consumer=no
+build_lib_kernel_ctl=no
+build_lib_lttng_ctl=no
+build_lib_relayd=no
+build_lib_sessiond_comm=no
+build_lib_testpoint=no
+build_lib_ust_consumer=no
+
+# There is an overlap for enabled dependencies, but this makes everything
+# simpler. libcommon and libconfig are always compiled so they are not repeated
+# here.
+
+# Enable binary dependencies.
+AS_IF([test x$enable_bin_lttng != xno],
+      [
+       build_lib_lttng_ctl=yes
+      ]
+)
+
+AS_IF([test x$enable_bin_lttng_consumerd != xno],
+      [
+       build_lib_consumer=yes
+       build_lib_sessiond_comm=yes
+       build_lib_index=yes
+       build_lib_health=yes
+       build_lib_testpoint=yes
+      ]
+)
+
+AS_IF([test x$enable_bin_lttng_crash != xno],
+      # Do nothing since libconfig and libcommon are built by default.
+      []
+)
+
+AS_IF([test x$enable_bin_lttng_relayd != xno],
+      [
+       build_lib_lttng_ctl=yes
+       build_lib_sessiond_comm=yes
+       build_lib_hashtable=yes
+       build_lib_compat=yes
+       build_lib_index=yes
+       build_lib_health=yes
+       build_lib_testpoint=yes
+      ]
+)
+AS_IF([test x$enable_bin_lttng_sessiond != xno],
+      [
+       build_lib_lttng_ctl=yes
+       build_lib_sessiond_comm=yes
+       build_lib_kernel_ctl=yes
+       build_lib_hashtable=yes
+       build_lib_compat=yes
+       build_lib_relayd=yes
+       build_lib_testpoint=yes
+       build_lib_health=yes
+       build_lib_health=yes
+      ]
+)
+
+# Libraries dependencies enabling
+AS_IF([test x$build_lib_lttng_ctl = xyes],
+      [
+       build_lib_sessiond_comm=yes
+       build_lib_hashtable=yes
+      ]
+)
+
+AS_IF([test x$build_lib_consumer = xyes],
+      [
+       build_lib_sessiond_comm=yes
+       build_lib_kernel_consumer=yes
+       build_lib_hashtable=yes
+       build_lib_compat=yes
+       build_lib_relayd=yes
+       AS_IF([test x$lttng_ust_ctl_found = xyes],[build_lib_ust_consumer=yes])
+      ]
+)
+
+AS_IF([test x$build_lib_kernel_consumer = xyes],
+      [
+       build_lib_kernel_ctl=yes
+       build_lib_relayd=yes
+      ]
+)
+
+AS_IF([test x$build_lib_relayd = xyes],
+      [
+       build_lib_sessiond_comm=yes
+      ]
+)
+
+
+# Export binaries build conditions.
+AM_CONDITIONAL([BUILD_BIN_LTTNG], [test x$enable_bin_lttng != xno])
+AM_CONDITIONAL([BUILD_BIN_LTTNG_CONSUMERD], [test x$enable_bin_lttng_consumerd != xno])
+AM_CONDITIONAL([BUILD_BIN_LTTNG_CRASH], [test x$enable_bin_lttng_crash != xno])
+AM_CONDITIONAL([BUILD_BIN_LTTNG_RELAYD], [test x$enable_bin_lttng_relayd != xno])
+AM_CONDITIONAL([BUILD_BIN_LTTNG_SESSIOND], [test x$enable_bin_lttng_sessiond != xno])
+
+# Export the tests and extras build conditions.
+AS_IF([\
+test "x$enable_bin_lttng" != "xno" && \
+test "x$enable_bin_lttng_consumerd" != "xno" && \
+test "x$enable_bin_lttng_crash" != "xno" && \
+test "x$enable_bin_lttng_relayd" != "xno" && \
+test "x$enable_bin_lttng_sessiond" != "xno"],
+[build_tests=yes],
+[build_tests=no]
+)
+
+AM_CONDITIONAL([BUILD_TESTS], [test x$build_tests = xyes])
+AM_CONDITIONAL([BUILD_EXTRAS], [test x$enable_extras != xno])
+
+# Export libraries build conditions.
+AM_CONDITIONAL([BUILD_LIB_COMPAT], [test x$build_lib_compat = xyes])
+AM_CONDITIONAL([BUILD_LIB_CONFIG], [test x$build_lib_config = xyes])
+AM_CONDITIONAL([BUILD_LIB_CONSUMER], [test x$build_lib_consumer = xyes])
+AM_CONDITIONAL([BUILD_LIB_HASHTABLE], [test x$build_lib_hashtable = xyes])
+AM_CONDITIONAL([BUILD_LIB_HEALTH], [test x$build_lib_health = xyes])
+AM_CONDITIONAL([BUILD_LIB_INDEX], [test x$build_lib_index = xyes])
+AM_CONDITIONAL([BUILD_LIB_KERNEL_CONSUMER], [test x$build_lib_kernel_consumer = xyes])
+AM_CONDITIONAL([BUILD_LIB_KERNEL_CTL], [test x$build_lib_kernel_ctl = xyes])
+AM_CONDITIONAL([BUILD_LIB_LTTNG_CTL], [test x$build_lib_lttng_ctl = xyes])
+AM_CONDITIONAL([BUILD_LIB_RELAYD], [test x$build_lib_relayd = xyes])
+AM_CONDITIONAL([BUILD_LIB_SESSIOND_COMM], [test x$build_lib_sessiond_comm = xyes])
+AM_CONDITIONAL([BUILD_LIB_TESTPOINT], [test x$build_lib_testpoint = xyes])
+AM_CONDITIONAL([BUILD_LIB_UST_CONSUMER], [test x$build_lib_ust_consumer = xyes])
+
+# check for pgrep
+AC_PATH_PROG([PGREP], [pgrep], [no])
+AM_CONDITIONAL([HAS_PGREP], [test "x$PGREP" != "xno"])
 
 if test ! -f "$srcdir/src/lib/lttng-ctl/filter/filter-parser.h"; then
-	if test x"$YACC" != "xbison -y"; then
+	if test x"$(basename "$YACC")" != "xbison -y"; then
 		AC_MSG_ERROR([[bison not found and is required when building from git.
 		Please install bison]])
 	fi
@@ -608,6 +817,7 @@ AC_CONFIG_FILES([
 	src/common/Makefile
 	src/common/kernel-ctl/Makefile
 	src/common/kernel-consumer/Makefile
+	src/common/consumer/Makefile
 	src/common/ust-consumer/Makefile
 	src/common/hashtable/Makefile
 	src/common/sessiond-comm/Makefile
@@ -628,6 +838,7 @@ AC_CONFIG_FILES([
 	src/bin/lttng/Makefile
 	src/bin/lttng-crash/Makefile
 	tests/Makefile
+	tests/destructive/Makefile
 	tests/regression/Makefile
 	tests/regression/kernel/Makefile
 	tests/regression/tools/Makefile
@@ -642,6 +853,7 @@ AC_CONFIG_FILES([
 	tests/regression/tools/mi/Makefile
 	tests/regression/tools/wildcard/Makefile
 	tests/regression/tools/crash/Makefile
+	tests/regression/tools/metadata-regen/Makefile
 	tests/regression/ust/Makefile
 	tests/regression/ust/nprocesses/Makefile
 	tests/regression/ust/high-throughput/Makefile
@@ -657,11 +869,14 @@ AC_CONFIG_FILES([
 	tests/regression/ust/exit-fast/Makefile
 	tests/regression/ust/fork/Makefile
 	tests/regression/ust/libc-wrapper/Makefile
+	tests/regression/ust/baddr-statedump/Makefile
+	tests/regression/ust/ust-dl/Makefile
 	tests/regression/ust/java-jul/Makefile
 	tests/regression/ust/java-log4j/Makefile
 	tests/regression/ust/python-logging/Makefile
 	tests/regression/ust/getcpu-override/Makefile
 	tests/regression/ust/clock-override/Makefile
+	tests/regression/ust/type-declarations/Makefile
 	tests/stress/Makefile
 	tests/unit/Makefile
 	tests/unit/ini_config/Makefile
@@ -673,22 +888,33 @@ AC_CONFIG_FILES([
 	tests/utils/testapp/gen-ust-tracef/Makefile
 ])
 
-# Inject variable into python test script
+# Inject variable into python test script.
 AC_CONFIG_FILES([tests/regression/ust/python-logging/test_python_logging],[chmod +x tests/regression/ust/python-logging/test_python_logging])
 
 AC_OUTPUT
 
 #
-# Mini-report on what will be built
+# Mini-report on what will be built.
 #
-AS_ECHO()
 
-AS_ECHO("Version name: $version_name")
-AS_ECHO("$version_description")
+PPRINT_INIT
+PPRINT_SET_INDENT(1)
+PPRINT_SET_TS(38)
 
-AS_ECHO()
+AS_ECHO
+AS_ECHO("${PPRINT_COLOR_BLDBLU}LTTng-tools $PACKAGE_VERSION \"$version_name\"$PPRINT_COLOR_RST")
+AS_ECHO
 
-# Target architecture we're building for
+AS_IF([test -n "$report_fold"], [
+	AS_ECHO("`AS_ECHO("$version_description") | $report_fold -s`")
+], [
+	AS_ECHO("$version_description")
+])
+
+AS_ECHO
+PPRINT_SUBTITLE([Features])
+
+# Target architecture we're building for.
 target_arch=$host_cpu
 [
 for f in $CFLAGS; do
@@ -699,120 +925,134 @@ for f in $CFLAGS; do
         fi
 done
 ]
-AS_ECHO_N("Target architecture: ")
-AS_ECHO($target_arch)
+PPRINT_PROP_STRING([Target architecture], $target_arch)
 
 # kmod enabled/disabled
-AS_ECHO_N("libkmod support: ")
-AS_IF([test "x$kmod_found" = "xyes"],[
-	AS_ECHO("Enabled")
-],[
-	AS_ECHO("Disabled")
-])
+test "x$kmod_found" = "xyes" && value=1 || value=0
+PPRINT_PROP_BOOL([libkmod support], $value)
 
 # LTTng-UST enabled/disabled
-AS_ECHO_N("Lttng-UST support: ")
-AS_IF([test "x$lttng_ust_support" = "xyes"],[
-	AS_ECHO("Enabled")
-],[
-	AS_ECHO("Disabled")
+test "x$lttng_ust_support" = "xyes" && value=1 || value=0
+PPRINT_PROP_BOOL([LTTng-UST support], $value)
+
+AS_ECHO
+PPRINT_SUBTITLE([Binaries])
+
+# List binaries to be built
+test x$enable_bin_lttng != xno && value=1 || value=0
+PPRINT_PROP_BOOL([lttng], $value)
+
+test x$enable_bin_lttng_consumerd != xno && value=1 || value=0
+PPRINT_PROP_BOOL([lttng-consumerd], $value)
+
+test x$enable_bin_lttng_crash != xno && value=1 || value=0
+PPRINT_PROP_BOOL([lttng-crash], $value)
+
+test x$enable_bin_lttng_relayd != xno && value=1 || value=0
+PPRINT_PROP_BOOL([lttng-relayd], $value)
+
+test x$enable_bin_lttng_sessiond != xno && value=1 || value=0
+PPRINT_PROP_BOOL([lttng-sessiond], $value)
+
+# Extras
+test x$enable_extras != xno && value=1 || value=0
+AS_ECHO
+PPRINT_SET_INDENT(0)
+PPRINT_PROP_BOOL([Extras], $value, $PPRINT_COLOR_SUBTITLE)
+PPRINT_SET_INDENT(1)
+
+AS_ECHO
+PPRINT_SUBTITLE([Tests])
+
+# Print clear message that tests won't be built
+AS_IF([test "x$build_tests" = "xno"],[
+	PPRINT_WARN([Tests won't be built since some binaries were disabled])
 ])
 
 # LTTng UST Java agent JUL tests enabled/disabled
-AS_ECHO_N("LTTng-UST Java agent JUL tests: ")
-AS_IF([test "x$test_java_agent_jul" = "xyes"],[
-	AS_ECHO("Enabled")
-],[
-	AS_ECHO("Disabled")
-])
+test "x$test_java_agent_jul" = "xyes" && value=1 || value=0
+PPRINT_PROP_BOOL([LTTng-UST Java agent JUL tests], $value)
 
 # LTTng UST Java agent Log4j tests enabled/disabled
-AS_ECHO_N("LTTng-UST Java agent Log4j tests: ")
-AS_IF([test "x$test_java_agent_log4j" = "xyes"],[
-	AS_ECHO("Enabled")
-],[
-	AS_ECHO("Disabled")
-])
+test "x$test_java_agent_log4j" = "xyes" && value=1 || value=0
+PPRINT_PROP_BOOL([LTTng-UST Java agent Log4j tests], $value)
 
-AS_ECHO_N("LTTng-UST Python2 agent tests: ")
-AS_IF([test ! -z "$PYTHON2_AGENT"],[
-	AS_ECHO("Enabled")
-],[
-	AS_ECHO("Disabled")
-])
+test ! -z "$PYTHON2_AGENT" && value=1 || value=0
+PPRINT_PROP_BOOL([LTTng-UST Python2 agent tests], $value)
 
-AS_ECHO_N("LTTng-UST Python3 agent tests: ")
-AS_IF([test ! -z "$PYTHON3_AGENT"],[
-	AS_ECHO("Enabled")
-],[
-	AS_ECHO("Disabled")
-])
+test ! -z "$PYTHON3_AGENT" && value=1 || value=0
+PPRINT_PROP_BOOL([LTTng-UST Python3 agent tests], $value)
 
 #Python binding enabled/disabled
-AS_ECHO_N("Python binding: ")
-AS_IF([test "x${enable_python_binding:-yes}" = xyes], [
-	AS_ECHO("Enabled")
-],[
-	AS_ECHO("Disabled")
+test "x${enable_python_binding:-yes}" = xyes && value=1 || value=0
+AS_ECHO
+PPRINT_SET_INDENT(0)
+PPRINT_PROP_BOOL([Python binding], $value, $PPRINT_COLOR_SUBTITLE)
+PPRINT_SET_INDENT(1)
+
+AS_ECHO
+PPRINT_SUBTITLE([Man pages])
+
+# man pages build enabled/disabled
+test "x$enable_build_man_pages" = "xyes" && value=1 || value=0
+AS_IF([test "x$enable_build_man_pages" = "xyes"], [
+	PPRINT_PROP_BOOL([Build man pages], 1)
+], [
+	AS_IF([test "x$in_git_repo" = "xyes"], [
+		PPRINT_PROP_BOOL([Build man pages], 0)
+	], [
+		PPRINT_PROP_STRING([Build man pages], [${PPRINT_COLOR_BLDGRN}Already built])
+	])
 ])
 
-# Do we build only the consumerd, or everything
-AS_IF([test "x$consumerd_only" = "xyes"],[
-	AS_ECHO("Only the consumerd daemon will be built.")
-],[
-	AS_ECHO("All binaries will be built.")
-])
+# man pages install enabled/disabled (always true in tarball)
+test "x$enable_build_man_pages" = "xno" && test "x$in_git_repo" = "xyes" && value=0 || value=1
+PPRINT_PROP_BOOL([Install man pages], $value)
+
+report_bindir="`eval eval echo $bindir`"
+report_libdir="`eval eval echo $libdir`"
 
 # Print the bindir and libdir this `make install' will install into.
-AS_ECHO()
-AS_ECHO_N("Binaries will be installed in:  ")
-AS_ECHO("`eval eval echo $bindir`")
-AS_ECHO_N("Libraries will be installed in: ")
-AS_ECHO("`eval eval echo $libdir`")
+AS_ECHO
+PPRINT_SUBTITLE([Install directories])
+PPRINT_PROP_STRING([Binaries], [$report_bindir])
+PPRINT_PROP_STRING([Libraries], [$report_libdir])
+
+AS_ECHO
+PPRINT_SUBTITLE([Search directories])
 
 # If we build the sessiond, print the paths it will use
-AS_IF([test "x$consumerd_only" = "xno"],[
-	AS_ECHO()
-	AS_ECHO_N("The lttng command will look for the lttng-sessiond executable at: ")
-	AS_IF([test "$SESSIOND_BIN" = ""],[
-		AS_ECHO_N("`eval eval echo $bindir`")
-		AS_ECHO("/lttng-sessiond")
-	],[
-		AS_ECHO("$SESSIOND_BIN")
-	])
-
-	AS_ECHO()
-	AS_ECHO("The sessiond daemon will look in the following directories: ")
-	AS_ECHO_N("32-bit consumerd executable at: ")
-	AS_IF([test "$CONSUMERD32_BIN" = ""],[
-		AS_ECHO_N("`eval eval echo $lttnglibexecdir`")
-		AS_ECHO("/lttng-consumerd")
-	],[
-		AS_ECHO("$CONSUMERD32_BIN")
-	])
-
-	AS_ECHO_N("32-bit consumer libraries in:   ")
-	AS_IF([test "$CONSUMERD32_LIBDIR" = ""],[
-		AS_ECHO("`eval eval echo $libdir`")
-	],[
-		AS_ECHO("$CONSUMERD32_LIBDIR")
-	])
-
-	AS_ECHO_N("64-bit consumerd executable at: ")
-	AS_IF([test "$CONSUMERD64_BIN" = ""],[
-		AS_ECHO_N("`eval eval echo $lttnglibexecdir`")
-		AS_ECHO("/lttng-consumerd")
-	],[
-		AS_ECHO("$CONSUMERD64_BIN")
-	])
-
-	AS_ECHO_N("64-bit consumer libraries in:   ")
-	AS_IF([test "$CONSUMERD64_LIBDIR" = ""],[
-		AS_ECHO("`eval eval echo $libdir`")
-	],[
-		AS_ECHO("$CONSUMERD64_LIBDIR")
-	])
+AS_IF([test "$SESSIOND_BIN" = ""],[
+	path="$report_bindir/lttng-sessiond"
+],[
+	path="$SESSIOND_BIN"
 ])
+PPRINT_PROP_STRING([lttng-sessiond executable], [$path])
 
-AS_ECHO()
+AS_IF([test "$CONSUMERD32_BIN" = ""],[
+	path="`eval eval echo $lttnglibexecdir`/lttng-consumerd"
+],[
+	path="$CONSUMERD32_BIN"
+])
+PPRINT_PROP_STRING([32-bit lttng-consumerd executable], [$path])
 
+AS_IF([test "$CONSUMERD32_LIBDIR" = ""],[
+	path="`eval eval echo $libdir`"
+],[
+	path="$CONSUMERD32_LIBDIR"
+])
+PPRINT_PROP_STRING([32-bit consumer libraries], [$path])
+
+AS_IF([test "$CONSUMERD64_BIN" = ""],[
+	path="`eval eval echo $lttnglibexecdir`/lttng-consumerd"
+],[
+	path="$CONSUMERD64_BIN"
+])
+PPRINT_PROP_STRING([64-bit lttng-consumerd executable], [$path])
+
+AS_IF([test "$CONSUMERD64_LIBDIR" = ""],[
+	path="`eval eval echo $libdir`"
+],[
+	path="$CONSUMERD64_LIBDIR"
+])
+PPRINT_PROP_STRING([64-bit consumer libraries], [$path])

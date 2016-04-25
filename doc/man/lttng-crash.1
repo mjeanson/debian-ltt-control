@@ -1,82 +1,135 @@
-.TH "LTTNG-CRASH" "1" "March 26th, 2015" "" ""
-
+'\" t
+.\"     Title: lttng-crash
+.\"    Author: [see the "AUTHORS" section]
+.\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
+.\"      Date: 03/18/2016
+.\"    Manual: LTTng Manual
+.\"    Source: LTTng 2.8.0
+.\"  Language: English
+.\"
+.TH "LTTNG\-CRASH" "1" "03/18/2016" "LTTng 2\&.8\&.0" "LTTng Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
 .SH "NAME"
-lttng-crash \- LTTng Crash Trace Viewer
-
+lttng-crash \- Recover and view LTTng 2 trace buffers in the event of a crash
 .SH "SYNOPSIS"
-
-.PP
-lttng-crash [OPTIONS] FILE
+.sp
+.nf
+\fBlttng\-crash\fR [\fB--extract\fR=\fIPATH\fR | \fB--viewer\fR=\fIVIEWER\fR] [\fB-v\fR | \fB-vv\fR | \fB-vvv\fR]
+.fi
 .SH "DESCRIPTION"
-
-.PP
-The LTTng project aims at providing highly efficient tracing tools for Linux.
-Its tracers help track down performance issues and debug problems involving
-multiple concurrent processes and threads. Tracing across multiple systems
-is also possible.
-
-The \fBlttng-crash\fP command line tool, part of the lttng-tools package, is used to
-view or recover trace buffers in the event of a crash.
+.sp
+The \fILinux Trace Toolkit: next generation\fR is an open source software package used for correlated tracing of the Linux kernel, user applications, and user libraries\&.
+.sp
+LTTng consists of Linux kernel modules (for Linux kernel tracing) and dynamically loaded libraries (for user application and library tracing)\&.
+.sp
+The \fI\fBlttng-crash\fR\fR command\-line tool is used to recover and view LTTng trace buffers in the event of a system crash\&.
 .SH "OPTIONS"
-
 .PP
-This program follows the usual GNU command line syntax with long options starting with
-two dashes. Below is a summary of the available options.
+\fB-x\fR, \fB--extract\fR=\fIPATH\fR
+.RS 4
+Extract recovered traces to path
+\fIPATH\fR; do not execute the trace viewer\&.
+.RE
 .PP
-
-.TP
-.BR "\-h, \-\-help"
-Show summary of possible options and commands.
-.TP
-.BR "\-V, \-\-version"
-Show version.
-.TP
-.BR "\-v, \-\-verbose"
-Increase verbosity.
-Three levels of verbosity are available which are triggered by putting additional v to
-the option (\-vv or \-vvv)
-.TP
-.BR "\-e, \-\-viewer NAME"
-Specify viewer and/or options to use. This will completely override the default
-viewers therefore make sure to specify the full command. The trace directory paths are
-appended at the end to the arguments. (defaults: babeltrace)
-.TP
-.BR "\-x, \-\-extract PATH"
-Extract trace(s) to the specified path. Don't display the trace.
-
-.SH "SEE ALSO"
-.BR babeltrace(1),
-.BR lttng(1),
-.BR lttng-ust(3),
-.BR lttng-sessiond(8),
-.BR lttng-relayd(8),
-
+\fB-v\fR, \fB--verbose\fR
+.RS 4
+Increase verbosity\&.
+.sp
+Three levels of verbosity are available, which are triggered by appending additional
+\fBv\fR
+letters to the option (that is,
+\fB-vv\fR
+and
+\fB-vvv\fR)\&.
+.RE
+.PP
+\fB-e\fR, \fB--viewer\fR=\fIVIEWER\fR
+.RS 4
+Use trace viewer
+\fIVIEWER\fR
+to view the trace buffers\&.
+\fIVIEWER\fR
+is the absolute path to the viewer command to use, and it can contain command arguments as well\&. The trace directory paths are passed to the
+\fIVIEWER\fR
+command as its last arguments\&.
+.sp
+Default:
+\fBbabeltrace\fR\&.
+.RE
+.SS "Program information"
+.PP
+\fB-h\fR, \fB--help\fR
+.RS 4
+Show help\&.
+.RE
+.PP
+\fB-V\fR, \fB--version\fR
+.RS 4
+Show version\&.
+.RE
+.SH "EXIT STATUS"
+.PP
+\fB0\fR
+.RS 4
+Success
+.RE
+.PP
+\fB1\fR
+.RS 4
+Error
+.RE
+.PP
+\fB3\fR
+.RS 4
+Fatal error
+.RE
 .SH "BUGS"
-
-.PP
-If you encounter any issues or usability problem, please report it on our
-mailing list <lttng-dev@lists.lttng.org> to help improve this project or
-at https://bugs.lttng.org which is a bug tracker.
-.PP
-
-.SH "CREDITS"
-
-.PP
-lttng is distributed under the GNU General Public License version 2. See the file
-COPYING for details.
-.PP
-A Web site is available at http://lttng.org for more information on the LTTng
-project.
-.PP
-You can also find our git tree at http://git.lttng.org.
-.PP
-Mailing lists for support and development: <lttng-dev@lists.lttng.org>.
-.PP
-You can find us on IRC server irc.oftc.net (OFTC) in #lttng.
-.PP
+.sp
+If you encounter any issue or usability problem, please report it on the LTTng bug tracker: \fBhttps://bugs\&.lttng\&.org/projects/lttng\-tools\fR\&.
+.SH "RESOURCES"
+.sp
+LTTng project website: \fBhttp://lttng\&.org\fR\&.
+.sp
+LTTng documentation: \fBhttp://lttng\&.org/docs\fR\&.
+.sp
+Git repositories: \fBhttp://git\&.lttng\&.org\fR\&.
+.sp
+Mailing list for support and development: \fBlttng-dev@lists.lttng.org\fR\&.
+.sp
+IRC channel: \fB#lttng\fR on \fBirc.oftc.net\fR (OFTC)\&.
+.SH "COPYRIGHTS"
+.sp
+This program is part of the LTTng\-tools project\&.
+.sp
+LTTng\-tools is distributed under the GNU General Public License version 2\&. See the \fBLICENSE\fR file for details\&.
+.SH "THANKS"
+.sp
+Special thanks to Michel Dagenais and the DORSAL laboratory at \('Ecole Polytechnique de Montr\('eal for the LTTng journey\&.
+.sp
+Also thanks to the Ericsson teams working on tracing which helped us greatly with detailed bug reports and unusual test cases\&.
 .SH "AUTHORS"
-
-.PP
-lttng-crash was originally written by Mathieu Desnoyers. It is currently
-maintained by Jérémie Galarneau <jeremie.galarneau@efficios.com>.
-.PP
+.sp
+LTTng\-tools was originally written by Mathieu Desnoyers, Julien Desfossez, and David Goulet\&. More people have since contributed to it\&.
+.sp
+LTTng\-tools is currently maintained by J\('er\('emie Galarneau (\fBjeremie\&.galarneau@efficios\&.com\fR)\&.
+.SH "SEE ALSO"
+.sp
+\fBlttng\fR(1), \fBlttng-sessiond\fR(8), \fBlttng-relayd\fR(8), \fBlttng-ust\fR(3), \fBbabeltrace\fR(1)

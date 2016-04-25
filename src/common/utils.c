@@ -17,14 +17,12 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <ctype.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -32,11 +30,14 @@
 #include <grp.h>
 #include <pwd.h>
 #include <sys/file.h>
-#include <dirent.h>
+#include <unistd.h>
 
 #include <common/common.h>
 #include <common/runas.h>
 #include <common/compat/getenv.h>
+#include <common/compat/string.h>
+#include <common/compat/dirent.h>
+#include <lttng/constant.h>
 
 #include "utils.h"
 #include "defaults.h"
@@ -82,6 +83,8 @@ char *utils_partial_realpath(const char *path, char *resolved_path, size_t size)
 
 	/* Resolve the canonical path of the first part of the path */
 	while (try_path != NULL && next != end) {
+		char *try_path_buf = NULL;
+
 		/*
 		 * If there is not any '/' left, we want to try with
 		 * the full path
@@ -92,15 +95,22 @@ char *utils_partial_realpath(const char *path, char *resolved_path, size_t size)
 		}
 
 		/* Cut the part we will be trying to resolve */
-		cut_path = strndup(path, next - path);
+		cut_path = lttng_strndup(path, next - path);
 		if (cut_path == NULL) {
-			PERROR("strndup");
+			PERROR("lttng_strndup");
+			goto error;
+		}
+
+		try_path_buf = zmalloc(LTTNG_PATH_MAX);
+		if (!try_path_buf) {
+			PERROR("zmalloc");
 			goto error;
 		}
 
 		/* Try to resolve this part */
-		try_path = realpath((char *)cut_path, NULL);
+		try_path = realpath((char *) cut_path, try_path_buf);
 		if (try_path == NULL) {
+			free(try_path_buf);
 			/*
 			 * There was an error, we just want to be assured it
 			 * is linked to an unexistent directory, if it's another
@@ -117,6 +127,7 @@ char *utils_partial_realpath(const char *path, char *resolved_path, size_t size)
 			}
 		} else {
 			/* Save the place we are before trying the next step */
+			try_path_buf = NULL;
 			free(try_path_prev);
 			try_path_prev = try_path;
 			prev = next;
@@ -125,7 +136,7 @@ char *utils_partial_realpath(const char *path, char *resolved_path, size_t size)
 		/* Free the allocated memory */
 		free(cut_path);
 		cut_path = NULL;
-	};
+	}
 
 	/* Allocate memory for the resolved path if necessary */
 	if (resolved_path == NULL) {
@@ -162,6 +173,8 @@ char *utils_partial_realpath(const char *path, char *resolved_path, size_t size)
 		/* Free the allocated memory */
 		free(cut_path);
 		free(try_path_prev);
+		cut_path = NULL;
+		try_path_prev = NULL;
 	/*
 	 * Else, we just copy the path in our resolved_path to
 	 * return it as is
@@ -228,9 +241,9 @@ char *utils_expand_path(const char *path)
 	while ((next = strstr(absolute_path, "/./"))) {
 
 		/* We prepare the start_path not containing it */
-		start_path = strndup(absolute_path, next - absolute_path);
+		start_path = lttng_strndup(absolute_path, next - absolute_path);
 		if (!start_path) {
-			PERROR("strndup");
+			PERROR("lttng_strndup");
 			goto error;
 		}
 		/* And we concatenate it with the part after this string */
@@ -248,9 +261,9 @@ char *utils_expand_path(const char *path)
 		}
 
 		/* Then we prepare the start_path not containing it */
-		start_path = strndup(absolute_path, previous - absolute_path);
+		start_path = lttng_strndup(absolute_path, previous - absolute_path);
 		if (!start_path) {
-			PERROR("strndup");
+			PERROR("lttng_strndup");
 			goto error;
 		}
 
@@ -478,7 +491,7 @@ int utils_create_pid_file(pid_t pid, const char *filepath)
 		goto error;
 	}
 
-	ret = fprintf(fp, "%d\n", pid);
+	ret = fprintf(fp, "%d\n", (int) pid);
 	if (ret < 0) {
 		PERROR("fprintf pid file");
 		goto error;
@@ -487,7 +500,7 @@ int utils_create_pid_file(pid_t pid, const char *filepath)
 	if (fclose(fp)) {
 		PERROR("fclose");
 	}
-	DBG("Pid %d written in file %s", pid, filepath);
+	DBG("Pid %d written in file %s", (int) pid, filepath);
 	ret = 0;
 error:
 	return ret;
@@ -502,11 +515,13 @@ int utils_create_lock_file(const char *filepath)
 {
 	int ret;
 	int fd;
+	struct flock lock;
 
 	assert(filepath);
 
-	fd = open(filepath, O_CREAT,
-		O_WRONLY | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+	memset(&lock, 0, sizeof(lock));
+	fd = open(filepath, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR |
+		S_IRGRP | S_IWGRP);
 	if (fd < 0) {
 		PERROR("open lock file %s", filepath);
 		ret = -1;
@@ -518,8 +533,12 @@ int utils_create_lock_file(const char *filepath)
 	 * already a process using the same lock file running
 	 * and we should exit.
 	 */
-	ret = flock(fd, LOCK_EX | LOCK_NB);
-	if (ret) {
+	lock.l_whence = SEEK_SET;
+	lock.l_type = F_WRLCK;
+
+	ret = fcntl(fd, F_SETLK, &lock);
+	if (ret == -1) {
+		PERROR("fcntl lock file");
 		ERR("Could not get lock file %s, another instance is running.",
 			filepath);
 		if (close(fd)) {
@@ -824,7 +843,6 @@ int utils_rotate_stream_file(char *path_name, char *file_name, uint64_t size,
 {
 	int ret;
 
-	assert(new_count);
 	assert(stream_fd);
 
 	ret = close(out_fd);
@@ -847,18 +865,22 @@ int utils_rotate_stream_file(char *path_name, char *file_name, uint64_t size,
 		 * Unlinking the old file rather than overwriting it
 		 * achieves this.
 		 */
-		*new_count = (*new_count + 1) % count;
-		ret = utils_unlink_stream_file(path_name, file_name,
-				size, *new_count, uid, gid, 0);
+		if (new_count) {
+			*new_count = (*new_count + 1) % count;
+		}
+		ret = utils_unlink_stream_file(path_name, file_name, size,
+				new_count ? *new_count : 0, uid, gid, 0);
 		if (ret < 0 && errno != ENOENT) {
 			goto error;
 		}
 	} else {
-		(*new_count)++;
+		if (new_count) {
+			(*new_count)++;
+		}
 	}
 
-	ret = utils_create_stream_file(path_name, file_name, size, *new_count,
-			uid, gid, 0);
+	ret = utils_create_stream_file(path_name, file_name, size,
+			new_count ? *new_count : 0, uid, gid, 0);
 	if (ret < 0) {
 		goto error;
 	}
@@ -1229,6 +1251,7 @@ LTTNG_HIDDEN
 int utils_recursive_rmdir(const char *path)
 {
 	DIR *dir;
+	size_t path_len;
 	int dir_fd, ret = 0, closeret, is_empty = 1;
 	struct dirent *entry;
 
@@ -1238,19 +1261,41 @@ int utils_recursive_rmdir(const char *path)
 		PERROR("Cannot open '%s' path", path);
 		return -1;
 	}
-	dir_fd = dirfd(dir);
+	dir_fd = lttng_dirfd(dir);
 	if (dir_fd < 0) {
-		PERROR("dirfd");
+		PERROR("lttng_dirfd");
 		return -1;
 	}
 
+	path_len = strlen(path);
 	while ((entry = readdir(dir))) {
+		struct stat st;
+		size_t name_len;
+		char filename[PATH_MAX];
+
 		if (!strcmp(entry->d_name, ".")
-				|| !strcmp(entry->d_name, ".."))
+				|| !strcmp(entry->d_name, "..")) {
 			continue;
-		switch (entry->d_type) {
-		case DT_DIR:
-		{
+		}
+
+		name_len = strlen(entry->d_name);
+		if (path_len + name_len + 2 > sizeof(filename)) {
+			ERR("Failed to remove file: path name too long (%s/%s)",
+				path, entry->d_name);
+			continue;
+		}
+		if (snprintf(filename, sizeof(filename), "%s/%s",
+				path, entry->d_name) < 0) {
+			ERR("Failed to format path.");
+			continue;
+		}
+
+		if (stat(filename, &st)) {
+			PERROR("stat");
+			continue;
+		}
+
+		if (S_ISDIR(st.st_mode)) {
 			char subpath[PATH_MAX];
 
 			strncpy(subpath, path, PATH_MAX);
@@ -1262,12 +1307,9 @@ int utils_recursive_rmdir(const char *path)
 			if (utils_recursive_rmdir(subpath)) {
 				is_empty = 0;
 			}
-			break;
-		}
-		case DT_REG:
+		} else if (S_ISREG(st.st_mode)) {
 			is_empty = 0;
-			break;
-		default:
+		} else {
 			ret = -EINVAL;
 			goto end;
 		}
@@ -1281,5 +1323,58 @@ end:
 		DBG3("Attempting rmdir %s", path);
 		ret = rmdir(path);
 	}
+	return ret;
+}
+
+LTTNG_HIDDEN
+int utils_truncate_stream_file(int fd, off_t length)
+{
+	int ret;
+
+	ret = ftruncate(fd, length);
+	if (ret < 0) {
+		PERROR("ftruncate");
+		goto end;
+	}
+	ret = lseek(fd, length, SEEK_SET);
+	if (ret < 0) {
+		PERROR("lseek");
+		goto end;
+	}
+end:
+	return ret;
+}
+
+static const char *get_man_bin_path(void)
+{
+	char *env_man_path = getenv(DEFAULT_MAN_BIN_PATH_ENV);
+
+	if (env_man_path) {
+		return env_man_path;
+	}
+
+	return DEFAULT_MAN_BIN_PATH;
+}
+
+LTTNG_HIDDEN
+int utils_show_man_page(int section, const char *page_name)
+{
+	char section_string[8];
+	const char *man_bin_path = get_man_bin_path();
+	int ret;
+
+	/* Section integer -> section string */
+	ret = sprintf(section_string, "%d", section);
+	assert(ret > 0 && ret < 8);
+
+	/*
+	 * Execute man pager.
+	 *
+	 * We provide --manpath to man here because LTTng-tools can
+	 * be installed outside /usr, in which case its man pages are
+	 * not located in the default /usr/share/man directory.
+	 */
+	ret = execlp(man_bin_path, "man", "--manpath", MANPATH,
+		section_string, page_name, NULL);
 	return ret;
 }

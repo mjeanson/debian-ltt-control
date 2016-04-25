@@ -13,6 +13,11 @@
 # PARTICULAR PURPOSE.
 
 @SET_MAKE@
+
+# Man pages are only built if the --enable-build-man-pages option was passed
+# to the configure script.
+#
+# They should always be built before creating a distribution tarball.
 VPATH = @srcdir@
 am__is_gnu_make = { \
   if test -z '$(MAKELEVEL)'; then \
@@ -88,29 +93,40 @@ POST_UNINSTALL = :
 build_triplet = @build@
 host_triplet = @host@
 target_triplet = @target@
+
+# only build man pages if it was enabled
+# dist + install
+@BUILD_MAN_PAGES_TRUE@am__append_1 = $(MAN1)
+@BUILD_MAN_PAGES_TRUE@am__append_2 = $(MAN3)
+@BUILD_MAN_PAGES_TRUE@am__append_3 = $(MAN8)
+# we are in the tarball, hence the man pages are already built
+@BUILD_MAN_PAGES_FALSE@@IN_GIT_REPO_FALSE@am__append_4 = $(MAN1)
+@BUILD_MAN_PAGES_FALSE@@IN_GIT_REPO_FALSE@am__append_5 = $(MAN3)
+@BUILD_MAN_PAGES_FALSE@@IN_GIT_REPO_FALSE@am__append_6 = $(MAN8)
 subdir = doc/man
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
-	$(top_srcdir)/config/ax_check_class.m4 \
-	$(top_srcdir)/config/ax_check_classpath.m4 \
-	$(top_srcdir)/config/ax_compare_version.m4 \
-	$(top_srcdir)/config/ax_java_options.m4 \
-	$(top_srcdir)/config/ax_pkg_swig.m4 \
-	$(top_srcdir)/config/ax_prog_bison_version.m4 \
-	$(top_srcdir)/config/ax_prog_flex_version.m4 \
-	$(top_srcdir)/config/ax_prog_jar.m4 \
-	$(top_srcdir)/config/ax_prog_java.m4 \
-	$(top_srcdir)/config/ax_prog_java_works.m4 \
-	$(top_srcdir)/config/ax_prog_javac.m4 \
-	$(top_srcdir)/config/ax_prog_javac_works.m4 \
-	$(top_srcdir)/config/ax_try_compile_java.m4 \
-	$(top_srcdir)/config/config_feature.m4 \
-	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
-	$(top_srcdir)/config/libxml.m4 \
-	$(top_srcdir)/config/ltoptions.m4 \
-	$(top_srcdir)/config/ltsugar.m4 \
-	$(top_srcdir)/config/ltversion.m4 \
-	$(top_srcdir)/config/lt~obsolete.m4 $(top_srcdir)/configure.ac
+am__aclocal_m4_deps = $(top_srcdir)/m4/ac_define_dir.m4 \
+	$(top_srcdir)/m4/ax_c___attribute__.m4 \
+	$(top_srcdir)/m4/ax_check_class.m4 \
+	$(top_srcdir)/m4/ax_check_classpath.m4 \
+	$(top_srcdir)/m4/ax_compare_version.m4 \
+	$(top_srcdir)/m4/ax_java_options.m4 \
+	$(top_srcdir)/m4/ax_lib_socket_nsl.m4 \
+	$(top_srcdir)/m4/ax_pkg_swig.m4 \
+	$(top_srcdir)/m4/ax_prog_bison_version.m4 \
+	$(top_srcdir)/m4/ax_prog_flex_version.m4 \
+	$(top_srcdir)/m4/ax_prog_jar.m4 \
+	$(top_srcdir)/m4/ax_prog_java.m4 \
+	$(top_srcdir)/m4/ax_prog_java_works.m4 \
+	$(top_srcdir)/m4/ax_prog_javac.m4 \
+	$(top_srcdir)/m4/ax_prog_javac_works.m4 \
+	$(top_srcdir)/m4/ax_pthread.m4 \
+	$(top_srcdir)/m4/ax_try_compile_java.m4 \
+	$(top_srcdir)/m4/config_feature.m4 $(top_srcdir)/m4/epoll.m4 \
+	$(top_srcdir)/m4/libtool.m4 $(top_srcdir)/m4/libxml.m4 \
+	$(top_srcdir)/m4/ltoptions.m4 $(top_srcdir)/m4/ltsugar.m4 \
+	$(top_srcdir)/m4/ltversion.m4 $(top_srcdir)/m4/lt~obsolete.m4 \
+	$(top_srcdir)/m4/pprint.m4 $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 DIST_COMMON = $(srcdir)/Makefile.am $(am__DIST_COMMON)
@@ -165,18 +181,21 @@ am__uninstall_files_from_dir = { \
          $(am__cd) "$$dir" && rm -f $$files; }; \
   }
 man1dir = $(mandir)/man1
-am__installdirs = "$(DESTDIR)$(man1dir)" "$(DESTDIR)$(man8dir)"
+am__installdirs = "$(DESTDIR)$(man1dir)" "$(DESTDIR)$(man3dir)" \
+	"$(DESTDIR)$(man8dir)"
+man3dir = $(mandir)/man3
 man8dir = $(mandir)/man8
 NROFF = nroff
-MANS = $(dist_man1_MANS) $(dist_man8_MANS)
+MANS = $(dist_man1_MANS) $(dist_man3_MANS) $(dist_man8_MANS)
 am__tagged_files = $(HEADERS) $(SOURCES) $(TAGS_FILES) $(LISP)
-am__DIST_COMMON = $(dist_man1_MANS) $(dist_man8_MANS) \
-	$(srcdir)/Makefile.in
+am__DIST_COMMON = $(dist_man1_MANS) $(dist_man3_MANS) \
+	$(dist_man8_MANS) $(srcdir)/Makefile.in
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
 AR = @AR@
+ASCIIDOC = @ASCIIDOC@
 AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
@@ -244,6 +263,7 @@ MINOR_VERSION = @MINOR_VERSION@
 MKDIR_P = @MKDIR_P@
 NM = @NM@
 NMEDIT = @NMEDIT@
+OBJCOPY = @OBJCOPY@
 OBJDUMP = @OBJDUMP@
 OBJEXT = @OBJEXT@
 OTOOL = @OTOOL@
@@ -257,11 +277,15 @@ PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATCHLEVEL_VERSION = @PATCHLEVEL_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
+PGREP = @PGREP@
 PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POPT_CFLAGS = @POPT_CFLAGS@
 POPT_LIBS = @POPT_LIBS@
+PTHREAD_CC = @PTHREAD_CC@
+PTHREAD_CFLAGS = @PTHREAD_CFLAGS@
+PTHREAD_LIBS = @PTHREAD_LIBS@
 PYTHON = @PYTHON@
 PYTHON2_AGENT = @PYTHON2_AGENT@
 PYTHON2_BIN = @PYTHON2_BIN@
@@ -287,6 +311,7 @@ UUID_CFLAGS = @UUID_CFLAGS@
 UUID_LIBS = @UUID_LIBS@
 VERSION = @VERSION@
 XML2_CONFIG = @XML2_CONFIG@
+XMLTO = @XMLTO@
 XML_CPPFLAGS = @XML_CPPFLAGS@
 XML_LIBS = @XML_LIBS@
 YACC = @YACC@
@@ -303,6 +328,7 @@ am__leading_dot = @am__leading_dot@
 am__quote = @am__quote@
 am__tar = @am__tar@
 am__untar = @am__untar@
+ax_pthread_config = @ax_pthread_config@
 bindir = @bindir@
 build = @build@
 build_alias = @build_alias@
@@ -336,11 +362,13 @@ oldincludedir = @oldincludedir@
 pdfdir = @pdfdir@
 pkgpyexecdir = @pkgpyexecdir@
 pkgpythondir = @pkgpythondir@
+pprint_tput = @pprint_tput@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
+report_fold = @report_fold@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -353,8 +381,91 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-dist_man1_MANS = lttng.1 lttng-crash.1
-dist_man8_MANS = lttng-sessiond.8 lttng-relayd.8
+
+# function which adds the source directory prefix and adds a given suffix
+manaddsuffix = $(addsuffix $(1),$(addprefix $(srcdir)/,$(2)))
+
+# List only the names without the .*.txt extension here:
+MAN1_NAMES = \
+	lttng \
+	lttng-create \
+	lttng-destroy \
+	lttng-set-session \
+	lttng-save \
+	lttng-load \
+	lttng-start \
+	lttng-stop \
+	lttng-version \
+	lttng-view \
+	lttng-enable-channel \
+	lttng-disable-channel \
+	lttng-add-context \
+	lttng-list \
+	lttng-calibrate \
+	lttng-track \
+	lttng-untrack \
+	lttng-status \
+	lttng-help \
+	lttng-snapshot \
+	lttng-enable-event \
+	lttng-disable-event \
+	lttng-crash \
+	lttng-metadata
+
+MAN3_NAMES = 
+MAN8_NAMES = lttng-sessiond lttng-relayd
+MAN1_NO_ASCIIDOC_NAMES = 
+MAN3_NO_ASCIIDOC_NAMES = lttng-health-check
+MAN8_NO_ASCIIDOC_NAMES = 
+
+# man pages destinations
+MAN1 = $(call manaddsuffix,.1,$(MAN1_NAMES))
+MAN3 = $(call manaddsuffix,.3,$(MAN3_NAMES))
+MAN8 = $(call manaddsuffix,.8,$(MAN8_NAMES))
+MAN1_NO_ASCIIDOC = $(call manaddsuffix,.1,$(MAN1_NO_ASCIIDOC_NAMES))
+MAN3_NO_ASCIIDOC = $(call manaddsuffix,.3,$(MAN3_NO_ASCIIDOC_NAMES))
+MAN8_NO_ASCIIDOC = $(call manaddsuffix,.8,$(MAN8_NO_ASCIIDOC_NAMES))
+MAN = $(MAN1) $(MAN3) $(MAN8)
+
+# those are always installed since they are written in troff
+dist_man1_MANS = $(MAN1_NO_ASCIIDOC) $(am__append_1) $(am__append_4)
+dist_man3_MANS = $(MAN3_NO_ASCIIDOC) $(am__append_2) $(am__append_5)
+dist_man8_MANS = $(MAN8_NO_ASCIIDOC) $(am__append_3) $(am__append_6)
+
+# AsciiDoc sources and outputs
+@BUILD_MAN_PAGES_TRUE@MAN1_TXT = $(call manaddsuffix,.1.txt,$(MAN1_NAMES))
+@BUILD_MAN_PAGES_TRUE@MAN3_TXT = $(call manaddsuffix,.3.txt,$(MAN3_NAMES))
+@BUILD_MAN_PAGES_TRUE@MAN8_TXT = $(call manaddsuffix,.8.txt,$(MAN8_NAMES))
+@BUILD_MAN_PAGES_TRUE@MAN_TXT = $(MAN1_TXT) $(MAN3_TXT) $(MAN8_TXT)
+@BUILD_MAN_PAGES_TRUE@MAN_XML = $(patsubst $(srcdir)/%.txt,%.xml,$(MAN_TXT))
+
+# common AsciiDoc source files
+@BUILD_MAN_PAGES_TRUE@COMMON_TXT = \
+@BUILD_MAN_PAGES_TRUE@	$(srcdir)/common-footer.txt \
+@BUILD_MAN_PAGES_TRUE@	$(srcdir)/common-cmd-footer.txt \
+@BUILD_MAN_PAGES_TRUE@	$(srcdir)/common-cmd-options-head.txt \
+@BUILD_MAN_PAGES_TRUE@	$(srcdir)/common-cmd-help-options.txt
+
+
+# config
+@BUILD_MAN_PAGES_TRUE@ASCIIDOC_CONF = $(srcdir)/asciidoc.conf
+@BUILD_MAN_PAGES_TRUE@XSL_FILES = \
+@BUILD_MAN_PAGES_TRUE@	manpage.xsl \
+@BUILD_MAN_PAGES_TRUE@	manpage-base.xsl \
+@BUILD_MAN_PAGES_TRUE@	manpage-bold-literal.xsl \
+@BUILD_MAN_PAGES_TRUE@	manpage-ulinks.xsl
+
+@BUILD_MAN_PAGES_TRUE@XSL_SRC_FILES = $(addprefix $(srcdir)/xsl/,$(XSL_FILES))
+
+# common dependencies
+@BUILD_MAN_PAGES_TRUE@COMMON_DEPS = $(ASCIIDOC_CONF) $(COMMON_TXT)
+
+# tools
+@BUILD_MAN_PAGES_TRUE@ADOC = $(ASCIIDOC) -f $(ASCIIDOC_CONF) -d manpage \
+@BUILD_MAN_PAGES_TRUE@	-a lttng_version=$(PACKAGE_VERSION)
+
+@BUILD_MAN_PAGES_TRUE@ADOC_DOCBOOK = $(ADOC) -b docbook
+@BUILD_MAN_PAGES_TRUE@XTO = $(XMLTO) -m $(firstword $(XSL_SRC_FILES)) man
 all: all-am
 
 .SUFFIXES:
@@ -434,6 +545,47 @@ uninstall-man1:
 	} | sed -e 's,.*/,,;h;s,.*\.,,;s,^[^1][0-9a-z]*$$,1,;x' \
 	      -e 's,\.[0-9a-z]*$$,,;$(transform);G;s,\n,.,'`; \
 	dir='$(DESTDIR)$(man1dir)'; $(am__uninstall_files_from_dir)
+install-man3: $(dist_man3_MANS)
+	@$(NORMAL_INSTALL)
+	@list1='$(dist_man3_MANS)'; \
+	list2=''; \
+	test -n "$(man3dir)" \
+	  && test -n "`echo $$list1$$list2`" \
+	  || exit 0; \
+	echo " $(MKDIR_P) '$(DESTDIR)$(man3dir)'"; \
+	$(MKDIR_P) "$(DESTDIR)$(man3dir)" || exit 1; \
+	{ for i in $$list1; do echo "$$i"; done;  \
+	if test -n "$$list2"; then \
+	  for i in $$list2; do echo "$$i"; done \
+	    | sed -n '/\.3[a-z]*$$/p'; \
+	fi; \
+	} | while read p; do \
+	  if test -f $$p; then d=; else d="$(srcdir)/"; fi; \
+	  echo "$$d$$p"; echo "$$p"; \
+	done | \
+	sed -e 'n;s,.*/,,;p;h;s,.*\.,,;s,^[^3][0-9a-z]*$$,3,;x' \
+	      -e 's,\.[0-9a-z]*$$,,;$(transform);G;s,\n,.,' | \
+	sed 'N;N;s,\n, ,g' | { \
+	list=; while read file base inst; do \
+	  if test "$$base" = "$$inst"; then list="$$list $$file"; else \
+	    echo " $(INSTALL_DATA) '$$file' '$(DESTDIR)$(man3dir)/$$inst'"; \
+	    $(INSTALL_DATA) "$$file" "$(DESTDIR)$(man3dir)/$$inst" || exit $$?; \
+	  fi; \
+	done; \
+	for i in $$list; do echo "$$i"; done | $(am__base_list) | \
+	while read files; do \
+	  test -z "$$files" || { \
+	    echo " $(INSTALL_DATA) $$files '$(DESTDIR)$(man3dir)'"; \
+	    $(INSTALL_DATA) $$files "$(DESTDIR)$(man3dir)" || exit $$?; }; \
+	done; }
+
+uninstall-man3:
+	@$(NORMAL_UNINSTALL)
+	@list='$(dist_man3_MANS)'; test -n "$(man3dir)" || exit 0; \
+	files=`{ for i in $$list; do echo "$$i"; done; \
+	} | sed -e 's,.*/,,;h;s,.*\.,,;s,^[^3][0-9a-z]*$$,3,;x' \
+	      -e 's,\.[0-9a-z]*$$,,;$(transform);G;s,\n,.,'`; \
+	dir='$(DESTDIR)$(man3dir)'; $(am__uninstall_files_from_dir)
 install-man8: $(dist_man8_MANS)
 	@$(NORMAL_INSTALL)
 	@list1='$(dist_man8_MANS)'; \
@@ -481,6 +633,8 @@ ctags CTAGS:
 
 cscope cscopelist:
 
+@BUILD_MAN_PAGES_TRUE@dist-hook:
+@IN_GIT_REPO_FALSE@dist-hook:
 
 distdir: $(DISTFILES)
 	@srcdirstrip=`echo "$(srcdir)" | sed 's/[].[^$$\\*]/\\\\&/g'`; \
@@ -512,11 +666,14 @@ distdir: $(DISTFILES)
 	    || exit 1; \
 	  fi; \
 	done
+	$(MAKE) $(AM_MAKEFLAGS) \
+	  top_distdir="$(top_distdir)" distdir="$(distdir)" \
+	  dist-hook
 check-am: all-am
 check: check-am
 all-am: Makefile $(MANS)
 installdirs:
-	for dir in "$(DESTDIR)$(man1dir)" "$(DESTDIR)$(man8dir)"; do \
+	for dir in "$(DESTDIR)$(man1dir)" "$(DESTDIR)$(man3dir)" "$(DESTDIR)$(man8dir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
 	done
 install: install-am
@@ -549,9 +706,10 @@ distclean-generic:
 maintainer-clean-generic:
 	@echo "This command is intended for maintainers to use"
 	@echo "it deletes files that may require special tools to rebuild."
+@BUILD_MAN_PAGES_FALSE@clean-local:
 clean: clean-am
 
-clean-am: clean-generic clean-libtool mostlyclean-am
+clean-am: clean-generic clean-libtool clean-local mostlyclean-am
 
 distclean: distclean-am
 	-rm -f Makefile
@@ -585,7 +743,7 @@ install-info: install-info-am
 
 install-info-am:
 
-install-man: install-man1 install-man8
+install-man: install-man1 install-man3 install-man8
 
 install-pdf: install-pdf-am
 
@@ -615,25 +773,55 @@ ps-am:
 
 uninstall-am: uninstall-man
 
-uninstall-man: uninstall-man1 uninstall-man8
+uninstall-man: uninstall-man1 uninstall-man3 uninstall-man8
 
 .MAKE: install-am install-strip
 
 .PHONY: all all-am check check-am clean clean-generic clean-libtool \
-	cscopelist-am ctags-am distclean distclean-generic \
-	distclean-libtool distdir dvi dvi-am html html-am info info-am \
-	install install-am install-data install-data-am install-dvi \
-	install-dvi-am install-exec install-exec-am install-html \
-	install-html-am install-info install-info-am install-man \
-	install-man1 install-man8 install-pdf install-pdf-am \
-	install-ps install-ps-am install-strip installcheck \
-	installcheck-am installdirs maintainer-clean \
-	maintainer-clean-generic mostlyclean mostlyclean-generic \
-	mostlyclean-libtool pdf pdf-am ps ps-am tags-am uninstall \
-	uninstall-am uninstall-man uninstall-man1 uninstall-man8
+	clean-local cscopelist-am ctags-am dist-hook distclean \
+	distclean-generic distclean-libtool distdir dvi dvi-am html \
+	html-am info info-am install install-am install-data \
+	install-data-am install-dvi install-dvi-am install-exec \
+	install-exec-am install-html install-html-am install-info \
+	install-info-am install-man install-man1 install-man3 \
+	install-man8 install-pdf install-pdf-am install-ps \
+	install-ps-am install-strip installcheck installcheck-am \
+	installdirs maintainer-clean maintainer-clean-generic \
+	mostlyclean mostlyclean-generic mostlyclean-libtool pdf pdf-am \
+	ps ps-am tags-am uninstall uninstall-am uninstall-man \
+	uninstall-man1 uninstall-man3 uninstall-man8
 
 .PRECIOUS: Makefile
 
+
+# recipes
+@BUILD_MAN_PAGES_TRUE@%.1.xml: $(srcdir)/%.1.txt $(COMMON_DEPS)
+@BUILD_MAN_PAGES_TRUE@	$(ADOC_DOCBOOK) -o $@ $<
+
+@BUILD_MAN_PAGES_TRUE@%.1: %.1.xml $(XSL_SRC_FILES)
+@BUILD_MAN_PAGES_TRUE@	$(XTO) $<
+
+@BUILD_MAN_PAGES_TRUE@%.3.xml: $(srcdir)/%.3.txt $(COMMON_DEPS)
+@BUILD_MAN_PAGES_TRUE@	$(ADOC_DOCBOOK) -o $@ $<
+
+@BUILD_MAN_PAGES_TRUE@%.3: %.3.xml $(XSL_SRC_FILES)
+@BUILD_MAN_PAGES_TRUE@	$(XTO) $<
+
+@BUILD_MAN_PAGES_TRUE@%.8.xml: $(srcdir)/%.8.txt $(COMMON_DEPS)
+@BUILD_MAN_PAGES_TRUE@	$(ADOC_DOCBOOK) -o $@ $<
+
+@BUILD_MAN_PAGES_TRUE@%.8: %.8.xml $(XSL_SRC_FILES)
+@BUILD_MAN_PAGES_TRUE@	$(XTO) $<
+
+@BUILD_MAN_PAGES_TRUE@clean-local:
+@BUILD_MAN_PAGES_TRUE@	rm -rf $(MAN_XML)
+@BUILD_MAN_PAGES_TRUE@	rm -rf $(MAN)
+# we are in the Git repo: the man pages should be built for distribution
+@BUILD_MAN_PAGES_FALSE@@IN_GIT_REPO_TRUE@dist-hook:
+@BUILD_MAN_PAGES_FALSE@@IN_GIT_REPO_TRUE@	@echo
+@BUILD_MAN_PAGES_FALSE@@IN_GIT_REPO_TRUE@	@echo 'Error: Please build the man pages before creating a tarball.'
+@BUILD_MAN_PAGES_FALSE@@IN_GIT_REPO_TRUE@	@echo
+@BUILD_MAN_PAGES_FALSE@@IN_GIT_REPO_TRUE@	@false
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.

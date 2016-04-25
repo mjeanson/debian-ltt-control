@@ -15,7 +15,6 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <stdio.h>
@@ -130,7 +129,15 @@ static int relayd_create_session_2_4(struct lttcomm_relayd_sock *rsock,
 	int ret;
 	struct lttcomm_relayd_create_session_2_4 msg;
 
+	if (strlen(session_name) >= sizeof(msg.session_name)) {
+		ret = -1;
+		goto error;
+	}
 	strncpy(msg.session_name, session_name, sizeof(msg.session_name));
+	if (strlen(hostname) >= sizeof(msg.hostname)) {
+		ret = -1;
+		goto error;
+	}
 	strncpy(msg.hostname, hostname, sizeof(msg.hostname));
 	msg.live_timer = htobe32(session_live_timer);
 	msg.snapshot = htobe32(snapshot);
@@ -248,7 +255,15 @@ int relayd_add_stream(struct lttcomm_relayd_sock *rsock, const char *channel_nam
 	/* Compat with relayd 2.1 */
 	if (rsock->minor == 1) {
 		memset(&msg, 0, sizeof(msg));
+		if (strlen(channel_name) >= sizeof(msg.channel_name)) {
+			ret = -1;
+			goto error;
+		}
 		strncpy(msg.channel_name, channel_name, sizeof(msg.channel_name));
+		if (strlen(pathname) >= sizeof(msg.pathname)) {
+			ret = -1;
+			goto error;
+		}
 		strncpy(msg.pathname, pathname, sizeof(msg.pathname));
 
 		/* Send command */
@@ -259,7 +274,15 @@ int relayd_add_stream(struct lttcomm_relayd_sock *rsock, const char *channel_nam
 	} else {
 		memset(&msg_2_2, 0, sizeof(msg_2_2));
 		/* Compat with relayd 2.2+ */
+		if (strlen(channel_name) >= sizeof(msg_2_2.channel_name)) {
+			ret = -1;
+			goto error;
+		}
 		strncpy(msg_2_2.channel_name, channel_name, sizeof(msg_2_2.channel_name));
+		if (strlen(pathname) >= sizeof(msg_2_2.pathname)) {
+			ret = -1;
+			goto error;
+		}
 		strncpy(msg_2_2.pathname, pathname, sizeof(msg_2_2.pathname));
 		msg_2_2.tracefile_size = htobe64(tracefile_size);
 		msg_2_2.tracefile_count = htobe64(tracefile_count);
@@ -828,6 +851,11 @@ int relayd_send_index(struct lttcomm_relayd_sock *rsock,
 	msg.events_discarded = index->events_discarded;
 	msg.stream_id = index->stream_id;
 
+	if (rsock->minor >= 8) {
+		msg.stream_instance_id = index->stream_instance_id;
+		msg.packet_seq_num = index->packet_seq_num;
+	}
+
 	/* Send command */
 	ret = send_command(rsock, RELAYD_SEND_INDEX, &msg, sizeof(msg), 0);
 	if (ret < 0) {
@@ -850,6 +878,61 @@ int relayd_send_index(struct lttcomm_relayd_sock *rsock,
 		/* Success */
 		ret = 0;
 	}
+
+error:
+	return ret;
+}
+
+/*
+ * Ask the relay to reset the metadata trace file (regeneration).
+ */
+int relayd_reset_metadata(struct lttcomm_relayd_sock *rsock,
+		uint64_t stream_id, uint64_t version)
+{
+	int ret;
+	struct lttcomm_relayd_reset_metadata msg;
+	struct lttcomm_relayd_generic_reply reply;
+
+	/* Code flow error. Safety net. */
+	assert(rsock);
+
+	/* Should have been prevented by the sessiond. */
+	if (rsock->minor < 8) {
+		ERR("Metadata regeneration unsupported before 2.8");
+		ret = -1;
+		goto error;
+	}
+
+	DBG("Relayd reset metadata stream id %" PRIu64, stream_id);
+
+	memset(&msg, 0, sizeof(msg));
+	msg.stream_id = htobe64(stream_id);
+	msg.version = htobe64(version);
+
+	/* Send command */
+	ret = send_command(rsock, RELAYD_RESET_METADATA, (void *) &msg, sizeof(msg), 0);
+	if (ret < 0) {
+		goto error;
+	}
+
+	/* Receive response */
+	ret = recv_reply(rsock, (void *) &reply, sizeof(reply));
+	if (ret < 0) {
+		goto error;
+	}
+
+	reply.ret_code = be32toh(reply.ret_code);
+
+	/* Return session id or negative ret code. */
+	if (reply.ret_code != LTTNG_OK) {
+		ret = -1;
+		ERR("Relayd reset metadata replied error %d", reply.ret_code);
+	} else {
+		/* Success */
+		ret = 0;
+	}
+
+	DBG("Relayd reset metadata stream id %" PRIu64 " successfully", stream_id);
 
 error:
 	return ret;

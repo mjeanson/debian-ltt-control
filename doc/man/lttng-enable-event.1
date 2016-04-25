@@ -1,0 +1,1212 @@
+'\" t
+.\"     Title: lttng-enable-event
+.\"    Author: [see the "AUTHORS" section]
+.\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
+.\"      Date: 03/18/2016
+.\"    Manual: LTTng Manual
+.\"    Source: LTTng 2.8.0-rc1
+.\"  Language: English
+.\"
+.TH "LTTNG\-ENABLE\-EVENT" "1" "03/18/2016" "LTTng 2\&.8\&.0\-rc1" "LTTng Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+lttng-enable-event \- Create or enable LTTng event rules
+.SH "SYNOPSIS"
+.sp
+Create or enable Linux kernel event rules:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBenable\-event\fR \fB--kernel\fR
+      [\fB--probe\fR=\fISOURCE\fR | \fB--function\fR=\fISOURCE\fR | \fB--syscall\fR]
+      [\fB--filter\fR=\fIEXPR\fR] [\fB--session\fR=\fISESSION\fR]
+      [\fB--channel\fR=\fICHANNEL\fR] \fIEVENT\fR[,\fIEVENT\fR]\&...
+.fi
+.sp
+Create or enable an "all" Linux kernel event rule:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBenable\-event\fR \fB--kernel\fR \fB--all\fR [\fB--syscall\fR]
+      [\fB--filter\fR=\fIEXPR\fR] [\fB--session\fR=\fISESSION\fR] [\fB--channel\fR=\fICHANNEL\fR]
+.fi
+.sp
+Create or enable application event rules:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBenable\-event\fR
+      (\fB--userspace\fR | \fB--jul\fR | \fB--log4j\fR | \fB--python\fR)
+      [\fB--filter\fR=\fIEXPR\fR] [\fB--exclude\fR=\fIEVENT\fR[,\fIEVENT\fR]\&...]
+      [\fB--loglevel\fR=\fILOGLEVEL\fR | \fB--loglevel-only\fR=\fILOGLEVEL\fR]
+      [\fB--session\fR=\fISESSION\fR] [\fB--channel\fR=\fICHANNEL\fR] (\fB--all\fR | \fIEVENT\fR[,\fIEVENT\fR]\&...)
+.fi
+.SH "DESCRIPTION"
+.sp
+The \fBlttng enable-event\fR command can create a new event rule, or enable one or more existing and disabled ones\&.
+.sp
+An event rule created by \fBlttng enable-event\fR is a set of conditions that must be satisfied in order for an actual event to be emitted by an LTTng tracer when the execution of an application or the Linux kernel reaches an event source (tracepoint, system call, dynamic probe)\&. Event sources can be listed with the \fBlttng-list\fR(1) command\&.
+.sp
+The \fBlttng-disable-event\fR(1) command can be used to disable existing event rules\&.
+.sp
+Event rules are always assigned to a channel when they are created\&. If the \fB--channel\fR option is omitted, a default channel named \fBchannel0\fR is used (and created automatically if it does not exist for the specified domain in the selected tracing session)\&.
+.sp
+If the \fB--session\fR option is omitted, the chosen channel is picked from the current tracing session\&.
+.sp
+Events can be enabled while tracing is active (use \fBlttng-start\fR(1) to make a tracing session active)\&.
+.SS "Event source types"
+.sp
+Four types of event sources are available in the Linux kernel tracing domain (\fB--kernel\fR option):
+.PP
+Tracepoint (\fB--tracepoint\fR option; default)
+.RS 4
+A Linux kernel tracepoint, that is, a static instrumentation point placed in the kernel source code\&. Standard tracepoints are designed and placed in the source code by developers and record useful payload fields\&.
+.RE
+.PP
+Dynamic probe (\fB--probe\fR option)
+.RS 4
+A Linux kernel kprobe, that is, an instrumentation point placed dynamically in the compiled kernel code\&. Dynamic probe events do not record any payload field\&.
+.RE
+.PP
+Function probe (\fB--function\fR option)
+.RS 4
+A Linux kernel kretprobe, that is, two instrumentation points placed dynamically where a function is entered and where it returns in the compiled kernel code\&. Function probe events do not record any payload field\&.
+.RE
+.PP
+System call (\fB--syscall\fR option)
+.RS 4
+A Linux kernel system call\&. Two instrumentation points are statically placed where a system call function is entered and where it returns in the compiled kernel code\&. System call event sources record useful payload fields\&.
+.RE
+.sp
+The application tracing domains (\fB--userspace\fR, \fB--jul\fR, \fB--log4j\fR, or \fB--python\fR options) only support tracepoints\&. In the cases of the JUL, Apache log4j, and Python domains, the event names correspond to \fIlogger\fR names\&.
+.SS "Understanding event rule conditions"
+.sp
+When creating an event rule with \fBlttng enable-event\fR, conditions are specified using options\&. The logical conjunction (logical AND) of all those conditions must be true when an event source is reached by an application or by the Linux kernel in order for an actual event to be emitted by an LTTng tracer\&.
+.sp
+Any condition that is not explicitly specified on creation is considered a \fIdon\(cqt care\fR\&.
+.sp
+For example, consider the following commands:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+lttng enable\-event \-\-userspace hello:world
+lttng enable\-event \-\-userspace hello:world \-\-loglevel=TRACE_INFO
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+Here, two event rules are created\&. The first one has a single condition: the tracepoint name must match \fBhello:world\fR\&. The second one has two conditions:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+The tracepoint name must match
+\fBhello:world\fR,
+\fIand\fR
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+The tracepoint\(cqs defined log level must be at least as severe as the
+\fBTRACE_INFO\fR
+level\&.
+.RE
+.sp
+In this case, the second event rule is pointless because the first one is more general: it does not care about the tracepoint\(cqs log level\&. If an event source matching both event rules is reached by the application\(cqs execution, only one event is emitted\&.
+.sp
+The available conditions for the Linux kernel domain are:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Tracepoint/system call name (\fIEVENT\fR
+argument with
+\fB--tracepoint\fR
+or
+\fB--syscall\fR
+options) or dynamic probe/function name/address (\fB--probe\fR
+or
+\fB--function\fR
+option\(cqs argument) which must match event source\(cqs equivalent\&.
+.sp
+Wildcard using the
+\fB*\fR
+character are supported
+\fIat the end\fR
+of tracepoint and system call names\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Filter expression (\fB--filter\fR
+option) executed against the dynamic values of event fields at execution time that must evaluate to true\&. See the
+Filter expression syntax
+section below for more information\&.
+.RE
+.sp
+The available conditions for the application domains are:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Tracepoint name (\fIEVENT\fR
+with
+\fB--tracepoint\fR
+option) which must match event source\(cqs equivalent\&.
+.sp
+Wildcard using the
+\fB*\fR
+character are supported
+\fIat the end\fR
+of tracepoint names\&. When creating an event rule with a tracepoint name containing a wildcard, specific tracepoint names can be excluded from the match using the
+\fB--exclude\fR
+option\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Filter expression (\fB--filter\fR
+option) executed against the dynamic values of event fields at execution time that must evaluate to true\&. See the
+Filter expression syntax
+section below for more information\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Event\(cqs log level that must be at least as severe as a given log level (\fB--loglevel\fR
+option) or match exactly a given log level (\fB--loglevel-only\fR
+option)\&.
+.RE
+.sp
+When using \fBlttng enable-event\fR with a set of conditions that does not currently exist for the chosen tracing session, domain, and channel, a new event rule is created\&. Otherwise, the existing event rule is enabled if it is currently disabled (see \fBlttng-disable-event\fR(1))\&.
+.sp
+The \fB--all\fR option can be used alongside the \fB--tracepoint\fR or \fB--syscall\fR options\&. When this option is used, no \fIEVENT\fR argument must be specified\&. This option defines a single event rule matching \fIall\fR the possible events of a given tracing domain for the chosen channel and tracing session\&. It is the equivalent of an \fIEVENT\fR argument named \fB*\fR (wildcard)\&.
+.SS "Filter expression syntax"
+.sp
+Filter expressions can be specified with the \fB--filter\fR option when creating a new event rule\&. If the filter expression evaluates to true when executed against the dynamic values of an event\(cqs fields when tracing, the filtering condition passes\&.
+.sp
+The filter expression syntax is very similar to C language conditional expressions (expressions that can be evaluated by an \fBif\fR statement)\&.
+.sp
+The following logical operators are supported:
+.TS
+allbox tab(:);
+ltB ltB.
+T{
+Name
+T}:T{
+Syntax
+T}
+.T&
+lt lt
+lt lt
+lt lt.
+T{
+.sp
+Logical negation (NOT)
+T}:T{
+.sp
+\fB!a\fR
+T}
+T{
+.sp
+Logical conjunction (AND)
+T}:T{
+.sp
+\fBa && b\fR
+T}
+T{
+.sp
+Logical disjunction (OR)
+T}:T{
+.sp
+\fBa || b\fR
+T}
+.TE
+.sp 1
+.sp
+The following comparison operators/relational operators are supported:
+.TS
+allbox tab(:);
+ltB ltB.
+T{
+Name
+T}:T{
+Syntax
+T}
+.T&
+lt lt
+lt lt
+lt lt
+lt lt
+lt lt
+lt lt.
+T{
+.sp
+Equal to
+T}:T{
+.sp
+\fBa == b\fR
+T}
+T{
+.sp
+Not equal to
+T}:T{
+.sp
+\fBa != b\fR
+T}
+T{
+.sp
+Greater than
+T}:T{
+.sp
+\fBa > b\fR
+T}
+T{
+.sp
+Less than
+T}:T{
+.sp
+\fBa < b\fR
+T}
+T{
+.sp
+Greater than or equal to
+T}:T{
+.sp
+\fBa >= b\fR
+T}
+T{
+.sp
+Less than or equal to
+T}:T{
+.sp
+\fBa <= b\fR
+T}
+.TE
+.sp 1
+.sp
+The arithmetic and bitwise operators are NOT supported\&.
+.sp
+The precedence table of the operators above is the same as the one of the C language\&. Parentheses are supported to bypass this\&.
+.sp
+The dynamic value of an event field is read by using its name as a C identifier\&.
+.sp
+The dynamic value of a statically\-known context field is read by prefixing its name with \fB$ctx.\fR\&. Statically\-known context fields are context fields added to channels without the \fB$app.\fR prefix using the \fBlttng-add-context\fR(1) command\&.
+.sp
+The dynamic value of an application\-specific context field is read by prefixing its name with \fB$app.\fR (follows the format used to add such a context field with the \fBlttng-add-context\fR(1) command)\&.
+.sp
+When a comparison includes a non existent event field, the whole filter expression evaluates to false (the event is discarded)\&.
+.sp
+C integer and floating point number constants are supported, as well as literal strings between double quotes (\fB"\fR)\&. Literal strings can contain a wildcard character (\fB*\fR) at the end to match more than one string\&. This wildcard can be escaped using \fB\\*\fR\&.
+.sp
+LTTng\-UST enumeration fields can be compared to integer values (fields or constants)\&.
+.if n \{\
+.sp
+.\}
+.RS 4
+.it 1 an-trap
+.nr an-no-space-flag 1
+.nr an-break-flag 1
+.br
+.ps +1
+\fBNote\fR
+.ps -1
+.br
+.sp
+Although it is possible to filter the process ID of an event when the \fBpid\fR context has been added to its channel using, for example, \fB$ctx.pid == 2832\fR, it is recommended to use the PID tracker instead, which is much more efficient (see \fBlttng-track\fR(1))\&.
+.sp .5v
+.RE
+.sp
+Examples:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+msg_id == 23 && size >= 2048
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+$ctx\&.procname == "lttng*" && (!flag || poel < 34)
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+$app\&.my_provider:my_context == 17\&.34e9 || some_enum >= 14
+.fi
+.if n \{\
+.RE
+.\}
+.SS "Log levels"
+.sp
+Tracepoints and log statements in applications have an attached log level\&. Application event rules can contain a \fIlog level\fR condition\&.
+.sp
+With the \fB--loglevel\fR option, the event source\(cqs log level must be at least as severe as the option\(cqs argument\&. With the \fB--loglevel-only\fR option, the event source\(cqs log level must match the option\(cqs argument\&.
+.sp
+The available log levels are:
+.PP
+User space domain (\fB--userspace\fR option)
+.RS 4
+Shortcuts such as
+\fBsystem\fR
+are allowed\&.
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_EMERG\fR
+(0)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_ALERT\fR
+(1)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_CRIT\fR
+(2)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_ERR\fR
+(3)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_WARNING\fR
+(4)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_NOTICE\fR
+(5)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_INFO\fR
+(6)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_DEBUG_SYSTEM\fR
+(7)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_DEBUG_PROGRAM\fR
+(8)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_DEBUG_PROCESS\fR
+(9)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_DEBUG_MODULE\fR
+(10)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_DEBUG_UNIT\fR
+(11)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_DEBUG_FUNCTION\fR
+(12)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_DEBUG_LINE\fR
+(13)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBTRACE_DEBUG\fR
+(14)
+.RE
+.RE
+.PP
+\fBjava.util.logging\fR domain (\fB--jul\fR option)
+.RS 4
+Shortcuts such as
+\fBsevere\fR
+are allowed\&.
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBJUL_OFF\fR
+(\fBINT32_MAX\fR)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBJUL_SEVERE\fR
+(1000)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBJUL_WARNING\fR
+(900)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBJUL_INFO\fR
+(800)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBJUL_CONFIG\fR
+(700)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBJUL_FINE\fR
+(500)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBJUL_FINER\fR
+(400)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBJUL_FINEST\fR
+(300)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBJUL_ALL\fR
+(\fBINT32_MIN\fR)
+.RE
+.RE
+.PP
+Apache log4j domain (\fB--log4j\fR option)
+.RS 4
+Shortcuts such as
+\fBsevere\fR
+are allowed\&.
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBLOG4J_OFF\fR
+(\fBINT32_MAX\fR)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBLOG4J_FATAL\fR
+(50000)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBLOG4J_ERROR\fR
+(40000)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBLOG4J_WARN\fR
+(30000)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBLOG4J_INFO\fR
+(20000)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBLOG4J_DEBUG\fR
+(10000)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBLOG4J_TRACE\fR
+(5000)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBLOG4J_ALL\fR
+(\fBINT32_MIN\fR)
+.RE
+.RE
+.PP
+Python domain (\fB--python\fR option)
+.RS 4
+Shortcuts such as
+\fBcritical\fR
+are allowed\&.
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBPYTHON_CRITICAL\fR
+(50)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBPYTHON_ERROR\fR
+(40)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBPYTHON_WARNING\fR
+(30)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBPYTHON_INFO\fR
+(20)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBPYTHON_DEBUG\fR
+(10)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBPYTHON_NOTSET\fR
+(0)
+.RE
+.RE
+.SH "OPTIONS"
+.sp
+General options are described in \fBlttng\fR(1)\&.
+.SS "Domain"
+.sp
+One of:
+.PP
+\fB-j\fR, \fB--jul\fR
+.RS 4
+Create or enable event rules in the
+\fBjava.util.logging\fR
+(JUL) domain\&.
+.RE
+.PP
+\fB-k\fR, \fB--kernel\fR
+.RS 4
+Create or enable event rules in the Linux kernel domain\&.
+.RE
+.PP
+\fB-l\fR, \fB--log4j\fR
+.RS 4
+Create or enable event rules in the Apache log4j domain\&.
+.RE
+.PP
+\fB-p\fR, \fB--python\fR
+.RS 4
+Create or enable event rules in the Python domain\&.
+.RE
+.PP
+\fB-u\fR, \fB--userspace\fR
+.RS 4
+Create or enable event rules in the user space domain\&.
+.RE
+.SS "Target"
+.PP
+\fB-c\fR, \fB--channel\fR=\fICHANNEL\fR
+.RS 4
+Create or enable event rules in the channel named
+\fICHANNEL\fR
+instead of the default channel name
+\fBchannel0\fR\&.
+.RE
+.PP
+\fB-s\fR, \fB--session\fR=\fISESSION\fR
+.RS 4
+Create or enable event rules in the tracing session named
+\fISESSION\fR
+instead of the current tracing session\&.
+.RE
+.SS "Event source type"
+.sp
+One of:
+.PP
+\fB--function\fR=\fISOURCE\fR
+.RS 4
+Linux kernel kretprobe\&. Only available with the
+\fB--kernel\fR
+domain option\&.
+\fISOURCE\fR
+is one of:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Function address (\fB0x\fR
+prefix supported)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Function symbol
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Function symbol and offset (\fBSYMBOL+OFFSET\fR
+format)
+.RE
+.RE
+.PP
+\fB--probe\fR=\fISOURCE\fR
+.RS 4
+Linux kernel kprobe\&. Only available with the
+\fB--kernel\fR
+domain option\&.
+\fISOURCE\fR
+is one of:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Address (\fB0x\fR
+prefix supported)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Symbol
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Symbol and offset (\fBSYMBOL+OFFSET\fR
+format)
+.RE
+.RE
+.PP
+\fB--syscall\fR
+.RS 4
+Linux kernel system call\&. Only available with the
+\fB--kernel\fR
+domain option\&.
+.RE
+.PP
+\fB--tracepoint\fR
+.RS 4
+Linux kernel or application tracepoint (default)\&.
+.RE
+.SS "Log level"
+.sp
+One of:
+.PP
+\fB--loglevel\fR=\fILOGLEVEL\fR
+.RS 4
+Add log level condition to the event rule: the event source\(cqs defined log level must be at least as severe as
+\fILOGLEVEL\fR\&. See the
+Log levels
+section above for the available log levels\&. Only available with application domains\&.
+.RE
+.PP
+\fB--loglevel-only\fR=\fILOGLEVEL\fR
+.RS 4
+Add log level condition to the event rule: the event source\(cqs defined log level must match
+\fILOGLEVEL\fR\&. See the
+Log levels
+section above for the available log levels\&. Only available with application domains\&.
+.RE
+.SS "Filtering and exclusion"
+.PP
+\fB-x\fR, \fB--exclude\fR=\fIEVENT\fR[,\fIEVENT\fR]\&...
+.RS 4
+Exclude events named
+\fIEVENT\fR
+from the event rule\&. This option can be used when the command\(cqs
+\fIEVENT\fR
+argument contains a wildcard (\fB*\fR) to exclude specific names\&. Only available with application domains\&.
+.RE
+.PP
+\fB-f\fR, \fB--filter\fR=\fIEXPR\fR
+.RS 4
+Add filter expression condition to the event rule\&. Expression
+\fIEXPR\fR
+must evaluate to true when executed against the dynamic values of event fields\&. See the
+Filter expression syntax
+section above for more information\&.
+.RE
+.SS "Shortcuts"
+.PP
+\fB-a\fR, \fB--all\fR
+.RS 4
+Equivalent to an
+\fIEVENT\fR
+argument named
+\fB*\fR
+(wildcard) when also using the
+\fB--tracepoint\fR
+(default) or
+\fB--syscall\fR
+option\&.
+.RE
+.SS "Program information"
+.PP
+\fB-h\fR, \fB--help\fR
+.RS 4
+Show command help\&.
+.sp
+This option, like
+\fBlttng-help\fR(1), attempts to launch
+\fB/usr/bin/man\fR
+to view the command\(cqs man page\&. The path to the man pager can be overridden by the
+\fBLTTNG_MAN_BIN_PATH\fR
+environment variable\&.
+.RE
+.PP
+\fB--list-options\fR
+.RS 4
+List available command options\&.
+.RE
+.SH "ENVIRONMENT VARIABLES"
+.PP
+\fBLTTNG_HOME\fR
+.RS 4
+Overrides the
+\fB$HOME\fR
+environment variable\&. Useful when the user running the commands has a non\-writable home directory\&.
+.RE
+.PP
+\fBLTTNG_MAN_BIN_PATH\fR
+.RS 4
+Absolute path to the man pager to use for viewing help information about LTTng commands (using
+\fBlttng-help\fR(1)
+or
+\fBlttng COMMAND --help\fR)\&.
+.RE
+.PP
+\fBLTTNG_SESSION_CONFIG_XSD_PATH\fR
+.RS 4
+Path in which the
+\fBsession.xsd\fR
+session configuration XML schema may be found\&.
+.RE
+.PP
+\fBLTTNG_SESSIOND_PATH\fR
+.RS 4
+Full session daemon binary path\&.
+.sp
+The
+\fB--sessiond-path\fR
+option has precedence over this environment variable\&.
+.RE
+.sp
+Note that the \fBlttng-create\fR(1) command can spawn an LTTng session daemon automatically if none is running\&. See \fBlttng-sessiond\fR(8) for the environment variables influencing the execution of the session daemon\&.
+.SH "EXIT STATUS"
+.PP
+\fB0\fR
+.RS 4
+Success
+.RE
+.PP
+\fB1\fR
+.RS 4
+Command error
+.RE
+.PP
+\fB2\fR
+.RS 4
+Undefined command
+.RE
+.PP
+\fB3\fR
+.RS 4
+Fatal error
+.RE
+.PP
+\fB4\fR
+.RS 4
+Command warning (something went wrong during the command)
+.RE
+.SH "BUGS"
+.sp
+If you encounter any issue or usability problem, please report it on the LTTng bug tracker: \fBhttps://bugs\&.lttng\&.org/projects/lttng\-tools\fR\&.
+.SH "RESOURCES"
+.sp
+LTTng project website: \fBhttp://lttng\&.org\fR\&.
+.sp
+LTTng documentation: \fBhttp://lttng\&.org/docs\fR\&.
+.sp
+Git repositories: \fBhttp://git\&.lttng\&.org\fR\&.
+.sp
+Mailing list for support and development: \fBlttng-dev@lists.lttng.org\fR\&.
+.sp
+IRC channel: \fB#lttng\fR on \fBirc.oftc.net\fR (OFTC)\&.
+.SH "COPYRIGHTS"
+.sp
+This program is part of the LTTng\-tools project\&.
+.sp
+LTTng\-tools is distributed under the GNU General Public License version 2\&. See the \fBLICENSE\fR file for details\&.
+.SH "THANKS"
+.sp
+Special thanks to Michel Dagenais and the DORSAL laboratory at \('Ecole Polytechnique de Montr\('eal for the LTTng journey\&.
+.sp
+Also thanks to the Ericsson teams working on tracing which helped us greatly with detailed bug reports and unusual test cases\&.
+.SH "AUTHORS"
+.sp
+LTTng\-tools was originally written by Mathieu Desnoyers, Julien Desfossez, and David Goulet\&. More people have since contributed to it\&.
+.sp
+LTTng\-tools is currently maintained by J\('er\('emie Galarneau (\fBjeremie\&.galarneau@efficios\&.com\fR)\&.
+.SH "SEE ALSO"
+.sp
+\fBlttng-disable-event\fR(1), \fBlttng\fR(1)

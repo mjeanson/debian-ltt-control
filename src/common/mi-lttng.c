@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2014 - Jonathan Rajotte <jonathan.r.julien@gmail.com>
  *                    - Olivier Cotte <olivier.cotte@polymtl.ca>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License, version 2 only, as
@@ -16,14 +17,31 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
-#include <include/config.h>
-#include <common/config/config.h>
+#include <common/config/session-config.h>
+#include <common/defaults.h>
 #include <lttng/snapshot-internal.h>
+#include <lttng/channel.h>
 #include "mi-lttng.h"
 
 #include <assert.h>
+
+#define MI_SCHEMA_MAJOR_VERSION 3
+#define MI_SCHEMA_MINOR_VERSION 0
+
+/* Machine interface namespace URI */
+const char * const mi_lttng_xmlns = "xmlns";
+const char * const mi_lttng_xmlns_xsi = "xmlns:xsi";
+const char * const mi_lttng_w3_schema_uri = "http://www.w3.org/2001/XMLSchema-instance";
+const char * const mi_lttng_schema_location = "xsi:schemaLocation";
+const char * const mi_lttng_schema_location_uri =
+	DEFAULT_LTTNG_MI_NAMESPACE " "
+	"http://lttng.org/xml/schemas/lttng-mi/" XSTR(MI_SCHEMA_MAJOR_VERSION)
+	"/lttng-mi-" XSTR(MI_SCHEMA_MAJOR_VERSION) "."
+	XSTR(MI_SCHEMA_MINOR_VERSION) ".xsd";
+const char * const mi_lttng_schema_version = "schemaVersion";
+const char * const mi_lttng_schema_version_value = XSTR(MI_SCHEMA_MAJOR_VERSION)
+	"." XSTR(MI_SCHEMA_MINOR_VERSION);
 
 /* Strings related to command */
 const char * const mi_lttng_element_command = "command";
@@ -38,6 +56,8 @@ const char * const mi_lttng_element_command_enable_channels = "enable-channel";
 const char * const mi_lttng_element_command_enable_event = "enable-event";
 const char * const mi_lttng_element_command_list = "list";
 const char * const mi_lttng_element_command_load = "load";
+const char * const mi_lttng_element_command_metadata = "metadata";
+const char * const mi_lttng_element_command_metadata_action = "metadata_action";
 const char * const mi_lttng_element_command_name = "name";
 const char * const mi_lttng_element_command_output = "output";
 const char * const mi_lttng_element_command_save = "save";
@@ -69,13 +89,8 @@ const char * const mi_lttng_element_version_web = "url";
 const char * const mi_lttng_element_event_field = "event_field";
 const char * const mi_lttng_element_event_fields = "event_fields";
 
-/* String related to lttng_event_context */
-const char * const mi_lttng_context_type_perf_counter = "PERF_COUNTER";
-const char * const mi_lttng_context_type_perf_cpu_counter = "PERF_CPU_COUNTER";
-const char * const mi_lttng_context_type_perf_thread_counter = "PERF_THREAD_COUNTER";
-
 /* String related to lttng_event_perf_counter_ctx */
-const char * const mi_lttng_element_perf_counter_context = "perf_counter_context";
+const char * const mi_lttng_element_perf_counter_context = "perf";
 
 /* Strings related to pid */
 const char * const mi_lttng_element_pid_id = "id";
@@ -163,8 +178,6 @@ const char * const mi_lttng_element_snapshot_session_name = "session_name";
 const char * const mi_lttng_element_snapshots = "snapshots";
 
 /* String related to track/untrack command */
-const char * const mi_lttng_element_track_untrack_targets = "targets";
-const char * const mi_lttng_element_track_untrack_pid_target = "pid_target";
 const char * const mi_lttng_element_track_untrack_all_wildcard = "*";
 
 
@@ -327,18 +340,12 @@ const char *mi_lttng_eventtype_string(enum lttng_event_type value)
 	}
 }
 
-LTTNG_HIDDEN
+static
 const char *mi_lttng_event_contexttype_string(enum lttng_event_context_type val)
 {
 	switch (val) {
 	case LTTNG_EVENT_CONTEXT_PID:
 		return config_event_context_pid;
-	case LTTNG_EVENT_CONTEXT_PERF_COUNTER:
-		return mi_lttng_context_type_perf_counter;
-	case LTTNG_EVENT_CONTEXT_PERF_THREAD_COUNTER:
-		return mi_lttng_context_type_perf_thread_counter;
-	case LTTNG_EVENT_CONTEXT_PERF_CPU_COUNTER:
-		return mi_lttng_context_type_perf_cpu_counter;
 	case LTTNG_EVENT_CONTEXT_PROCNAME:
 		return config_event_context_procname;
 	case LTTNG_EVENT_CONTEXT_PRIO:
@@ -401,6 +408,7 @@ const char *mi_lttng_domaintype_string(enum lttng_domain_type value)
 	default:
 		/* Should not have an unknown domain */
 		assert(0);
+		return NULL;
 	}
 }
 
@@ -417,6 +425,7 @@ const char *mi_lttng_buffertype_string(enum lttng_buffer_type value)
 	default:
 		/* Should not have an unknow buffer type */
 		assert(0);
+		return NULL;
 	}
 }
 
@@ -489,10 +498,42 @@ int mi_lttng_writer_command_open(struct mi_writer *writer, const char *command)
 {
 	int ret;
 
-	ret = mi_lttng_writer_open_element(writer, mi_lttng_element_command);
+	/*
+	 * A command is always the MI's root node, it must declare the current
+	 * namespace and schema URIs and the schema's version.
+	 */
+	ret = config_writer_open_element(writer->writer,
+			mi_lttng_element_command);
 	if (ret) {
 		goto end;
 	}
+
+	ret = config_writer_write_attribute(writer->writer,
+			mi_lttng_xmlns, DEFAULT_LTTNG_MI_NAMESPACE);
+	if (ret) {
+		goto end;
+	}
+
+	ret = config_writer_write_attribute(writer->writer,
+			mi_lttng_xmlns_xsi, mi_lttng_w3_schema_uri);
+	if (ret) {
+		goto end;
+	}
+
+	ret = config_writer_write_attribute(writer->writer,
+			mi_lttng_schema_location,
+			mi_lttng_schema_location_uri);
+	if (ret) {
+		goto end;
+	}
+
+	ret = config_writer_write_attribute(writer->writer,
+			mi_lttng_schema_version,
+			mi_lttng_schema_version_value);
+	if (ret) {
+		goto end;
+	}
+
 	ret = mi_lttng_writer_write_element_string(writer,
 			mi_lttng_element_command_name, command);
 end:
@@ -828,8 +869,21 @@ int mi_lttng_channel_attr(struct mi_writer *writer,
 		struct lttng_channel_attr *attr)
 {
 	int ret = 0;
+	struct lttng_channel *chan = caa_container_of(attr,
+			struct lttng_channel, attr);
+	uint64_t discarded_events, lost_packets;
 
 	assert(attr);
+
+	ret = lttng_channel_get_discarded_event_count(chan, &discarded_events);
+	if (ret) {
+		goto end;
+	}
+
+	ret = lttng_channel_get_lost_packet_count(chan, &lost_packets);
+	if (ret) {
+		goto end;
+	}
 
 	/* Opening Attributes */
 	ret = mi_lttng_writer_open_element(writer, config_element_attributes);
@@ -909,6 +963,22 @@ int mi_lttng_channel_attr(struct mi_writer *writer,
 		goto end;
 	}
 
+	/* Discarded events */
+	ret = mi_lttng_writer_write_element_unsigned_int(writer,
+		config_element_discarded_events,
+		discarded_events);
+	if (ret) {
+		goto end;
+	}
+
+	/* Lost packets */
+	ret = mi_lttng_writer_write_element_unsigned_int(writer,
+		config_element_lost_packets,
+		lost_packets);
+	if (ret) {
+		goto end;
+	}
+
 	/* Closing attributes */
 	ret = mi_lttng_writer_close_element(writer);
 	if (ret) {
@@ -924,6 +994,7 @@ int mi_lttng_event_common_attributes(struct mi_writer *writer,
 		struct lttng_event *event)
 {
 	int ret;
+	const char *filter_expression;
 
 	/* Open event element */
 	ret = mi_lttng_writer_open_element(writer, config_element_event);
@@ -952,9 +1023,65 @@ int mi_lttng_event_common_attributes(struct mi_writer *writer,
 		goto end;
 	}
 
-	/* Event filter enabled? */
-	ret = mi_lttng_writer_write_element_bool(writer,
-			config_element_filter, event->filter);
+	/* Event filter expression */
+	ret = lttng_event_get_filter_expression(event, &filter_expression);
+	if (ret) {
+		goto end;
+	}
+
+	if (filter_expression) {
+		ret = mi_lttng_writer_write_element_string(writer,
+				config_element_filter_expression,
+				filter_expression);
+		if (ret) {
+			goto end;
+		}
+	}
+
+end:
+	return ret;
+}
+
+static int write_event_exclusions(struct mi_writer *writer,
+		struct lttng_event *event)
+{
+	int i;
+	int ret;
+	int exclusion_count;
+
+	/* Open event exclusions */
+	ret = mi_lttng_writer_open_element(writer, config_element_exclusions);
+	if (ret) {
+		goto end;
+	}
+
+	exclusion_count = lttng_event_get_exclusion_name_count(event);
+	if (exclusion_count < 0) {
+		ret = exclusion_count;
+		goto end;
+	}
+
+	for (i = 0; i < exclusion_count; i++) {
+		const char *name;
+
+		ret = lttng_event_get_exclusion_name(event, i, &name);
+		if (ret) {
+			/* Close exclusions */
+			mi_lttng_writer_close_element(writer);
+			goto end;
+		}
+
+		ret = mi_lttng_writer_write_element_string(writer,
+				config_element_exclusion, name);
+		if (ret) {
+			/* Close exclusions */
+			mi_lttng_writer_close_element(writer);
+			goto end;
+		}
+	}
+
+	/* Close exclusions */
+	ret = mi_lttng_writer_close_element(writer);
 
 end:
 	return ret;
@@ -982,12 +1109,8 @@ int mi_lttng_event_tracepoint_loglevel(struct mi_writer *writer,
 		goto end;
 	}
 
-	/* event exclusion filter */
-	ret = mi_lttng_writer_write_element_bool(writer,
-			config_element_exclusion, event->exclusion);
-	if (ret) {
-		goto end;
-	}
+	/* Event exclusions */
+	ret = write_event_exclusions(writer, event);
 
 end:
 	return ret;
@@ -998,8 +1121,7 @@ int mi_lttng_event_tracepoint_no_loglevel(struct mi_writer *writer,
 		struct lttng_event *event)
 {
 	/* event exclusion filter */
-	return mi_lttng_writer_write_element_bool(writer,
-			config_element_exclusion, event->exclusion);
+	return write_event_exclusions(writer, event);
 }
 
 LTTNG_HIDDEN
@@ -1199,7 +1321,7 @@ LTTNG_HIDDEN
 int mi_lttng_targets_open(struct mi_writer *writer)
 {
 	return mi_lttng_writer_open_element(writer,
-			mi_lttng_element_track_untrack_targets);
+			config_element_targets);
 }
 
 LTTNG_HIDDEN
@@ -1208,7 +1330,7 @@ int mi_lttng_pid_target(struct mi_writer *writer, pid_t pid, int is_open)
 	int ret;
 
 	ret = mi_lttng_writer_open_element(writer,
-			mi_lttng_element_track_untrack_pid_target);
+			config_element_target_pid);
 	if (ret) {
 		goto end;
 	}
@@ -1322,54 +1444,6 @@ end:
 }
 
 LTTNG_HIDDEN
-int mi_lttng_context(struct mi_writer *writer,
-		struct lttng_event_context *context, int is_open)
-{
-	int ret;
-	const char *type_string;
-	struct lttng_event_perf_counter_ctx *perf_context;
-	/* Open context */
-	ret = mi_lttng_writer_open_element(writer , config_element_context);
-	if (ret) {
-		goto end;
-	}
-
-	type_string = mi_lttng_event_contexttype_string(context->ctx);
-	if (!type_string) {
-		ret = -LTTNG_ERR_INVALID;
-		goto end;
-	}
-
-	/* Print context type */
-	ret = mi_lttng_writer_write_element_string(writer, config_element_type,
-			type_string);
-
-	/* Special case for PERF_*_COUNTER
-	 * print the lttng_event_perf_counter_ctx*/
-	switch (context->ctx) {
-	case LTTNG_EVENT_CONTEXT_PERF_COUNTER:
-	case LTTNG_EVENT_CONTEXT_PERF_THREAD_COUNTER:
-	case LTTNG_EVENT_CONTEXT_PERF_CPU_COUNTER:
-		perf_context = &context->u.perf_counter;
-		ret =  mi_lttng_perf_counter_context(writer, perf_context);
-		if (ret) {
-			goto end;
-		}
-		break;
-	default:
-		break;
-	}
-
-	/* Close context */
-	if (!is_open) {
-		ret = mi_lttng_writer_close_element(writer);
-	}
-
-end:
-	return ret;
-}
-
-LTTNG_HIDDEN
 int mi_lttng_perf_counter_context(struct mi_writer *writer,
 		struct lttng_event_perf_counter_ctx  *perf_context)
 {
@@ -1405,6 +1479,102 @@ int mi_lttng_perf_counter_context(struct mi_writer *writer,
 
 	/* Close perf_counter_context */
 	ret = mi_lttng_writer_close_element(writer);
+end:
+	return ret;
+}
+
+static
+int mi_lttng_app_context(struct mi_writer *writer,
+		const char *provider_name, const char *ctx_name)
+{
+	int ret;
+
+	/* Open app */
+	ret = mi_lttng_writer_open_element(writer,
+			config_element_context_app);
+	if (ret) {
+		goto end;
+	}
+
+	/* provider_name */
+	ret = mi_lttng_writer_write_element_string(writer,
+			config_element_context_app_provider_name,
+			provider_name);
+	if (ret) {
+		goto end;
+	}
+
+	/* ctx_name */
+	ret = mi_lttng_writer_write_element_string(writer,
+			config_element_context_app_ctx_name, ctx_name);
+	if (ret) {
+		goto end;
+	}
+
+	/* Close app */
+	ret = mi_lttng_writer_close_element(writer);
+end:
+	return ret;
+}
+
+LTTNG_HIDDEN
+int mi_lttng_context(struct mi_writer *writer,
+		struct lttng_event_context *context, int is_open)
+{
+	int ret;
+
+	/* Open context */
+	ret = mi_lttng_writer_open_element(writer , config_element_context);
+	if (ret) {
+		goto end;
+	}
+
+	/* Special case for PERF_*_COUNTER
+	 * print the lttng_event_perf_counter_ctx*/
+	switch (context->ctx) {
+	case LTTNG_EVENT_CONTEXT_PERF_COUNTER:
+	case LTTNG_EVENT_CONTEXT_PERF_THREAD_COUNTER:
+	case LTTNG_EVENT_CONTEXT_PERF_CPU_COUNTER:
+	{
+		struct lttng_event_perf_counter_ctx *perf_context =
+				&context->u.perf_counter;
+		ret =  mi_lttng_perf_counter_context(writer, perf_context);
+		if (ret) {
+			goto end;
+		}
+		break;
+	}
+	case LTTNG_EVENT_CONTEXT_APP_CONTEXT:
+	{
+		ret = mi_lttng_app_context(writer,
+				context->u.app_ctx.provider_name,
+				context->u.app_ctx.ctx_name);
+		if (ret) {
+			goto end;
+		}
+		break;
+	}
+	default:
+	{
+		const char *type_string = mi_lttng_event_contexttype_string(
+				context->ctx);
+		if (!type_string) {
+			ret = -LTTNG_ERR_INVALID;
+			goto end;
+		}
+
+		/* Print context type */
+		ret = mi_lttng_writer_write_element_string(writer,
+				config_element_type, type_string);
+		break;
+	}
+	}
+
+	/* Close context */
+	if (!is_open) {
+		ret = mi_lttng_writer_close_element(writer);
+	}
+
 end:
 	return ret;
 }

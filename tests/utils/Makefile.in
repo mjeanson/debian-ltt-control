@@ -14,6 +14,7 @@
 
 @SET_MAKE@
 
+
 VPATH = @srcdir@
 am__is_gnu_make = { \
   if test -z '$(MAKELEVEL)'; then \
@@ -91,27 +92,28 @@ host_triplet = @host@
 target_triplet = @target@
 subdir = tests/utils
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
-	$(top_srcdir)/config/ax_check_class.m4 \
-	$(top_srcdir)/config/ax_check_classpath.m4 \
-	$(top_srcdir)/config/ax_compare_version.m4 \
-	$(top_srcdir)/config/ax_java_options.m4 \
-	$(top_srcdir)/config/ax_pkg_swig.m4 \
-	$(top_srcdir)/config/ax_prog_bison_version.m4 \
-	$(top_srcdir)/config/ax_prog_flex_version.m4 \
-	$(top_srcdir)/config/ax_prog_jar.m4 \
-	$(top_srcdir)/config/ax_prog_java.m4 \
-	$(top_srcdir)/config/ax_prog_java_works.m4 \
-	$(top_srcdir)/config/ax_prog_javac.m4 \
-	$(top_srcdir)/config/ax_prog_javac_works.m4 \
-	$(top_srcdir)/config/ax_try_compile_java.m4 \
-	$(top_srcdir)/config/config_feature.m4 \
-	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
-	$(top_srcdir)/config/libxml.m4 \
-	$(top_srcdir)/config/ltoptions.m4 \
-	$(top_srcdir)/config/ltsugar.m4 \
-	$(top_srcdir)/config/ltversion.m4 \
-	$(top_srcdir)/config/lt~obsolete.m4 $(top_srcdir)/configure.ac
+am__aclocal_m4_deps = $(top_srcdir)/m4/ac_define_dir.m4 \
+	$(top_srcdir)/m4/ax_c___attribute__.m4 \
+	$(top_srcdir)/m4/ax_check_class.m4 \
+	$(top_srcdir)/m4/ax_check_classpath.m4 \
+	$(top_srcdir)/m4/ax_compare_version.m4 \
+	$(top_srcdir)/m4/ax_java_options.m4 \
+	$(top_srcdir)/m4/ax_lib_socket_nsl.m4 \
+	$(top_srcdir)/m4/ax_pkg_swig.m4 \
+	$(top_srcdir)/m4/ax_prog_bison_version.m4 \
+	$(top_srcdir)/m4/ax_prog_flex_version.m4 \
+	$(top_srcdir)/m4/ax_prog_jar.m4 \
+	$(top_srcdir)/m4/ax_prog_java.m4 \
+	$(top_srcdir)/m4/ax_prog_java_works.m4 \
+	$(top_srcdir)/m4/ax_prog_javac.m4 \
+	$(top_srcdir)/m4/ax_prog_javac_works.m4 \
+	$(top_srcdir)/m4/ax_pthread.m4 \
+	$(top_srcdir)/m4/ax_try_compile_java.m4 \
+	$(top_srcdir)/m4/config_feature.m4 $(top_srcdir)/m4/epoll.m4 \
+	$(top_srcdir)/m4/libtool.m4 $(top_srcdir)/m4/libxml.m4 \
+	$(top_srcdir)/m4/ltoptions.m4 $(top_srcdir)/m4/ltsugar.m4 \
+	$(top_srcdir)/m4/ltversion.m4 $(top_srcdir)/m4/lt~obsolete.m4 \
+	$(top_srcdir)/m4/pprint.m4 $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 DIST_COMMON = $(srcdir)/Makefile.am $(dist_noinst_SCRIPTS) \
@@ -120,6 +122,14 @@ mkinstalldirs = $(install_sh) -d
 CONFIG_HEADER = $(top_builddir)/include/config.h
 CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
+LTLIBRARIES = $(noinst_LTLIBRARIES)
+libtestutils_la_LIBADD =
+am_libtestutils_la_OBJECTS = utils.lo
+libtestutils_la_OBJECTS = $(am_libtestutils_la_OBJECTS)
+AM_V_lt = $(am__v_lt_@AM_V@)
+am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
+am__v_lt_0 = --silent
+am__v_lt_1 = 
 SCRIPTS = $(dist_noinst_SCRIPTS)
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
@@ -133,8 +143,29 @@ AM_V_at = $(am__v_at_@AM_V@)
 am__v_at_ = $(am__v_at_@AM_DEFAULT_V@)
 am__v_at_0 = @
 am__v_at_1 = 
-SOURCES =
-DIST_SOURCES =
+depcomp = $(SHELL) $(top_srcdir)/config/depcomp
+am__depfiles_maybe = depfiles
+am__mv = mv -f
+COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
+	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
+LTCOMPILE = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) \
+	$(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) \
+	$(AM_CFLAGS) $(CFLAGS)
+AM_V_CC = $(am__v_CC_@AM_V@)
+am__v_CC_ = $(am__v_CC_@AM_DEFAULT_V@)
+am__v_CC_0 = @echo "  CC      " $@;
+am__v_CC_1 = 
+CCLD = $(CC)
+LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
+	$(AM_LDFLAGS) $(LDFLAGS) -o $@
+AM_V_CCLD = $(am__v_CCLD_@AM_V@)
+am__v_CCLD_ = $(am__v_CCLD_@AM_DEFAULT_V@)
+am__v_CCLD_0 = @echo "  CCLD    " $@;
+am__v_CCLD_1 = 
+SOURCES = $(libtestutils_la_SOURCES)
+DIST_SOURCES = $(libtestutils_la_SOURCES)
 RECURSIVE_TARGETS = all-recursive check-recursive cscopelist-recursive \
 	ctags-recursive dvi-recursive html-recursive info-recursive \
 	install-data-recursive install-dvi-recursive \
@@ -176,7 +207,7 @@ am__define_uniq_tagged_files = \
 ETAGS = etags
 CTAGS = ctags
 DIST_SUBDIRS = $(SUBDIRS)
-am__DIST_COMMON = $(srcdir)/Makefile.in
+am__DIST_COMMON = $(srcdir)/Makefile.in $(top_srcdir)/config/depcomp
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 am__relativize = \
   dir0=`pwd`; \
@@ -207,6 +238,7 @@ ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
 AR = @AR@
+ASCIIDOC = @ASCIIDOC@
 AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
@@ -274,6 +306,7 @@ MINOR_VERSION = @MINOR_VERSION@
 MKDIR_P = @MKDIR_P@
 NM = @NM@
 NMEDIT = @NMEDIT@
+OBJCOPY = @OBJCOPY@
 OBJDUMP = @OBJDUMP@
 OBJEXT = @OBJEXT@
 OTOOL = @OTOOL@
@@ -287,11 +320,15 @@ PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATCHLEVEL_VERSION = @PATCHLEVEL_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
+PGREP = @PGREP@
 PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POPT_CFLAGS = @POPT_CFLAGS@
 POPT_LIBS = @POPT_LIBS@
+PTHREAD_CC = @PTHREAD_CC@
+PTHREAD_CFLAGS = @PTHREAD_CFLAGS@
+PTHREAD_LIBS = @PTHREAD_LIBS@
 PYTHON = @PYTHON@
 PYTHON2_AGENT = @PYTHON2_AGENT@
 PYTHON2_BIN = @PYTHON2_BIN@
@@ -317,6 +354,7 @@ UUID_CFLAGS = @UUID_CFLAGS@
 UUID_LIBS = @UUID_LIBS@
 VERSION = @VERSION@
 XML2_CONFIG = @XML2_CONFIG@
+XMLTO = @XMLTO@
 XML_CPPFLAGS = @XML_CPPFLAGS@
 XML_LIBS = @XML_LIBS@
 YACC = @YACC@
@@ -333,6 +371,7 @@ am__leading_dot = @am__leading_dot@
 am__quote = @am__quote@
 am__tar = @am__tar@
 am__untar = @am__untar@
+ax_pthread_config = @ax_pthread_config@
 bindir = @bindir@
 build = @build@
 build_alias = @build_alias@
@@ -366,11 +405,13 @@ oldincludedir = @oldincludedir@
 pdfdir = @pdfdir@
 pkgpyexecdir = @pkgpyexecdir@
 pkgpythondir = @pkgpythondir@
+pprint_tput = @pprint_tput@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
+report_fold = @report_fold@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -383,12 +424,15 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-SUBDIRS = tap testapp
-EXTRA_DIST = utils.sh test_utils.py babelstats.pl
-dist_noinst_SCRIPTS = utils.sh test_utils.py babelstats.pl
+SUBDIRS = . tap testapp
+EXTRA_DIST = utils.sh test_utils.py babelstats.pl warn_lttng_processes.sh
+dist_noinst_SCRIPTS = utils.sh test_utils.py babelstats.pl warn_lttng_processes.sh
+noinst_LTLIBRARIES = libtestutils.la
+libtestutils_la_SOURCES = utils.c utils.h
 all: all-recursive
 
 .SUFFIXES:
+.SUFFIXES: .c .lo .o .obj
 $(srcdir)/Makefile.in: @MAINTAINER_MODE_TRUE@ $(srcdir)/Makefile.am  $(am__configure_deps)
 	@for dep in $?; do \
 	  case '$(am__configure_deps)' in \
@@ -418,6 +462,49 @@ $(top_srcdir)/configure: @MAINTAINER_MODE_TRUE@ $(am__configure_deps)
 $(ACLOCAL_M4): @MAINTAINER_MODE_TRUE@ $(am__aclocal_m4_deps)
 	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
 $(am__aclocal_m4_deps):
+
+clean-noinstLTLIBRARIES:
+	-test -z "$(noinst_LTLIBRARIES)" || rm -f $(noinst_LTLIBRARIES)
+	@list='$(noinst_LTLIBRARIES)'; \
+	locs=`for p in $$list; do echo $$p; done | \
+	      sed 's|^[^/]*$$|.|; s|/[^/]*$$||; s|$$|/so_locations|' | \
+	      sort -u`; \
+	test -z "$$locs" || { \
+	  echo rm -f $${locs}; \
+	  rm -f $${locs}; \
+	}
+
+libtestutils.la: $(libtestutils_la_OBJECTS) $(libtestutils_la_DEPENDENCIES) $(EXTRA_libtestutils_la_DEPENDENCIES) 
+	$(AM_V_CCLD)$(LINK)  $(libtestutils_la_OBJECTS) $(libtestutils_la_LIBADD) $(LIBS)
+
+mostlyclean-compile:
+	-rm -f *.$(OBJEXT)
+
+distclean-compile:
+	-rm -f *.tab.c
+
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/utils.Plo@am__quote@
+
+.c.o:
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$<' object='$@' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(COMPILE) -c -o $@ $<
+
+.c.obj:
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ `$(CYGPATH_W) '$<'`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$<' object='$@' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(COMPILE) -c -o $@ `$(CYGPATH_W) '$<'`
+
+.c.lo:
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LTCOMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$<' object='$@' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LTCOMPILE) -c -o $@ $<
 
 mostlyclean-libtool:
 	-rm -f *.lo
@@ -581,7 +668,7 @@ distdir: $(DISTFILES)
 	done
 check-am: all-am
 check: check-recursive
-all-am: Makefile $(SCRIPTS) all-local
+all-am: Makefile $(LTLIBRARIES) $(SCRIPTS) all-local
 installdirs: installdirs-recursive
 installdirs-am:
 install: install-recursive
@@ -616,11 +703,14 @@ maintainer-clean-generic:
 	@echo "it deletes files that may require special tools to rebuild."
 clean: clean-recursive
 
-clean-am: clean-generic clean-libtool clean-local mostlyclean-am
+clean-am: clean-generic clean-libtool clean-local \
+	clean-noinstLTLIBRARIES mostlyclean-am
 
 distclean: distclean-recursive
+	-rm -rf ./$(DEPDIR)
 	-rm -f Makefile
-distclean-am: clean-am distclean-generic distclean-tags
+distclean-am: clean-am distclean-compile distclean-generic \
+	distclean-tags
 
 dvi: dvi-recursive
 
@@ -663,12 +753,14 @@ install-ps-am:
 installcheck-am:
 
 maintainer-clean: maintainer-clean-recursive
+	-rm -rf ./$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 
 mostlyclean: mostlyclean-recursive
 
-mostlyclean-am: mostlyclean-generic mostlyclean-libtool
+mostlyclean-am: mostlyclean-compile mostlyclean-generic \
+	mostlyclean-libtool
 
 pdf: pdf-recursive
 
@@ -684,15 +776,16 @@ uninstall-am:
 
 .PHONY: $(am__recursive_targets) CTAGS GTAGS TAGS all all-am all-local \
 	check check-am clean clean-generic clean-libtool clean-local \
-	cscopelist-am ctags ctags-am distclean distclean-generic \
-	distclean-libtool distclean-tags distdir dvi dvi-am html \
-	html-am info info-am install install-am install-data \
-	install-data-am install-dvi install-dvi-am install-exec \
-	install-exec-am install-html install-html-am install-info \
-	install-info-am install-man install-pdf install-pdf-am \
-	install-ps install-ps-am install-strip installcheck \
-	installcheck-am installdirs installdirs-am maintainer-clean \
-	maintainer-clean-generic mostlyclean mostlyclean-generic \
+	clean-noinstLTLIBRARIES cscopelist-am ctags ctags-am distclean \
+	distclean-compile distclean-generic distclean-libtool \
+	distclean-tags distdir dvi dvi-am html html-am info info-am \
+	install install-am install-data install-data-am install-dvi \
+	install-dvi-am install-exec install-exec-am install-html \
+	install-html-am install-info install-info-am install-man \
+	install-pdf install-pdf-am install-ps install-ps-am \
+	install-strip installcheck installcheck-am installdirs \
+	installdirs-am maintainer-clean maintainer-clean-generic \
+	mostlyclean mostlyclean-compile mostlyclean-generic \
 	mostlyclean-libtool pdf pdf-am ps ps-am tags tags-am uninstall \
 	uninstall-am
 

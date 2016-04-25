@@ -15,11 +15,10 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <arpa/inet.h>
-#include <netdb.h>
+#include <common/compat/netdb.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -69,7 +68,6 @@ static const inline char *strpbrk_or_eos(const char *s, const char *accept)
 	return p;
 }
 
-
 /*
  * Validate if proto is a supported protocol from proto_uri array.
  */
@@ -116,7 +114,7 @@ static int set_ip_address(const char *addr, int af, char *dst, size_t size)
 	ret = inet_pton(af, addr, buf);
 	if (ret < 1) {
 		/* We consider the dst to be an hostname or an invalid IP char */
-		record = gethostbyname2(addr, af);
+		record = lttng_gethostbyname2(addr, af);
 		if (record == NULL) {
 			/* At this point, the IP or the hostname is bad */
 			ERR("URI parse bad hostname %s for af %d", addr, af);

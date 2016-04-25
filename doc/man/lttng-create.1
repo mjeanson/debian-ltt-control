@@ -1,0 +1,417 @@
+'\" t
+.\"     Title: lttng-create
+.\"    Author: [see the "AUTHORS" section]
+.\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
+.\"      Date: 03/18/2016
+.\"    Manual: LTTng Manual
+.\"    Source: LTTng 2.8.0-rc1
+.\"  Language: English
+.\"
+.TH "LTTNG\-CREATE" "1" "03/18/2016" "LTTng 2\&.8\&.0\-rc1" "LTTng Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+lttng-create \- Create an LTTng tracing session
+.SH "SYNOPSIS"
+.sp
+Normal mode:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR [\fB--output\fR=\fIPATH\fR | \fB--no-output\fR]
+      [\fB--shm-path\fR=\fIPATH\fR] [\fISESSION\fR]
+.fi
+.sp
+Snapshot mode:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR \fB--snapshot\fR
+      [\fB--set-url\fR=\fIURL\fR | \fB--ctrl-url\fR=\fIURL\fR \fB--data-url\fR=\fIURL\fR]
+      [\fB--shm-path\fR=\fIPATH\fR] [\fISESSION\fR]
+.fi
+.sp
+Live mode:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR \fB--live\fR[=\fIDELAYUS\fR]
+      [\fB--set-url\fR=\fIURL\fR | \fB--ctrl-url\fR=\fIURL\fR \fB--data-url\fR=\fIURL\fR]
+      [\fB--shm-path\fR=\fIPATH\fR] [\fISESSION\fR]
+.fi
+.SH "DESCRIPTION"
+.sp
+The \fBlttng create\fR command creates a new tracing session\&.
+.sp
+A tracing session is a named container of channels, which in turn contain event rules\&. It is domain\-agnostic, in that channels and event rules can be enabled for the user space tracer and/or the Linux kernel tracer\&.
+.sp
+On execution, an \fB.lttngrc\fR file is created, if it does not exist, in the user\(cqs home directory\&. This file contains the name of the current tracing session\&. When creating a new tracing session with \fBlttng create\fR, the current tracing session is set to this new tracing session\&. The \fBlttng-set-session\fR(1) command can be used to set the current tracing session without manually editing the \fB.lttngrc\fR file\&.
+.sp
+If \fISESSION\fR is omitted, a session name is automatically created having this form: \fBauto-YYYYmmdd-HHMMSS\fR\&. \fISESSION\fR \fBmust not\fR contain the character \fB/\fR\&.
+.sp
+The \fB--shm-path\fR option can be used to specify the path to the shared memory holding the ring buffers\&. Specifying a location on an NVRAM file system makes it possible to retrieve the latest recorded trace data when the system reboots after a crash\&. To view the events of ring buffer files after a system crash, use the \fBlttng-crash\fR(1) utility\&.
+.sp
+Tracing sessions are destroyed using the \fBlttng-destroy\fR(1) command\&.
+.SS "Creation modes"
+.sp
+There are three tracing session modes:
+.PP
+Normal mode
+.RS 4
+Traces the local system and writes the trace to the local file system\&. The
+\fB--output\fR
+option specifies the trace path\&. If omitted, the trace is written in the
+\fB$LTTNG_HOME/lttng-traces\fR
+directory (\fB$LTTNG_HOME\fR
+defaults to
+\fB$HOME\fR)\&. The file system output can be disabled using the
+\fB--no-output\fR
+option\&.
+.RE
+.PP
+Snapshot mode
+.RS 4
+Traces the local system without writing the trace to the local file system (implicit
+\fB--no-output\fR
+option)\&. Channels are automatically configured to be snapshot\-ready on creation (see
+\fBlttng-enable-channel\fR(1))\&. The
+\fBlttng-snapshot\fR(1)
+command is used to take snapshots of the current ring buffers\&. The
+\fB--set-url\fR, or
+\fB--ctrl-url\fR
+and
+\fB--data-url\fR
+options set the default snapshot output destination\&.
+.RE
+.PP
+Live mode
+.RS 4
+Traces the local system, sending trace data to an LTTng relay daemon over the network (see
+\fBlttng-relayd\fR(8))\&. The
+\fB--set-url\fR, or
+\fB--ctrl-url\fR
+and
+\fB--data-url\fR
+options set the trace output destination\&. The live output URLs cannot use the
+\fBfile://\fR
+protocol (see URL format below)\&.
+.RE
+.SS "URL format"
+.sp
+The \fB--set-url\fR, \fB--ctrl-url\fR, and \fB--data-url\fR options specify URLs\&.
+.sp
+The format of those URLs is one of:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+file://\fITRACEPATH\fR
+\fINETPROTO\fR://(\fIHOST\fR | \fIIPADDR\fR)[:\fICTRLPORT\fR[:\fIDATAPORT\fR]][/\fITRACEPATH\fR]
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+The \fBfile://\fR protocol targets the \fBlocal file system\fR\&.
+.PP
+\fITRACEPATH\fR
+.RS 4
+Absolute path to trace files on the local file system\&.
+.RE
+.sp
+The other version is used for \fBnetwork streaming\fR\&.
+.PP
+\fINETPROTO\fR
+.RS 4
+Network protocol, amongst:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBnet\fR: TCP over IPv4; the default values of
+\fB<ctrl port>\fR
+and
+\fB<data port>\fR
+are resp\&. 5342 and 5343
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBnet6\fR: TCP over IPv6: same default ports as
+\fBnet\fR
+protocol
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBtcp\fR: same as
+\fBnet\fR
+protocol; can only be used with the
+\fB--ctrl-url\fR
+and
+\fB--data-url\fR
+options together
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBtcp6\fR: same as
+\fBnet6\fR
+protocol; can only be used with the
+\fB--ctrl-url\fR
+and
+\fB--data-url\fR
+options together
+.RE
+.RE
+.PP
+(\fIHOST\fR | \fIIPADDR\fR)
+.RS 4
+Hostname or IP address (IPv6 address
+\fBmust\fR
+be enclosed in brackets (\fB[\fR
+and
+\fB]\fR); see
+RFC 2732)\&.
+.RE
+.PP
+\fICTRLPORT\fR
+.RS 4
+Control port\&.
+.RE
+.PP
+\fIDATAPORT\fR
+.RS 4
+Data port\&.
+.RE
+.PP
+\fITRACEPATH\fR
+.RS 4
+Path of trace files on the remote file system\&. This path is relative to the base output directory set on the relay daemon side; see
+\fBlttng-relayd\fR(8)\&.
+.RE
+.SH "OPTIONS"
+.sp
+General options are described in \fBlttng\fR(1)\&.
+.SS "Mode"
+.PP
+\fB--live\fR[=\fIDELAYUS\fR]
+.RS 4
+Create the session in live mode\&. The optional
+\fIDELAYUS\fR
+parameter, given in microseconds, is the maximum time the user can wait for the data to be flushed\&. This mode can be set with a network URL (options
+\fB--set-url\fR, or
+\fB--ctrl-url\fR
+and
+\fB--data-url\fR) and must have a relay daemon listening (see
+\fBlttng-relayd\fR(1))\&.
+.sp
+By default,
+\fIDELAYUS\fR
+is 1000000 and the network URL is set to
+\fBnet://127.0.0.1\fR\&.
+.RE
+.PP
+\fB--snapshot\fR
+.RS 4
+Create the session in snapshot mode\&. This is the equivalent of using the
+\fB--no-output\fR
+option and creating all the channels of this new tracing session in overwrite mode with an
+\fBmmap\fR
+output type\&.
+.RE
+.SS "Output"
+.PP
+\fB--no-output\fR
+.RS 4
+Do not output any trace data\&.
+.RE
+.PP
+\fB-o\fR, \fB--output\fR=\fIPATH\fR
+.RS 4
+Set trace output path to
+\fIPATH\fR\&.
+.RE
+.PP
+\fB--shm-path\fR=\fIPATH\fR
+.RS 4
+Create shared memory holding buffers at
+\fIPATH\fR\&.
+.RE
+.SS "URL"
+.sp
+See the URL format section above for more information about the syntax of the following options\*(Aq \fIURL\fR argument\&.
+.PP
+\fB-C\fR, \fB--ctrl-url\fR=\fIURL\fR
+.RS 4
+Set control path URL to
+\fIURL\fR
+(must use
+\fB--data-url\fR
+option also)\&.
+.RE
+.PP
+\fB-D\fR, \fB--data-url\fR=\fIURL\fR
+.RS 4
+Set data path URL to
+\fIURL\fR
+(must use
+\fB--ctrl-url\fR
+option also)\&.
+.RE
+.PP
+\fB-U\fR, \fB--set-url\fR=\fIURL\fR
+.RS 4
+Set URL destination of the trace data to
+\fIURL\fR\&. It is persistent for the session lifetime\&. This option sets both data (\fB--data-url\fR
+option) and control (\fB--ctrl-url\fR
+option) URLs at the same time\&.
+.RE
+.SS "Program information"
+.PP
+\fB-h\fR, \fB--help\fR
+.RS 4
+Show command help\&.
+.sp
+This option, like
+\fBlttng-help\fR(1), attempts to launch
+\fB/usr/bin/man\fR
+to view the command\(cqs man page\&. The path to the man pager can be overridden by the
+\fBLTTNG_MAN_BIN_PATH\fR
+environment variable\&.
+.RE
+.PP
+\fB--list-options\fR
+.RS 4
+List available command options\&.
+.RE
+.SH "ENVIRONMENT VARIABLES"
+.PP
+\fBLTTNG_HOME\fR
+.RS 4
+Overrides the
+\fB$HOME\fR
+environment variable\&. Useful when the user running the commands has a non\-writable home directory\&.
+.RE
+.PP
+\fBLTTNG_MAN_BIN_PATH\fR
+.RS 4
+Absolute path to the man pager to use for viewing help information about LTTng commands (using
+\fBlttng-help\fR(1)
+or
+\fBlttng COMMAND --help\fR)\&.
+.RE
+.PP
+\fBLTTNG_SESSION_CONFIG_XSD_PATH\fR
+.RS 4
+Path in which the
+\fBsession.xsd\fR
+session configuration XML schema may be found\&.
+.RE
+.PP
+\fBLTTNG_SESSIOND_PATH\fR
+.RS 4
+Full session daemon binary path\&.
+.sp
+The
+\fB--sessiond-path\fR
+option has precedence over this environment variable\&.
+.RE
+.sp
+Note that the \fBlttng-create\fR(1) command can spawn an LTTng session daemon automatically if none is running\&. See \fBlttng-sessiond\fR(8) for the environment variables influencing the execution of the session daemon\&.
+.SH "EXIT STATUS"
+.PP
+\fB0\fR
+.RS 4
+Success
+.RE
+.PP
+\fB1\fR
+.RS 4
+Command error
+.RE
+.PP
+\fB2\fR
+.RS 4
+Undefined command
+.RE
+.PP
+\fB3\fR
+.RS 4
+Fatal error
+.RE
+.PP
+\fB4\fR
+.RS 4
+Command warning (something went wrong during the command)
+.RE
+.SH "BUGS"
+.sp
+If you encounter any issue or usability problem, please report it on the LTTng bug tracker: \fBhttps://bugs\&.lttng\&.org/projects/lttng\-tools\fR\&.
+.SH "RESOURCES"
+.sp
+LTTng project website: \fBhttp://lttng\&.org\fR\&.
+.sp
+LTTng documentation: \fBhttp://lttng\&.org/docs\fR\&.
+.sp
+Git repositories: \fBhttp://git\&.lttng\&.org\fR\&.
+.sp
+Mailing list for support and development: \fBlttng-dev@lists.lttng.org\fR\&.
+.sp
+IRC channel: \fB#lttng\fR on \fBirc.oftc.net\fR (OFTC)\&.
+.SH "COPYRIGHTS"
+.sp
+This program is part of the LTTng\-tools project\&.
+.sp
+LTTng\-tools is distributed under the GNU General Public License version 2\&. See the \fBLICENSE\fR file for details\&.
+.SH "THANKS"
+.sp
+Special thanks to Michel Dagenais and the DORSAL laboratory at \('Ecole Polytechnique de Montr\('eal for the LTTng journey\&.
+.sp
+Also thanks to the Ericsson teams working on tracing which helped us greatly with detailed bug reports and unusual test cases\&.
+.SH "AUTHORS"
+.sp
+LTTng\-tools was originally written by Mathieu Desnoyers, Julien Desfossez, and David Goulet\&. More people have since contributed to it\&.
+.sp
+LTTng\-tools is currently maintained by J\('er\('emie Galarneau (\fBjeremie\&.galarneau@efficios\&.com\fR)\&.
+.SH "SEE ALSO"
+.sp
+\fBlttng-destroy\fR(1), \fBlttng-set-session\fR(1), \fBlttng\fR(1)

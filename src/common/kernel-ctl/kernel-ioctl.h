@@ -20,7 +20,7 @@
 #define _LTT_KERNEL_IOCTL_H
 
 #define LTTNG_MODULES_ABI_MAJOR_VERSION		2
-#define LTTNG_MODULES_ABI_MINOR_VERSION		0
+#define LTTNG_MODULES_ABI_MINOR_VERSION		1
 
 /* Get a snapshot of the current ring buffer producer and consumer positions */
 #define RING_BUFFER_SNAPSHOT                _IO(0xF6, 0x00)
@@ -49,6 +49,8 @@
 #define RING_BUFFER_GET_MMAP_READ_OFFSET    _IOR(0xF6, 0x0B, unsigned long)
 /* flush the current sub-buffer */
 #define RING_BUFFER_FLUSH                   _IO(0xF6, 0x0C)
+/* Get the current version of the metadata cache (after a get_next). */
+#define RING_BUFFER_GET_METADATA_VERSION    _IOR(0xF6, 0x0D, uint64_t)
 
 /* returns the timestamp begin of the current sub-buffer */
 #define LTTNG_RING_BUFFER_GET_TIMESTAMP_BEGIN     _IOR(0xF6, 0x20, uint64_t)
@@ -64,6 +66,10 @@
 #define LTTNG_RING_BUFFER_GET_STREAM_ID           _IOR(0xF6, 0x25, uint64_t)
 /* returns the current timestamp */
 #define LTTNG_RING_BUFFER_GET_CURRENT_TIMESTAMP   _IOR(0xF6, 0x26, uint64_t)
+/* returns the packet sequence number */
+#define LTTNG_RING_BUFFER_GET_SEQ_NUM             _IOR(0xF6, 0x27, uint64_t)
+/* returns the stream instance id */
+#define LTTNG_RING_BUFFER_INSTANCE_ID             _IOR(0xF6, 0x28, uint64_t)
 
 /* Old ABI (without support for 32/64 bits compat) */
 /* LTTng file descriptor ioctl */
@@ -122,6 +128,7 @@
 #define LTTNG_KERNEL_SESSION_UNTRACK_PID	\
 	_IOR(0xF6, 0x59, int32_t)
 #define LTTNG_KERNEL_SESSION_LIST_TRACKER_PIDS	_IO(0xF6, 0x58)
+#define LTTNG_KERNEL_SESSION_METADATA_REGEN	_IO(0xF6, 0x59)
 
 /* Channel FD ioctl */
 #define LTTNG_KERNEL_STREAM			_IO(0xF6, 0x62)

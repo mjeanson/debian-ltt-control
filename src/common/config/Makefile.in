@@ -92,27 +92,28 @@ host_triplet = @host@
 target_triplet = @target@
 subdir = src/common/config
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
-	$(top_srcdir)/config/ax_check_class.m4 \
-	$(top_srcdir)/config/ax_check_classpath.m4 \
-	$(top_srcdir)/config/ax_compare_version.m4 \
-	$(top_srcdir)/config/ax_java_options.m4 \
-	$(top_srcdir)/config/ax_pkg_swig.m4 \
-	$(top_srcdir)/config/ax_prog_bison_version.m4 \
-	$(top_srcdir)/config/ax_prog_flex_version.m4 \
-	$(top_srcdir)/config/ax_prog_jar.m4 \
-	$(top_srcdir)/config/ax_prog_java.m4 \
-	$(top_srcdir)/config/ax_prog_java_works.m4 \
-	$(top_srcdir)/config/ax_prog_javac.m4 \
-	$(top_srcdir)/config/ax_prog_javac_works.m4 \
-	$(top_srcdir)/config/ax_try_compile_java.m4 \
-	$(top_srcdir)/config/config_feature.m4 \
-	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
-	$(top_srcdir)/config/libxml.m4 \
-	$(top_srcdir)/config/ltoptions.m4 \
-	$(top_srcdir)/config/ltsugar.m4 \
-	$(top_srcdir)/config/ltversion.m4 \
-	$(top_srcdir)/config/lt~obsolete.m4 $(top_srcdir)/configure.ac
+am__aclocal_m4_deps = $(top_srcdir)/m4/ac_define_dir.m4 \
+	$(top_srcdir)/m4/ax_c___attribute__.m4 \
+	$(top_srcdir)/m4/ax_check_class.m4 \
+	$(top_srcdir)/m4/ax_check_classpath.m4 \
+	$(top_srcdir)/m4/ax_compare_version.m4 \
+	$(top_srcdir)/m4/ax_java_options.m4 \
+	$(top_srcdir)/m4/ax_lib_socket_nsl.m4 \
+	$(top_srcdir)/m4/ax_pkg_swig.m4 \
+	$(top_srcdir)/m4/ax_prog_bison_version.m4 \
+	$(top_srcdir)/m4/ax_prog_flex_version.m4 \
+	$(top_srcdir)/m4/ax_prog_jar.m4 \
+	$(top_srcdir)/m4/ax_prog_java.m4 \
+	$(top_srcdir)/m4/ax_prog_java_works.m4 \
+	$(top_srcdir)/m4/ax_prog_javac.m4 \
+	$(top_srcdir)/m4/ax_prog_javac_works.m4 \
+	$(top_srcdir)/m4/ax_pthread.m4 \
+	$(top_srcdir)/m4/ax_try_compile_java.m4 \
+	$(top_srcdir)/m4/config_feature.m4 $(top_srcdir)/m4/epoll.m4 \
+	$(top_srcdir)/m4/libtool.m4 $(top_srcdir)/m4/libxml.m4 \
+	$(top_srcdir)/m4/ltoptions.m4 $(top_srcdir)/m4/ltsugar.m4 \
+	$(top_srcdir)/m4/ltversion.m4 $(top_srcdir)/m4/lt~obsolete.m4 \
+	$(top_srcdir)/m4/pprint.m4 $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 DIST_COMMON = $(srcdir)/Makefile.am $(dist_xml_DATA) \
@@ -124,7 +125,8 @@ CONFIG_CLEAN_VPATH_FILES =
 LTLIBRARIES = $(noinst_LTLIBRARIES)
 am__DEPENDENCIES_1 =
 libconfig_la_DEPENDENCIES = $(am__DEPENDENCIES_1)
-am_libconfig_la_OBJECTS = libconfig_la-ini.lo libconfig_la-config.lo
+am_libconfig_la_OBJECTS = libconfig_la-ini.lo \
+	libconfig_la-session-config.lo
 libconfig_la_OBJECTS = $(am_libconfig_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
@@ -224,6 +226,7 @@ ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
 AR = @AR@
+ASCIIDOC = @ASCIIDOC@
 AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
@@ -291,6 +294,7 @@ MINOR_VERSION = @MINOR_VERSION@
 MKDIR_P = @MKDIR_P@
 NM = @NM@
 NMEDIT = @NMEDIT@
+OBJCOPY = @OBJCOPY@
 OBJDUMP = @OBJDUMP@
 OBJEXT = @OBJEXT@
 OTOOL = @OTOOL@
@@ -304,11 +308,15 @@ PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATCHLEVEL_VERSION = @PATCHLEVEL_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
+PGREP = @PGREP@
 PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POPT_CFLAGS = @POPT_CFLAGS@
 POPT_LIBS = @POPT_LIBS@
+PTHREAD_CC = @PTHREAD_CC@
+PTHREAD_CFLAGS = @PTHREAD_CFLAGS@
+PTHREAD_LIBS = @PTHREAD_LIBS@
 PYTHON = @PYTHON@
 PYTHON2_AGENT = @PYTHON2_AGENT@
 PYTHON2_BIN = @PYTHON2_BIN@
@@ -334,6 +342,7 @@ UUID_CFLAGS = @UUID_CFLAGS@
 UUID_LIBS = @UUID_LIBS@
 VERSION = @VERSION@
 XML2_CONFIG = @XML2_CONFIG@
+XMLTO = @XMLTO@
 XML_CPPFLAGS = @XML_CPPFLAGS@
 XML_LIBS = @XML_LIBS@
 YACC = @YACC@
@@ -350,6 +359,7 @@ am__leading_dot = @am__leading_dot@
 am__quote = @am__quote@
 am__tar = @am__tar@
 am__untar = @am__untar@
+ax_pthread_config = @ax_pthread_config@
 bindir = @bindir@
 build = @build@
 build_alias = @build_alias@
@@ -383,11 +393,13 @@ oldincludedir = @oldincludedir@
 pdfdir = @pdfdir@
 pkgpyexecdir = @pkgpyexecdir@
 pkgpythondir = @pkgpythondir@
+pprint_tput = @pprint_tput@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
+report_fold = @report_fold@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -402,7 +414,9 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
 noinst_LTLIBRARIES = libconfig.la
-libconfig_la_SOURCES = ini.c ini.h config.c config.h config-session-abi.h config-internal.h
+libconfig_la_SOURCES = ini.c ini.h session-config.c session-config.h \
+		config-session-abi.h config-internal.h
+
 libconfig_la_CPPFLAGS = $(XML_CPPFLAGS) $(AM_CPPFLAGS)
 libconfig_la_LIBADD = $(XML_LIBS)
 xmldir = $(datadir)/xml/lttng
@@ -462,8 +476,8 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libconfig_la-config.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libconfig_la-ini.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libconfig_la-session-config.Plo@am__quote@
 
 .c.o:
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
@@ -493,12 +507,12 @@ libconfig_la-ini.lo: ini.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libconfig_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libconfig_la-ini.lo `test -f 'ini.c' || echo '$(srcdir)/'`ini.c
 
-libconfig_la-config.lo: config.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libconfig_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT libconfig_la-config.lo -MD -MP -MF $(DEPDIR)/libconfig_la-config.Tpo -c -o libconfig_la-config.lo `test -f 'config.c' || echo '$(srcdir)/'`config.c
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libconfig_la-config.Tpo $(DEPDIR)/libconfig_la-config.Plo
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='config.c' object='libconfig_la-config.lo' libtool=yes @AMDEPBACKSLASH@
+libconfig_la-session-config.lo: session-config.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libconfig_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT libconfig_la-session-config.lo -MD -MP -MF $(DEPDIR)/libconfig_la-session-config.Tpo -c -o libconfig_la-session-config.lo `test -f 'session-config.c' || echo '$(srcdir)/'`session-config.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libconfig_la-session-config.Tpo $(DEPDIR)/libconfig_la-session-config.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='session-config.c' object='libconfig_la-session-config.lo' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libconfig_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libconfig_la-config.lo `test -f 'config.c' || echo '$(srcdir)/'`config.c
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libconfig_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libconfig_la-session-config.lo `test -f 'session-config.c' || echo '$(srcdir)/'`session-config.c
 
 mostlyclean-libtool:
 	-rm -f *.lo

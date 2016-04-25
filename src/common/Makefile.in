@@ -90,32 +90,42 @@ POST_UNINSTALL = :
 build_triplet = @build@
 host_triplet = @host@
 target_triplet = @target@
-@HAVE_LIBLTTNG_UST_CTL_TRUE@am__append_1 = \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		$(top_builddir)/src/common/ust-consumer/libust-consumer.la
-
+@BUILD_LIB_COMPAT_TRUE@am__append_1 = compat
+@BUILD_LIB_HEALTH_TRUE@am__append_2 = health
+@BUILD_LIB_HASHTABLE_TRUE@am__append_3 = hashtable
+@BUILD_LIB_KERNEL_CTL_TRUE@am__append_4 = kernel-ctl
+@BUILD_LIB_SESSIOND_COMM_TRUE@am__append_5 = sessiond-comm
+@BUILD_LIB_RELAYD_TRUE@am__append_6 = relayd
+@BUILD_LIB_KERNEL_CONSUMER_TRUE@am__append_7 = kernel-consumer
+@BUILD_LIB_UST_CONSUMER_TRUE@am__append_8 = ust-consumer
+@BUILD_LIB_TESTPOINT_TRUE@am__append_9 = testpoint
+@BUILD_LIB_INDEX_TRUE@am__append_10 = index
+@BUILD_LIB_CONFIG_TRUE@am__append_11 = config
+@BUILD_LIB_CONSUMER_TRUE@am__append_12 = consumer
 subdir = src/common
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
-	$(top_srcdir)/config/ax_check_class.m4 \
-	$(top_srcdir)/config/ax_check_classpath.m4 \
-	$(top_srcdir)/config/ax_compare_version.m4 \
-	$(top_srcdir)/config/ax_java_options.m4 \
-	$(top_srcdir)/config/ax_pkg_swig.m4 \
-	$(top_srcdir)/config/ax_prog_bison_version.m4 \
-	$(top_srcdir)/config/ax_prog_flex_version.m4 \
-	$(top_srcdir)/config/ax_prog_jar.m4 \
-	$(top_srcdir)/config/ax_prog_java.m4 \
-	$(top_srcdir)/config/ax_prog_java_works.m4 \
-	$(top_srcdir)/config/ax_prog_javac.m4 \
-	$(top_srcdir)/config/ax_prog_javac_works.m4 \
-	$(top_srcdir)/config/ax_try_compile_java.m4 \
-	$(top_srcdir)/config/config_feature.m4 \
-	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
-	$(top_srcdir)/config/libxml.m4 \
-	$(top_srcdir)/config/ltoptions.m4 \
-	$(top_srcdir)/config/ltsugar.m4 \
-	$(top_srcdir)/config/ltversion.m4 \
-	$(top_srcdir)/config/lt~obsolete.m4 $(top_srcdir)/configure.ac
+am__aclocal_m4_deps = $(top_srcdir)/m4/ac_define_dir.m4 \
+	$(top_srcdir)/m4/ax_c___attribute__.m4 \
+	$(top_srcdir)/m4/ax_check_class.m4 \
+	$(top_srcdir)/m4/ax_check_classpath.m4 \
+	$(top_srcdir)/m4/ax_compare_version.m4 \
+	$(top_srcdir)/m4/ax_java_options.m4 \
+	$(top_srcdir)/m4/ax_lib_socket_nsl.m4 \
+	$(top_srcdir)/m4/ax_pkg_swig.m4 \
+	$(top_srcdir)/m4/ax_prog_bison_version.m4 \
+	$(top_srcdir)/m4/ax_prog_flex_version.m4 \
+	$(top_srcdir)/m4/ax_prog_jar.m4 \
+	$(top_srcdir)/m4/ax_prog_java.m4 \
+	$(top_srcdir)/m4/ax_prog_java_works.m4 \
+	$(top_srcdir)/m4/ax_prog_javac.m4 \
+	$(top_srcdir)/m4/ax_prog_javac_works.m4 \
+	$(top_srcdir)/m4/ax_pthread.m4 \
+	$(top_srcdir)/m4/ax_try_compile_java.m4 \
+	$(top_srcdir)/m4/config_feature.m4 $(top_srcdir)/m4/epoll.m4 \
+	$(top_srcdir)/m4/libtool.m4 $(top_srcdir)/m4/libxml.m4 \
+	$(top_srcdir)/m4/ltoptions.m4 $(top_srcdir)/m4/ltsugar.m4 \
+	$(top_srcdir)/m4/ltversion.m4 $(top_srcdir)/m4/lt~obsolete.m4 \
+	$(top_srcdir)/m4/pprint.m4 $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 DIST_COMMON = $(srcdir)/Makefile.am $(noinst_HEADERS) \
@@ -130,21 +140,12 @@ libcommon_la_DEPENDENCIES =  \
 am__dirstamp = $(am__leading_dot)dirstamp
 am_libcommon_la_OBJECTS = error.lo utils.lo runas.lo futex.lo uri.lo \
 	defaults.lo pipe.lo readwrite.lo mi-lttng.lo daemonize.lo \
-	sessiond-comm/unix.lo
+	sessiond-comm/unix.lo filter.lo context.lo
 libcommon_la_OBJECTS = $(am_libcommon_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
 am__v_lt_1 = 
-libconsumer_la_DEPENDENCIES =  \
-	$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \
-	$(top_builddir)/src/common/kernel-consumer/libkernel-consumer.la \
-	$(top_builddir)/src/common/hashtable/libhashtable.la \
-	$(top_builddir)/src/common/compat/libcompat.la \
-	$(top_builddir)/src/common/relayd/librelayd.la $(am__append_1)
-am_libconsumer_la_OBJECTS = consumer.lo consumer-metadata-cache.lo \
-	consumer-timer.lo consumer-stream.lo
-libconsumer_la_OBJECTS = $(am_libconsumer_la_OBJECTS)
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
 am__v_P_0 = false
@@ -178,8 +179,8 @@ AM_V_CCLD = $(am__v_CCLD_@AM_V@)
 am__v_CCLD_ = $(am__v_CCLD_@AM_DEFAULT_V@)
 am__v_CCLD_0 = @echo "  CCLD    " $@;
 am__v_CCLD_1 = 
-SOURCES = $(libcommon_la_SOURCES) $(libconsumer_la_SOURCES)
-DIST_SOURCES = $(libcommon_la_SOURCES) $(libconsumer_la_SOURCES)
+SOURCES = $(libcommon_la_SOURCES)
+DIST_SOURCES = $(libcommon_la_SOURCES)
 RECURSIVE_TARGETS = all-recursive check-recursive cscopelist-recursive \
 	ctags-recursive dvi-recursive html-recursive info-recursive \
 	install-data-recursive install-dvi-recursive \
@@ -221,7 +222,6 @@ am__define_uniq_tagged_files = \
   done | $(am__uniquify_input)`
 ETAGS = etags
 CTAGS = ctags
-DIST_SUBDIRS = $(SUBDIRS)
 am__DIST_COMMON = $(srcdir)/Makefile.in $(top_srcdir)/config/depcomp
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 am__relativize = \
@@ -253,6 +253,7 @@ ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
 AR = @AR@
+ASCIIDOC = @ASCIIDOC@
 AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
@@ -320,6 +321,7 @@ MINOR_VERSION = @MINOR_VERSION@
 MKDIR_P = @MKDIR_P@
 NM = @NM@
 NMEDIT = @NMEDIT@
+OBJCOPY = @OBJCOPY@
 OBJDUMP = @OBJDUMP@
 OBJEXT = @OBJEXT@
 OTOOL = @OTOOL@
@@ -333,11 +335,15 @@ PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATCHLEVEL_VERSION = @PATCHLEVEL_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
+PGREP = @PGREP@
 PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POPT_CFLAGS = @POPT_CFLAGS@
 POPT_LIBS = @POPT_LIBS@
+PTHREAD_CC = @PTHREAD_CC@
+PTHREAD_CFLAGS = @PTHREAD_CFLAGS@
+PTHREAD_LIBS = @PTHREAD_LIBS@
 PYTHON = @PYTHON@
 PYTHON2_AGENT = @PYTHON2_AGENT@
 PYTHON2_BIN = @PYTHON2_BIN@
@@ -363,6 +369,7 @@ UUID_CFLAGS = @UUID_CFLAGS@
 UUID_LIBS = @UUID_LIBS@
 VERSION = @VERSION@
 XML2_CONFIG = @XML2_CONFIG@
+XMLTO = @XMLTO@
 XML_CPPFLAGS = @XML_CPPFLAGS@
 XML_LIBS = @XML_LIBS@
 YACC = @YACC@
@@ -379,6 +386,7 @@ am__leading_dot = @am__leading_dot@
 am__quote = @am__quote@
 am__tar = @am__tar@
 am__untar = @am__untar@
+ax_pthread_config = @ax_pthread_config@
 bindir = @bindir@
 build = @build@
 build_alias = @build_alias@
@@ -412,11 +420,13 @@ oldincludedir = @oldincludedir@
 pdfdir = @pdfdir@
 pkgpyexecdir = @pkgpyexecdir@
 pkgpythondir = @pkgpythondir@
+pprint_tput = @pprint_tput@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
+report_fold = @report_fold@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -429,44 +439,42 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src \
+	-DMANPATH=\""$(mandir)"\"
+
 AUTOMAKE_OPTIONS = subdir-objects
-SUBDIRS = compat health hashtable kernel-ctl sessiond-comm relayd \
-		  kernel-consumer ust-consumer testpoint index config
+SUBDIRS = $(am__append_1) $(am__append_2) $(am__append_3) \
+	$(am__append_4) $(am__append_5) $(am__append_6) \
+	$(am__append_7) $(am__append_8) $(am__append_9) \
+	$(am__append_10) $(am__append_11) $(am__append_12)
+
+# Make sure to always distribute all folders
+# since SUBDIRS is decided at configure time.
+DIST_SUBDIRS = compat health hashtable kernel-ctl sessiond-comm relayd \
+	  kernel-consumer ust-consumer testpoint index config consumer
 
 AM_CFLAGS = -fno-strict-aliasing
 noinst_HEADERS = lttng-kernel.h defaults.h macros.h error.h futex.h \
 				 uri.h utils.h lttng-kernel-old.h \
-				 consumer-metadata-cache.h consumer-timer.h \
-				 consumer-testpoint.h align.h bitfield.h bug.h
+				 align.h bitfield.h bug.h
 
 
 # Common library
-
-# Consumer library
-noinst_LTLIBRARIES = libcommon.la libconsumer.la
-EXTRA_DIST = mi_lttng.xsd
+noinst_LTLIBRARIES = libcommon.la
+EXTRA_DIST = mi-lttng-3.0.xsd
 libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
                        common.h futex.c futex.h uri.c uri.h defaults.c \
                        pipe.c pipe.h readwrite.c readwrite.h \
                        mi-lttng.h mi-lttng.c \
                        daemonize.c daemonize.h \
-                       sessiond-comm/unix.c sessiond-comm/unix.h
+                       sessiond-comm/unix.c sessiond-comm/unix.h \
+                       filter.c filter.h context.c context.h
 
 libcommon_la_LIBADD = \
 		-luuid \
 		-lrt \
 		$(top_builddir)/src/common/config/libconfig.la
 
-libconsumer_la_SOURCES = consumer.c consumer.h consumer-metadata-cache.c \
-                         consumer-timer.c consumer-stream.c consumer-stream.h
-
-libconsumer_la_LIBADD =  \
-	$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \
-	$(top_builddir)/src/common/kernel-consumer/libkernel-consumer.la \
-	$(top_builddir)/src/common/hashtable/libhashtable.la \
-	$(top_builddir)/src/common/compat/libcompat.la \
-	$(top_builddir)/src/common/relayd/librelayd.la $(am__append_1)
 all: all-recursive
 
 .SUFFIXES:
@@ -523,9 +531,6 @@ sessiond-comm/unix.lo: sessiond-comm/$(am__dirstamp) \
 libcommon.la: $(libcommon_la_OBJECTS) $(libcommon_la_DEPENDENCIES) $(EXTRA_libcommon_la_DEPENDENCIES) 
 	$(AM_V_CCLD)$(LINK)  $(libcommon_la_OBJECTS) $(libcommon_la_LIBADD) $(LIBS)
 
-libconsumer.la: $(libconsumer_la_OBJECTS) $(libconsumer_la_DEPENDENCIES) $(EXTRA_libconsumer_la_DEPENDENCIES) 
-	$(AM_V_CCLD)$(LINK)  $(libconsumer_la_OBJECTS) $(libconsumer_la_LIBADD) $(LIBS)
-
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
 	-rm -f sessiond-comm/*.$(OBJEXT)
@@ -534,13 +539,11 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/consumer-metadata-cache.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/consumer-stream.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/consumer-timer.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/consumer.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/context.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/daemonize.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/defaults.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/error.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/filter.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/futex.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/mi-lttng.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pipe.Plo@am__quote@

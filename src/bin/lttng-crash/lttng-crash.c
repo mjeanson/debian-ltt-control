@@ -16,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #include <getopt.h>
 #include <signal.h>
 #include <stdio.h>
@@ -29,15 +28,16 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <config.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <byteswap.h>
 #include <inttypes.h>
+#include <stdbool.h>
 
 #include <version.h>
 #include <lttng/lttng.h>
 #include <common/common.h>
+#include <common/utils.h>
 
 #define DEFAULT_VIEWER "babeltrace"
 
@@ -205,27 +205,15 @@ static struct option long_options[] = {
 	{ NULL, 0, NULL, 0 },
 };
 
-static void usage(FILE *ofp)
+static void usage(void)
 {
-	fprintf(ofp, "LTTng Crash Trace Viewer " VERSION " - " VERSION_NAME "%s\n\n",
-		GIT_VERSION[0] == '\0' ? "" : " - " GIT_VERSION);
-	fprintf(ofp, "usage: lttng-crash [OPTIONS] FILE\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Options:\n");
-	fprintf(ofp, "  -V, --version              Show version.\n");
-	fprintf(ofp, "  -h, --help                 Show this help.\n");
-	fprintf(ofp, "      --list-options         Simple listing of lttng-crash options.\n");
-	fprintf(ofp, "  -v, --verbose              Increase verbosity.\n");
-	fprintf(ofp, "  -e, --viewer               Specify viewer and/or options to use. This will\n"
-		     "                             completely override the default viewers so please\n"
-		     "                             make sure to specify the full command. The trace\n"
-		     "                             directory paths appended at the end to the\n"
-		     "                             arguments.\n");
-	fprintf(ofp, "  -x, --extract PATH         Extract trace(s) to specified path. Don't view\n"
-		     "                             trace.\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Please see the lttng-crash(1) man page for full documentation.\n");
-	fprintf(ofp, "See http://lttng.org for updates, bug reports and news.\n");
+	int ret = utils_show_man_page(1, "lttng-crash");
+
+	if (ret) {
+		ERR("Cannot view man page lttng-crash(1)");
+		perror("exec");
+		exit(EXIT_FAILURE);
+	}
 }
 
 static void version(FILE *ofp)
@@ -270,7 +258,7 @@ static int parse_args(int argc, char **argv)
 	int opt, ret = 0;
 
 	if (argc < 2) {
-		usage(stderr);
+		usage();
 		exit(EXIT_FAILURE);
 	}
 
@@ -281,7 +269,7 @@ static int parse_args(int argc, char **argv)
 			ret = 1;
 			goto end;
 		case 'h':
-			usage(stdout);
+			usage();
 			ret = 1;
 			goto end;
 		case 'v':
@@ -303,7 +291,7 @@ static int parse_args(int argc, char **argv)
 			ret = 1;
 			goto end;
 		default:
-			usage(stderr);
+			ERR("Unknown command-line option");
 			goto error;
 		}
 	}
@@ -313,8 +301,8 @@ static int parse_args(int argc, char **argv)
 	}
 
 	/* No leftovers, or more than one input path, print usage and quit */
-	if ((argc - optind) == 0 || (argc - optind) > 1) {
-		usage(stderr);
+	if (argc - optind != 1) {
+		ERR("Command-line error: Specify exactly one input path");
 		goto error;
 	}
 
@@ -1173,7 +1161,8 @@ int view_trace(const char *viewer_path, const char *trace_path)
  */
 int main(int argc, char *argv[])
 {
-	int ret, has_warning = 0;
+	int ret;
+	bool has_warning = false;
 	const char *output_path = NULL;
 	char tmppath[] = "/tmp/lttng-crash-XXXXXX";
 
@@ -1181,9 +1170,10 @@ int main(int argc, char *argv[])
 
 	ret = parse_args(argc, argv);
 	if (ret > 0) {
-		exit(EXIT_SUCCESS);
+		goto end;
 	} else if (ret < 0) {
-		exit(EXIT_FAILURE);
+		has_warning = true;
+		goto end;
 	}
 
 	if (opt_output_path) {
@@ -1191,35 +1181,38 @@ int main(int argc, char *argv[])
 		ret = mkdir(output_path, S_IRWXU | S_IRWXG);
 		if (ret) {
 			PERROR("mkdir");
-			exit(EXIT_FAILURE);
+			has_warning = true;
+			goto end;
 		}
 	} else {
 		output_path = mkdtemp(tmppath);
 		if (!output_path) {
 			PERROR("mkdtemp");
-			exit(EXIT_FAILURE);
+			has_warning = true;
+			goto end;
 		}
 	}
 
 	ret = extract_trace_recursive(output_path, input_path);
 	if (ret < 0) {
-		exit(EXIT_FAILURE);
+		has_warning = true;
+		goto end;
 	} else if (ret > 0) {
-		has_warning = 1;
+		/* extract_trace_recursive reported a warning. */
+		has_warning = true;
 	}
 	if (!opt_output_path) {
 		/* View trace */
 		ret = view_trace(opt_viewer_path, output_path);
-		if (ret)
-			has_warning = 1;
-
+		if (ret) {
+			has_warning = true;
+		}
 		/* unlink temporary trace */
 		ret = delete_dir_recursive(output_path);
 		if (ret) {
-			has_warning = 1;
+			has_warning = true;
 		}
 	}
-	if (has_warning)
-		exit(EXIT_FAILURE);
-	exit(EXIT_SUCCESS);
+end:
+	exit(has_warning ? EXIT_FAILURE : EXIT_SUCCESS);
 }
