@@ -15,7 +15,6 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -50,7 +49,7 @@
 #define LIVE_TIMER 2000000
 
 /* Number of TAP tests in this file */
-#define NUM_TESTS 8
+#define NUM_TESTS 11
 #define mmap_size 524288
 
 int ust_consumerd32_fd;
@@ -160,8 +159,8 @@ int establish_connection(void)
 	ssize_t ret_len;
 
 	cmd.cmd = htobe32(LTTNG_VIEWER_CONNECT);
-	cmd.data_size = sizeof(connect);
-	cmd.cmd_version = 0;
+	cmd.data_size = htobe64(sizeof(connect));
+	cmd.cmd_version = htobe32(0);
 
 	memset(&connect, 0, sizeof(connect));
 	connect.major = htobe32(VERSION_MAJOR);
@@ -207,8 +206,8 @@ int list_sessions(uint64_t *session_id)
 	int first_session = 0;
 
 	cmd.cmd = htobe32(LTTNG_VIEWER_LIST_SESSIONS);
-	cmd.data_size = 0;
-	cmd.cmd_version = 0;
+	cmd.data_size = htobe64(0);
+	cmd.cmd_version = htobe32(0);
 
 	ret_len = lttng_live_send(control_sock, &cmd, sizeof(cmd));
 	if (ret_len < 0) {
@@ -251,8 +250,8 @@ int create_viewer_session(void)
 	ssize_t ret_len;
 
 	cmd.cmd = htobe32(LTTNG_VIEWER_CREATE_SESSION);
-	cmd.data_size = 0;
-	cmd.cmd_version = 0;
+	cmd.data_size = htobe64(0);
+	cmd.cmd_version = htobe32(0);
 
 	ret_len = lttng_live_send(control_sock, &cmd, sizeof(cmd));
 	if (ret_len < 0) {
@@ -297,8 +296,8 @@ int attach_session(uint64_t id)
 	}
 
 	cmd.cmd = htobe32(LTTNG_VIEWER_ATTACH_SESSION);
-	cmd.data_size = sizeof(rq);
-	cmd.cmd_version = 0;
+	cmd.data_size = htobe64(sizeof(rq));
+	cmd.cmd_version = htobe32(0);
 
 	memset(&rq, 0, sizeof(rq));
 	rq.session_id = htobe64(id);
@@ -384,8 +383,8 @@ int get_metadata(void)
 	int metadata_stream_id = -1;
 
 	cmd.cmd = htobe32(LTTNG_VIEWER_GET_METADATA);
-	cmd.data_size = sizeof(rq);
-	cmd.cmd_version = 0;
+	cmd.data_size = htobe64(sizeof(rq));
+	cmd.cmd_version = htobe32(0);
 
 	for (i = 0; i < session->stream_count; i++) {
 		if (session->streams[i].metadata_flag) {
@@ -474,8 +473,8 @@ int get_next_index(void)
 	int id;
 
 	cmd.cmd = htobe32(LTTNG_VIEWER_GET_NEXT_INDEX);
-	cmd.data_size = sizeof(rq);
-	cmd.cmd_version = 0;
+	cmd.data_size = htobe64(sizeof(rq));
+	cmd.cmd_version = htobe32(0);
 
 	for (id = 0; id < session->stream_count; id++) {
 		if (session->streams[id].metadata_flag) {
@@ -557,8 +556,8 @@ int get_data_packet(int id, uint64_t offset,
 	ssize_t ret_len;
 
 	cmd.cmd = htobe32(LTTNG_VIEWER_GET_PACKET);
-	cmd.data_size = sizeof(rq);
-	cmd.cmd_version = 0;
+	cmd.data_size = htobe64(sizeof(rq));
+	cmd.cmd_version = htobe32(0);
 
 	memset(&rq, 0, sizeof(rq));
 	rq.stream_id = htobe64(session->streams[id].id);
@@ -630,6 +629,53 @@ error:
 	return -1;
 }
 
+int detach_viewer_session(uint64_t id)
+{
+	struct lttng_viewer_cmd cmd;
+	struct lttng_viewer_detach_session_response resp;
+	struct lttng_viewer_detach_session_request rq;
+	int ret;
+	ssize_t ret_len;
+
+	cmd.cmd = htobe32(LTTNG_VIEWER_DETACH_SESSION);
+	cmd.data_size = htobe64(sizeof(rq));
+	cmd.cmd_version = htobe32(0);
+
+	memset(&rq, 0, sizeof(rq));
+	rq.session_id = htobe64(id);
+
+	ret_len = lttng_live_send(control_sock, &cmd, sizeof(cmd));
+	if (ret_len < 0) {
+		fprintf(stderr, "[error] Error sending cmd\n");
+		ret = ret_len;
+		goto error;
+	}
+
+	ret_len = lttng_live_send(control_sock, &rq, sizeof(rq));
+	if (ret_len < 0) {
+		fprintf(stderr, "Error sending attach request\n");
+		ret = ret_len;
+		goto error;
+	}
+
+	ret_len = lttng_live_recv(control_sock, &resp, sizeof(resp));
+	if (ret_len < 0) {
+		fprintf(stderr, "[error] Error receiving detach session reply\n");
+		ret = ret_len;
+		goto error;
+	}
+
+	if (be32toh(resp.status) != LTTNG_VIEWER_DETACH_SESSION_OK) {
+		fprintf(stderr, "[error] Error detaching viewer session\n");
+		ret = -1;
+		goto error;
+	}
+	ret = 0;
+
+error:
+	return ret;
+}
+
 int main(int argc, char **argv)
 {
 	int ret;
@@ -667,6 +713,15 @@ int main(int argc, char **argv)
 			"Get one data packet for stream %d, offset %d, len %d",
 			first_packet_stream_id, first_packet_offset,
 			first_packet_len);
+
+	ret = detach_viewer_session(session_id);
+	ok(ret == 0, "Detach viewer session");
+
+	ret = list_sessions(&session_id);
+	ok(ret > 0, "List sessions : %d session(s)", ret);
+
+	ret = attach_session(session_id);
+	ok(ret > 0, "Attach to session, %d streams received", ret);
 
 	return exit_status();
 }

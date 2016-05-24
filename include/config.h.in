@@ -3,6 +3,72 @@
 /* Location of the babeltrace viewer executable. */
 #undef CONFIG_BABELTRACE_BIN
 
+/* CMD_DESCR_ADD_CONTEXT */
+#undef CONFIG_CMD_DESCR_ADD_CONTEXT
+
+/* CMD_DESCR_CALIBRATE */
+#undef CONFIG_CMD_DESCR_CALIBRATE
+
+/* CMD_DESCR_CREATE */
+#undef CONFIG_CMD_DESCR_CREATE
+
+/* CMD_DESCR_DESTROY */
+#undef CONFIG_CMD_DESCR_DESTROY
+
+/* CMD_DESCR_DISABLE_CHANNEL */
+#undef CONFIG_CMD_DESCR_DISABLE_CHANNEL
+
+/* CMD_DESCR_DISABLE_EVENT */
+#undef CONFIG_CMD_DESCR_DISABLE_EVENT
+
+/* CMD_DESCR_ENABLE_CHANNEL */
+#undef CONFIG_CMD_DESCR_ENABLE_CHANNEL
+
+/* CMD_DESCR_ENABLE_EVENT */
+#undef CONFIG_CMD_DESCR_ENABLE_EVENT
+
+/* CMD_DESCR_HELP */
+#undef CONFIG_CMD_DESCR_HELP
+
+/* CMD_DESCR_LIST */
+#undef CONFIG_CMD_DESCR_LIST
+
+/* CMD_DESCR_LOAD */
+#undef CONFIG_CMD_DESCR_LOAD
+
+/* CMD_DESCR_METADATA */
+#undef CONFIG_CMD_DESCR_METADATA
+
+/* CMD_DESCR_SAVE */
+#undef CONFIG_CMD_DESCR_SAVE
+
+/* CMD_DESCR_SET_SESSION */
+#undef CONFIG_CMD_DESCR_SET_SESSION
+
+/* CMD_DESCR_SNAPSHOT */
+#undef CONFIG_CMD_DESCR_SNAPSHOT
+
+/* CMD_DESCR_START */
+#undef CONFIG_CMD_DESCR_START
+
+/* CMD_DESCR_STATUS */
+#undef CONFIG_CMD_DESCR_STATUS
+
+/* CMD_DESCR_STOP */
+#undef CONFIG_CMD_DESCR_STOP
+
+/* CMD_DESCR_TRACK */
+#undef CONFIG_CMD_DESCR_TRACK
+
+/* CMD_DESCR_UNTRACK */
+#undef CONFIG_CMD_DESCR_UNTRACK
+
+/* CMD_DESCR_VERSION */
+#undef CONFIG_CMD_DESCR_VERSION
+
+/* CMD_DESCR_VIEW */
+#undef CONFIG_CMD_DESCR_VIEW
+
 /* Location of the 32-bit consumerd executable. */
 #undef CONFIG_CONSUMERD32_BIN
 
@@ -14,6 +80,105 @@
 
 /* Search for consumerd 64-bit libraries in this location. */
 #undef CONFIG_CONSUMERD64_LIBDIR
+
+/* DEFAULT_AGENT_BIND_ADDRESS */
+#undef CONFIG_DEFAULT_AGENT_BIND_ADDRESS
+
+/* DEFAULT_AGENT_TCP_PORT */
+#undef CONFIG_DEFAULT_AGENT_TCP_PORT
+
+/* DEFAULT_APP_SOCKET_RW_TIMEOUT */
+#undef CONFIG_DEFAULT_APP_SOCKET_RW_TIMEOUT
+
+/* DEFAULT_CHANNEL_SUBBUF_SIZE */
+#undef CONFIG_DEFAULT_CHANNEL_SUBBUF_SIZE
+
+/* DEFAULT_CHANNEL_TRACEFILE_COUNT */
+#undef CONFIG_DEFAULT_CHANNEL_TRACEFILE_COUNT
+
+/* DEFAULT_CHANNEL_TRACEFILE_SIZE */
+#undef CONFIG_DEFAULT_CHANNEL_TRACEFILE_SIZE
+
+/* DEFAULT_KERNEL_CHANNEL_LIVE_TIMER */
+#undef CONFIG_DEFAULT_KERNEL_CHANNEL_LIVE_TIMER
+
+/* DEFAULT_KERNEL_CHANNEL_READ_TIMER */
+#undef CONFIG_DEFAULT_KERNEL_CHANNEL_READ_TIMER
+
+/* DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM */
+#undef CONFIG_DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM
+
+/* DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE */
+#undef CONFIG_DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE
+
+/* DEFAULT_KERNEL_CHANNEL_SWITCH_TIMER */
+#undef CONFIG_DEFAULT_KERNEL_CHANNEL_SWITCH_TIMER
+
+/* DEFAULT_LTTNG_LIVE_TIMER */
+#undef CONFIG_DEFAULT_LTTNG_LIVE_TIMER
+
+/* DEFAULT_METADATA_CACHE_SIZE */
+#undef CONFIG_DEFAULT_METADATA_CACHE_SIZE
+
+/* DEFAULT_METADATA_READ_TIMER */
+#undef CONFIG_DEFAULT_METADATA_READ_TIMER
+
+/* DEFAULT_METADATA_SUBBUF_NUM */
+#undef CONFIG_DEFAULT_METADATA_SUBBUF_NUM
+
+/* DEFAULT_METADATA_SUBBUF_SIZE */
+#undef CONFIG_DEFAULT_METADATA_SUBBUF_SIZE
+
+/* DEFAULT_METADATA_SWITCH_TIMER */
+#undef CONFIG_DEFAULT_METADATA_SWITCH_TIMER
+
+/* DEFAULT_NETWORK_CONTROL_BIND_ADDRESS */
+#undef CONFIG_DEFAULT_NETWORK_CONTROL_BIND_ADDRESS
+
+/* DEFAULT_NETWORK_CONTROL_PORT */
+#undef CONFIG_DEFAULT_NETWORK_CONTROL_PORT
+
+/* DEFAULT_NETWORK_DATA_BIND_ADDRESS */
+#undef CONFIG_DEFAULT_NETWORK_DATA_BIND_ADDRESS
+
+/* DEFAULT_NETWORK_DATA_PORT */
+#undef CONFIG_DEFAULT_NETWORK_DATA_PORT
+
+/* DEFAULT_NETWORK_VIEWER_BIND_ADDRESS */
+#undef CONFIG_DEFAULT_NETWORK_VIEWER_BIND_ADDRESS
+
+/* DEFAULT_NETWORK_VIEWER_PORT */
+#undef CONFIG_DEFAULT_NETWORK_VIEWER_PORT
+
+/* DEFAULT_UST_PID_CHANNEL_LIVE_TIMER */
+#undef CONFIG_DEFAULT_UST_PID_CHANNEL_LIVE_TIMER
+
+/* DEFAULT_UST_PID_CHANNEL_READ_TIMER */
+#undef CONFIG_DEFAULT_UST_PID_CHANNEL_READ_TIMER
+
+/* DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM */
+#undef CONFIG_DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM
+
+/* DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE */
+#undef CONFIG_DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE
+
+/* DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER */
+#undef CONFIG_DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER
+
+/* DEFAULT_UST_UID_CHANNEL_LIVE_TIMER */
+#undef CONFIG_DEFAULT_UST_UID_CHANNEL_LIVE_TIMER
+
+/* DEFAULT_UST_UID_CHANNEL_READ_TIMER */
+#undef CONFIG_DEFAULT_UST_UID_CHANNEL_READ_TIMER
+
+/* DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM */
+#undef CONFIG_DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM
+
+/* DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE */
+#undef CONFIG_DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE
+
+/* DEFAULT_UST_UID_CHANNEL_SWITCH_TIMER */
+#undef CONFIG_DEFAULT_UST_UID_CHANNEL_SWITCH_TIMER
 
 /* LTTng system configuration directory. */
 #undef CONFIG_LTTNG_SYSTEM_CONFIGDIR
@@ -42,6 +207,9 @@
 /* Define to 1 if you have the `clock_gettime' function. */
 #undef HAVE_CLOCK_GETTIME
 
+/* Define to 1 if you have the `dirfd' function. */
+#undef HAVE_DIRFD
+
 /* Define to 1 if you have the <dlfcn.h> header file. */
 #undef HAVE_DLFCN_H
 
@@ -51,11 +219,17 @@
 /* This platform supports epoll(7). */
 #undef HAVE_EPOLL
 
+/* Define to 1 if you have the `epoll_create1' function. */
+#undef HAVE_EPOLL_CREATE1
+
 /* Define to 1 if you have the <fcntl.h> header file. */
 #undef HAVE_FCNTL_H
 
 /* Define to 1 if you have the `fdatasync' function. */
 #undef HAVE_FDATASYNC
+
+/* Define to 1 if you have the `fls' function. */
+#undef HAVE_FLS
 
 /* Define to 1 if you have the `ftruncate' function. */
 #undef HAVE_FTRUNCATE
@@ -63,8 +237,14 @@
 /* Define to 1 if you have the `gethostbyname' function. */
 #undef HAVE_GETHOSTBYNAME
 
+/* Define to 1 if you have the `gethostbyname2' function. */
+#undef HAVE_GETHOSTBYNAME2
+
 /* Define to 1 if you have the `gethostname' function. */
 #undef HAVE_GETHOSTNAME
+
+/* Define to 1 if you have the `getipnodebyname' function. */
+#undef HAVE_GETIPNODEBYNAME
 
 /* Define to 1 if you have the <getopt.h> header file. */
 #undef HAVE_GETOPT_H
@@ -89,6 +269,9 @@
 
 /* Define to 1 if you have the `pthread' library (-lpthread). */
 #undef HAVE_LIBPTHREAD
+
+/* Define to 1 if you have the `urcu-cds' library (-lurcu-cds). */
+#undef HAVE_LIBURCU_CDS
 
 /* Define to 1 if you have the <limits.h> header file. */
 #undef HAVE_LIMITS_H
@@ -123,8 +306,14 @@
 /* Define to 1 if you have the <popt.h> header file. */
 #undef HAVE_POPT_H
 
+/* Define if you have POSIX threads libraries and header files. */
+#undef HAVE_PTHREAD
+
 /* Define to 1 if you have the <pthread.h> header file. */
 #undef HAVE_PTHREAD_H
+
+/* Have PTHREAD_PRIO_INHERIT. */
+#undef HAVE_PTHREAD_PRIO_INHERIT
 
 /* Define to 1 if you have the `putenv' function. */
 #undef HAVE_PUTENV
@@ -176,6 +365,9 @@
 
 /* Define to 1 if you have the `strndup' function. */
 #undef HAVE_STRNDUP
+
+/* Define to 1 if you have the `strnlen' function. */
+#undef HAVE_STRNLEN
 
 /* Define to 1 if you have the `strpbrk' function. */
 #undef HAVE_STRPBRK
@@ -237,6 +429,9 @@
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
 
+/* define if your compiler has __attribute__ */
+#undef HAVE___ATTRIBUTE__
+
 /* Has fmemopen support. */
 #undef LTTNG_HAVE_FMEMOPEN
 
@@ -273,8 +468,34 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
+/* Define to necessary symbol if this constant uses a non-standard name on
+   your system. */
+#undef PTHREAD_CREATE_JOINABLE
+
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
+
+/* Enable extensions on AIX 3, Interix.  */
+#ifndef _ALL_SOURCE
+# undef _ALL_SOURCE
+#endif
+/* Enable GNU extensions on systems that have them.  */
+#ifndef _GNU_SOURCE
+# undef _GNU_SOURCE
+#endif
+/* Enable threading extensions on Solaris.  */
+#ifndef _POSIX_PTHREAD_SEMANTICS
+# undef _POSIX_PTHREAD_SEMANTICS
+#endif
+/* Enable extensions on HP NonStop.  */
+#ifndef _TANDEM_SOURCE
+# undef _TANDEM_SOURCE
+#endif
+/* Enable general extensions on Solaris.  */
+#ifndef __EXTENSIONS__
+# undef __EXTENSIONS__
+#endif
+
 
 /* Version number of package */
 #undef VERSION
@@ -308,6 +529,16 @@
 
 /* Define for large files, on AIX-style hosts. */
 #undef _LARGE_FILES
+
+/* Define to 1 if on MINIX. */
+#undef _MINIX
+
+/* Define to 2 if the system does not provide POSIX.1 features except with
+   this defined. */
+#undef _POSIX_1_SOURCE
+
+/* Define to 1 if you need to in order for `stat' and other things to work. */
+#undef _POSIX_SOURCE
 
 /* Define for Solaris 2.5.1 so the uint32_t typedef from <sys/synch.h>,
    <pthread.h>, or <semaphore.h> is not used. If the typedef were allowed, the

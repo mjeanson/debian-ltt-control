@@ -15,7 +15,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <popt.h>
 #include <stdio.h>
@@ -26,7 +25,6 @@
 #include <unistd.h>
 
 #include "../command.h"
-#include <config.h>
 
 static char *opt_session_name;
 static char *opt_viewer;
@@ -80,42 +78,12 @@ static struct viewers {
 /* Is the session we are trying to view is in live mode. */
 static int session_live_mode;
 
-/*
- * usage
- */
-static void usage(FILE *ofp)
-{
-	fprintf(ofp, "usage: lttng view [SESSION_NAME] [OPTIONS]\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "By default, the babeltrace viewer will be used for text viewing\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Where SESSION_NAME is an optional session name. If not specified, lttng will\n");
-	fprintf(ofp, "get it from the configuration file (.lttngrc).\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Options:\n");
-	fprintf(ofp, "  -h, --help               Show this help\n");
-	fprintf(ofp, "      --list-options       Simple listing of options\n");
-	fprintf(ofp, "  -t, --trace-path PATH    Trace directory path for the viewer\n");
-	fprintf(ofp, "  -e, --viewer CMD         Specify viewer and/or options to use\n");
-	fprintf(ofp, "                           This will completely override the default viewers so\n");
-	fprintf(ofp, "                           please make sure to specify the full command. The trace\n");
-	fprintf(ofp, "                           directory path of the session will be appended at the end\n");
-	fprintf(ofp, "                           to the arguments\n");
-	fprintf(ofp, "\n");
-}
-
 static struct viewers *parse_options(void)
 {
 	if (opt_viewer == NULL) {
 		/* Default is babeltrace */
 		return &(viewers[VIEWER_BABELTRACE]);
 	}
-
-#if 0
-	if (strstr(opt_viewer, viewers[VIEWER_LTTV_GUI].exec_name) == 0) {
-		return &(viewers[VIEWER_LTTV_GUI]);
-	}
-#endif
 
 	/*
 	 * This means that if -e, --viewers is used, we just override everything
@@ -285,12 +253,12 @@ static int spawn_viewer(const char *trace_path)
 		} else {
 			PERROR("exec: %s", viewer_bin);
 		}
-		free(argv);
 		ret = CMD_FATAL;
 		goto error;
 	}
 
 error:
+	free(argv);
 	return ret;
 }
 
@@ -452,13 +420,12 @@ int cmd_view(int argc, const char **argv)
 	while ((opt = poptGetNextOpt(pc)) != -1) {
 		switch (opt) {
 		case OPT_HELP:
-			usage(stdout);
+			SHOW_HELP();
 			goto end;
 		case OPT_LIST_OPTIONS:
 			list_cmd_options(stdout, long_options);
 			goto end;
 		default:
-			usage(stderr);
 			ret = CMD_UNDEFINED;
 			goto end;
 		}

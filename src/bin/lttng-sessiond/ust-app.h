@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 - David Goulet <david.goulet@polymtl.ca>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -22,7 +23,6 @@
 
 #include <common/compat/uuid.h>
 
-#include "agent.h"
 #include "trace-ust.h"
 #include "ust-registry.h"
 
@@ -102,7 +102,7 @@ struct ust_app_stream_list {
 
 struct ust_app_ctx {
 	int handle;
-	struct lttng_ust_context ctx;
+	struct lttng_ust_context_attr ctx;
 	struct lttng_ust_object_data *obj;
 	struct lttng_ht_node_ulong node;
 	struct cds_list_head list;
@@ -193,6 +193,11 @@ struct ust_app_session {
 	uint64_t id;	/* Unique session identifier */
 	struct lttng_ht *channels; /* Registered channels */
 	struct lttng_ht_node_u64 node;
+	/*
+	 * Node indexed by UST session object descriptor (handle). Stored in the
+	 * ust_sessions_objd hash table in the ust_app object.
+	 */
+	struct lttng_ht_node_ulong ust_objd_node;
 	char path[PATH_MAX];
 	/* UID/GID of the application owning the session */
 	uid_t uid;
@@ -273,6 +278,10 @@ struct ust_app {
 	 * Hash table containing ust_app_channel indexed by channel objd.
 	 */
 	struct lttng_ht *ust_objd;
+	/*
+	 * Hash table containing ust_app_session indexed by objd.
+	 */
+	struct lttng_ht *ust_sessions_objd;
 
 	/*
 	 * If this application is of the agent domain and this is non negative then
@@ -335,6 +344,14 @@ int ust_app_snapshot_record(struct ltt_ust_session *usess,
 uint64_t ust_app_get_size_one_more_packet_per_stream(
 		struct ltt_ust_session *usess, uint64_t cur_nr_packets);
 struct ust_app *ust_app_find_by_sock(int sock);
+int ust_app_uid_get_channel_runtime_stats(uint64_t ust_session_id,
+		struct cds_list_head *buffer_reg_uid_list,
+		struct consumer_output *consumer, uint64_t uchan_id,
+		int overwrite, uint64_t *discarded, uint64_t *lost);
+int ust_app_pid_get_channel_runtime_stats(struct ltt_ust_session *usess,
+		struct ltt_ust_channel *uchan,
+		struct consumer_output *consumer,
+		int overwrite, uint64_t *discarded, uint64_t *lost);
 
 static inline
 int ust_app_supported(void)
@@ -547,6 +564,23 @@ struct ust_app *ust_app_find_by_pid(pid_t pid)
 static inline
 uint64_t ust_app_get_size_one_more_packet_per_stream(
 		struct ltt_ust_session *usess, uint64_t cur_nr_packets) {
+	return 0;
+}
+static inline
+int ust_app_uid_get_channel_runtime_stats(uint64_t ust_session_id,
+		struct cds_list_head *buffer_reg_uid_list,
+		struct consumer_output *consumer, int overwrite,
+		uint64_t uchan_id, uint64_t *discarded, uint64_t *lost)
+{
+	return 0;
+}
+
+static inline
+int ust_app_pid_get_channel_runtime_stats(struct ltt_ust_session *usess,
+		struct ltt_ust_channel *uchan,
+		struct consumer_output *consumer,
+		int overwrite, uint64_t *discarded, uint64_t *lost)
+{
 	return 0;
 }
 

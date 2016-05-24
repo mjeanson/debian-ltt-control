@@ -32,7 +32,7 @@ extern "C" {
  */
 #define LTTNG_SESSION_PADDING1             12
 struct lttng_session {
-	char name[NAME_MAX];
+	char name[LTTNG_NAME_MAX];
 	/* The path where traces are written */
 	char path[PATH_MAX];
 	uint32_t enabled;	/* enabled/started: 1, disabled/stopped: 0 */
@@ -90,11 +90,24 @@ extern int lttng_create_session_live(const char *name, const char *url,
  * The session will not be usable, tracing will be stopped thus buffers will be
  * flushed.
  *
+ * This call will wait for data availability for each domain of the session,
+ * which can take an arbitrary amount of time. However, when returning the
+ * tracing data is guaranteed to be ready to be read and analyzed.
+ *
+ * lttng_destroy_session_no_wait() may be used if such a guarantee is not
+ * needed.
+ *
  * The name can't be NULL here.
  *
  * Return 0 on success else a negative LTTng error code.
  */
 extern int lttng_destroy_session(const char *name);
+
+/*
+ * Behaves exactly like lttng_destroy_session but does not wait for data
+ * availability.
+ */
+extern int lttng_destroy_session_no_wait(const char *name);
 
 /*
  * List all the tracing sessions.
@@ -139,10 +152,10 @@ extern int lttng_untrack_pid(struct lttng_handle *handle, int pid);
 /*
  * List PIDs in the tracker.
  *
- * @enabled is set to whether the PID tracker is enabled.
- * @pids is set to an allocated array of PIDs currently tracked. On
- * success, @pids must be freed by the caller.
- * @nr_pids is set to the number of entries contained by the @pids array.
+ * enabled is set to whether the PID tracker is enabled.
+ * pids is set to an allocated array of PIDs currently tracked. On
+ * success, pids must be freed by the caller.
+ * nr_pids is set to the number of entries contained by the pids array.
  *
  * Returns 0 on success, else a negative LTTng error code.
  */

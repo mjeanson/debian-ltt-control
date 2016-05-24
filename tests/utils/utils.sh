@@ -16,9 +16,15 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
 
 SESSIOND_BIN="lttng-sessiond"
+SESSIOND_MATCH=".*lttng-sess.*"
+SESSIOND_PIDS=""
 RUNAS_BIN="lttng-runas"
+RUNAS_MATCH=".*lttng-runas.*"
 CONSUMERD_BIN="lttng-consumerd"
+CONSUMERD_MATCH=".*lttng-consumerd.*"
 RELAYD_BIN="lttng-relayd"
+RELAYD_MATCH=".*lttng-relayd.*"
+RELAYD_PIDS=""
 LTTNG_BIN="lttng"
 BABELTRACE_BIN="babeltrace"
 OUTPUT_DEST=/dev/null
@@ -41,6 +47,22 @@ export LTTNG_UST_REGISTER_TIMEOUT=-1
 export LTTNG_SESSIOND_PATH="/bin/true"
 
 source $TESTDIR/utils/tap/tap.sh
+
+function full_cleanup ()
+{
+	if [ -n "${SESSIOND_PIDS}" ] || [ -n "${RELAYD_PIDS}" ]; then
+		kill -9 ${SESSIOND_PIDS} ${RELAYD_PIDS} > /dev/null 2>&1
+	fi
+
+	# Disable trap for SIGTERM since the following kill to the
+	# pidgroup will be SIGTERM. Otherwise it loops.
+	# The '-' before the pid number ($$) indicates 'kill' to signal the
+	# whole process group.
+	trap - SIGTERM && kill -- -$$
+}
+
+
+trap full_cleanup SIGINT SIGTERM
 
 function print_ok ()
 {
@@ -286,7 +308,7 @@ function start_lttng_relayd_opt()
 
 	DIR=$(readlink -f $TESTDIR)
 
-	if [ -z $(pgrep --full lt-$RELAYD_BIN) ]; then
+	if [ -z $(pgrep $RELAYD_MATCH) ]; then
 		$DIR/../src/bin/lttng-relayd/$RELAYD_BIN -b $opt 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
 		#$DIR/../src/bin/lttng-relayd/$RELAYD_BIN $opt -vvv >>/tmp/relayd.log 2>&1 &
 		if [ $? -eq 1 ]; then
@@ -302,6 +324,8 @@ function start_lttng_relayd_opt()
 	else
 		pass "Start lttng-relayd (opt: $opt)"
 	fi
+
+	RELAYD_PIDS=$(pgrep $RELAYD_MATCH)
 }
 
 function start_lttng_relayd()
@@ -318,12 +342,10 @@ function stop_lttng_relayd_opt()
 {
 	local withtap=$1
 
-	PID_RELAYD=`pgrep --full lt-$RELAYD_BIN`
-
 	if [ $withtap -eq "1" ]; then
-		diag "Killing lttng-relayd (pid: $PID_RELAYD)"
+		diag "Killing lttng-relayd (pid: $RELAYD_PIDS)"
 	fi
-	kill $PID_RELAYD 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+	kill $RELAYD_PIDS 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
 	retval=$?
 
 	if [ $? -eq 1 ]; then
@@ -334,13 +356,14 @@ function stop_lttng_relayd_opt()
 	else
 		out=1
 		while [ -n "$out" ]; do
-			out=$(pgrep --full lt-$RELAYD_BIN)
+			out=$(pgrep $RELAYD_MATCH)
 			sleep 0.5
 		done
 		if [ $withtap -eq "1" ]; then
 			pass "Kill relay daemon"
 		fi
 	fi
+	RELAYD_PIDS=""
 	return $retval
 }
 
@@ -376,7 +399,7 @@ function start_lttng_sessiond_opt()
 	: ${LTTNG_SESSION_CONFIG_XSD_PATH=${DIR}/../src/common/config/}
 	export LTTNG_SESSION_CONFIG_XSD_PATH
 
-	if [ -z $(pgrep --full lt-$SESSIOND_BIN) ]; then
+	if [ -z $(pgrep ${SESSIOND_MATCH}) ]; then
 		# Have a load path ?
 		if [ -n "$load_path" ]; then
 			$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --load "$load_path" --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
@@ -389,6 +412,7 @@ function start_lttng_sessiond_opt()
 			ok $status "Start session daemon"
 		fi
 	fi
+	SESSIOND_PIDS=$(pgrep $SESSIOND_MATCH)
 }
 
 function start_lttng_sessiond()
@@ -412,15 +436,15 @@ function stop_lttng_sessiond_opt()
 		return
 	fi
 
-	PID_SESSIOND="$(pgrep --full lt-$SESSIOND_BIN) $(pgrep --full $RUNAS_BIN)"
+	local pids="${SESSIOND_PIDS} $(pgrep $RUNAS_MATCH)"
 
 	if [ -n "$2" ]; then
 		kill_opt="$kill_opt -s $signal"
 	fi
 	if [ $withtap -eq "1" ]; then
-		diag "Killing lt-$SESSIOND_BIN pids: $(echo $PID_SESSIOND | tr '\n' ' ')"
+		diag "Killing $SESSIOND_BIN and lt-$SESSIOND_BIN pids: $(echo $pids | tr '\n' ' ')"
 	fi
-	kill $kill_opt $PID_SESSIOND 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+	kill $kill_opt $pids 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
 
 	if [ $? -eq 1 ]; then
 		if [ $withtap -eq "1" ]; then
@@ -429,14 +453,16 @@ function stop_lttng_sessiond_opt()
 	else
 		out=1
 		while [ -n "$out" ]; do
-			out=$(pgrep --full lt-$SESSIOND_BIN)
+			out=$(pgrep ${SESSIOND_MATCH})
 			sleep 0.5
 		done
 		out=1
 		while [ -n "$out" ]; do
-			out=$(pgrep --full $CONSUMERD_BIN)
+			out=$(pgrep $CONSUMERD_MATCH)
 			sleep 0.5
 		done
+
+		SESSIOND_PIDS=""
 		if [ $withtap -eq "1" ]; then
 			pass "Kill session daemon"
 		fi
@@ -464,12 +490,12 @@ function sigstop_lttng_sessiond_opt()
 		return
 	fi
 
-	PID_SESSIOND="$(pgrep --full lt-$SESSIOND_BIN) $(pgrep --full $RUNAS_BIN)"
+	PID_SESSIOND="$(pgrep ${SESSIOND_MATCH}) $(pgrep $RUNAS_MATCH)"
 
 	kill_opt="$kill_opt -s $signal"
 
 	if [ $withtap -eq "1" ]; then
-		diag "Sending SIGSTOP to lt-$SESSIOND_BIN pids: $(echo $PID_SESSIOND | tr '\n' ' ')"
+		diag "Sending SIGSTOP to lt-$SESSIOND_BIN and $SESSIOND_BIN pids: $(echo $PID_SESSIOND | tr '\n' ' ')"
 	fi
 	kill $kill_opt $PID_SESSIOND 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
 
@@ -480,7 +506,7 @@ function sigstop_lttng_sessiond_opt()
 	else
 		out=1
 		while [ $out -ne 0 ]; do
-			pid=$(pgrep --full lt-$SESSIOND_BIN)
+			pid=$(pgrep $SESSIOND_MATCH)
 
 			# Wait until state becomes stopped for session
 			# daemon(s).
@@ -515,7 +541,7 @@ function stop_lttng_consumerd_opt()
 	local signal=$2
 	local kill_opt=""
 
-	PID_CONSUMERD=`pgrep --full $CONSUMERD_BIN`
+	PID_CONSUMERD=$(pgrep $CONSUMERD_MATCH)
 
 	if [ -n "$2" ]; then
 		kill_opt="$kill_opt -s $signal"
@@ -536,7 +562,7 @@ function stop_lttng_consumerd_opt()
 	else
 		out=1
 		while [ $out -ne 0 ]; do
-			pid=$(pgrep --full $CONSUMERD_BIN)
+			pid=$(pgrep $CONSUMERD_MATCH)
 
 			# If consumerds are still present check their status.
 			# A zombie status qualifies the consumerd as *killed*
@@ -572,7 +598,7 @@ function sigstop_lttng_consumerd_opt()
 	local signal=SIGSTOP
 	local kill_opt=""
 
-	PID_CONSUMERD=`pgrep --full $CONSUMERD_BIN`
+	PID_CONSUMERD=$(pgrep $CONSUMERD_MATCH)
 
 	kill_opt="$kill_opt -s $signal"
 
@@ -591,7 +617,7 @@ function sigstop_lttng_consumerd_opt()
 	else
 		out=1
 		while [ $out -ne 0 ]; do
-			pid=$(pgrep --full $CONSUMERD_BIN)
+			pid=$(pgrep $CONSUMERD_MATCH)
 
 			# Wait until state becomes stopped for all
 			# consumers.
@@ -1198,7 +1224,7 @@ function trace_matches ()
 
 	if [ "$count" -ne "$nr_iter" ]; then
 		fail "Trace match"
-		diag "$count events found in trace"
+		diag "$count matching events found in trace"
 	else
 		pass "Trace match"
 	fi
@@ -1308,4 +1334,38 @@ function validate_trace_empty()
 	fi
 	ret=$?
 	return $ret
+}
+
+function metadata_regenerate ()
+{
+	local expected_to_fail=$1
+	local sess_name=$2
+
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN metadata regenerate -s $sess_name 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+	ret=$?
+	if [[ $expected_to_fail -eq "1" ]]; then
+		test "$ret" -ne "0"
+		ok $? "Expected fail on regenerate $sess_name"
+	else
+		ok $ret "Metadata regenerate $sess_name"
+	fi
+}
+
+function metadata_regenerate_ok ()
+{
+	metadata_regenerate 0 "$@"
+}
+
+function metadata_regenerate_fail ()
+{
+	metadata_regenerate 1 "$@"
+}
+
+function destructive_tests_enabled ()
+{
+	if [ ${LTTNG_ENABLE_DESTRUCTIVE_TESTS} = "will-break-my-system" ]; then
+		return 0
+	else
+		return 1
+	fi
 }

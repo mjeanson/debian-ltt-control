@@ -1,8 +1,11 @@
 LTTng-tools
 ===========
 
+[![Jenkins](https://img.shields.io/jenkins/s/https/ci.lttng.org/lttng-tools_master_build.svg)](https://ci.lttng.org/job/lttng-tools_master_build/)
+[![Coverity](https://img.shields.io/coverity/scan/lttng-tools.svg)](https://scan.coverity.com/projects/lttng-tools)
+
 LTTng-tools is a set of tools to control [LTTng](https://lttng.org/)
-tracing. The project includes the LTTng session daemon, consumer damon
+tracing. The project includes the LTTng session daemon, consumer daemon
 and relay daemon, as well as `liblttng-ctl`, a C library used to
 communicate with the session daemon, and `lttng`, a command line
 interface to `liblttng-ctl`.
@@ -37,8 +40,8 @@ The following items are _optional_ dependencies:
   - **[Babeltrace](https://lttng.org/babeltrace)**: trace viewer.
     Enables the use of `lttng view` command.
     - Debian/Ubuntu package: `babeltrace`
-  - **[LTTng UST](https://lttng.org) (same version as LTTng Tools)**: userspace tracer.
-    Enables the tracing of userspace applications.
+  - **[LTTng UST](https://lttng.org) (same minor version as LTTng Tools)**:
+    userspace tracer. Enables the tracing of userspace applications.
     - Debian/Ubuntu package: `liblttng-ust-dev`
   - **Perl**: needed for `make check` and tests.
   - **Python >= 3.0**: needed for `make check` and tests.
@@ -49,8 +52,22 @@ The following items are _optional_ dependencies:
     - Debian/Ubuntu packages: `swig2.0` and `python3-dev`
   - **modprobe**: needed for automatic LTTng kernel modules loading
     (kernel tracing).
-  - **bash**: needed for running `make check`.
+  - **bash**: needed to run `make check`.
+  - **man** (manual pager): needed to view LTTng-tools commands' man
+    pages with the `--help` option or with the `lttng help` command.
+    Note that without `man`, you cannot get offline help with
+    LTTng-tools commands, not even their usage.
 
+LTTng-tools supports both the [LTTng Linux Kernel tracer](https://lttng.org)
+and [LTTng user space tracer](https://lttng.org) released as part of the same
+**minor** release series. While some releases do not change the tracer ABIs and
+should work with, no testing is performed to ensure cross-version compatibility
+is maintained.
+
+Note that applications instrumented with older versions of the LTTng UST project
+do not have to be rebuilt or modified to work with the latest LTTng-tools.
+For more information on versioning, please refer to the
+[LTTng documentation](https://lttng.org/docs).
 
 Building
 --------
@@ -59,17 +76,24 @@ This source tree is based on the Autotools suite from GNU to simplify
 portability. Here are some things you should have on your system in
 order to compile the Git repository tree:
 
-  - GNU Autotools (Automake >= 1.10, Autoconf >= 2.64,
-    Autoheader >= 2.50; make sure your system-wide `automake` points to
-    a recent version!)
-  - [GNU Libtool](http://www.gnu.org/software/autoconf/) >= 2.2
-  - Flex >= 2.5.35
-  - Bison >= 2.4
+  - **GNU Autotools** (**Automake >= 1.10**, **Autoconf >= 2.64**,
+    **Autoheader >= 2.50**; make sure your system-wide `automake` points
+    to a recent version)
+  - **[GNU Libtool](http://www.gnu.org/software/autoconf/) >= 2.2**
+  - **Flex >= 2.5.35**
+  - **Bison >= 2.4**
+
+Optional packages to build LTTng-tools man pages:
+
+  - **AsciiDoc >= 8.4.5** (previous versions may work, but were
+    not tested)
+  - **xmlto >= 0.0.21** (previous versions may work, but were
+    not tested)
 
 If you use GNU gold, which is _not_ mandatory, make sure you have this
 version:
 
-  - GNU gold >= 2.22
+  - **GNU gold >= 2.22**
 
 Before this version of GNU gold, we hit a
 [known bug](http://sourceware.org/bugzilla/show_bug.cgi?id=11317).
@@ -133,6 +157,7 @@ This package contains the following elements:
   - `include`: the public header files that will be installed on the system.
   - `src/bin`: source code of LTTng-tools programs.
     - `lttng-consumerd`: consumer daemon.
+    - `lttng-crash`: crash trace viewer.
     - `lttng-relayd`: relay daemon.
     - `lttng-sessiond`: session daemon.
     - `lttng`: command line interface for LTTng tracing control.

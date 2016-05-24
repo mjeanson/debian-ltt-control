@@ -15,7 +15,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <inttypes.h>
 #include <popt.h>
@@ -67,34 +66,6 @@ static struct poptOption long_options[] = {
 	{"list-options", 0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{0, 0, 0, 0, 0, 0, 0}
 };
-
-/*
- * usage
- */
-static void usage(FILE *ofp)
-{
-	fprintf(ofp, "usage: lttng list [OPTIONS] [SESSION [SESSION OPTIONS]]\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "With no arguments, list available tracing session(s)\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Without a session, -k lists available kernel events\n");
-	fprintf(ofp, "Without a session, -u lists available userspace events\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "  -h, --help              Show this help\n");
-	fprintf(ofp, "      --list-options      Simple listing of options\n");
-	fprintf(ofp, "  -k, --kernel            Select kernel domain\n");
-	fprintf(ofp, "  -u, --userspace         Select user-space domain.\n");
-	fprintf(ofp, "  -j, --jul               Apply for Java application using JUL\n");
-	fprintf(ofp, "  -l, --log4j             Apply for Java application using LOG4J\n");
-	fprintf(ofp, "  -p, --python            Apply for Python application using logging\n");
-	fprintf(ofp, "  -f, --fields            List event fields.\n");
-	fprintf(ofp, "      --syscall           List available system calls.\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Session Options:\n");
-	fprintf(ofp, "  -c, --channel NAME      List details of a channel\n");
-	fprintf(ofp, "  -d, --domain            List available domain(s)\n");
-	fprintf(ofp, "\n");
-}
 
 /*
  * Get command line from /proc for a specific pid.
@@ -167,21 +138,9 @@ const char *enabled_string(int value)
 }
 
 static
-const char *filter_string(int value)
+const char *safe_string(const char *str)
 {
-	switch (value) {
-	case 1:	return " [with filter]";
-	default: return "";
-	}
-}
-
-static
-const char *exclusion_string(int value)
-{
-	switch (value) {
-	case 1: return " [has exclusions]";
-	default: return "";
-	}
+	return str ? str : "";
 }
 
 static const char *logleveltype_string(enum lttng_loglevel_type value)
@@ -214,10 +173,103 @@ static const char *bitness_event(enum lttng_event_flag flags)
 }
 
 /*
+ * Get exclusion names message for a single event.
+ *
+ * Returned pointer must be freed by caller. Returns NULL on error.
+ */
+static char *get_exclusion_names_msg(struct lttng_event *event)
+{
+	int ret;
+	int exclusion_count;
+	char *exclusion_msg = NULL;
+	char *at;
+	size_t i;
+	const char * const exclusion_fmt = " [exclusions: ";
+	const size_t exclusion_fmt_len = strlen(exclusion_fmt);
+
+	exclusion_count = lttng_event_get_exclusion_name_count(event);
+	if (exclusion_count < 0) {
+		goto end;
+	} else if (exclusion_count == 0) {
+		/*
+		 * No exclusions: return copy of empty string so that
+		 * it can be freed by caller.
+		 */
+		exclusion_msg = strdup("");
+		goto end;
+	}
+
+	/*
+	 * exclusion_msg's size is bounded by the exclusion_fmt string,
+	 * a comma per entry, the entry count (fixed-size), a closing
+	 * bracket, and a trailing \0.
+	 */
+	exclusion_msg = malloc(exclusion_count +
+			exclusion_count * LTTNG_SYMBOL_NAME_LEN +
+			exclusion_fmt_len + 1);
+	if (!exclusion_msg) {
+		goto end;
+	}
+
+	at = strcpy(exclusion_msg, exclusion_fmt) + exclusion_fmt_len;
+	for (i = 0; i < exclusion_count; ++i) {
+		const char *name;
+
+		/* Append comma between exclusion names */
+		if (i > 0) {
+			*at = ',';
+			at++;
+		}
+
+		ret = lttng_event_get_exclusion_name(event, i, &name);
+		if (ret) {
+			/* Prints '?' on local error; should never happen */
+			*at = '?';
+			at++;
+			continue;
+		}
+
+		/* Append exclusion name */
+		at += sprintf(at, "%s", name);
+	}
+
+	/* This also puts a final '\0' at the end of exclusion_msg */
+	strcpy(at, "]");
+
+end:
+	return exclusion_msg;
+}
+
+/*
  * Pretty print single event.
  */
 static void print_events(struct lttng_event *event)
 {
+	int ret;
+	const char *filter_str;
+	char *filter_msg = NULL;
+	char *exclusion_msg = NULL;
+
+	ret = lttng_event_get_filter_expression(event, &filter_str);
+
+	if (ret) {
+		filter_msg = strdup(" [failed to retrieve filter]");
+	} else if (filter_str) {
+		const char * const filter_fmt = " [filter: '%s']";
+
+		filter_msg = malloc(strlen(filter_str) +
+				strlen(filter_fmt) + 1);
+		if (filter_msg) {
+			sprintf(filter_msg, filter_fmt,
+					filter_str);
+		}
+	}
+
+	exclusion_msg = get_exclusion_names_msg(event);
+	if (!exclusion_msg) {
+		exclusion_msg = strdup(" [failed to retrieve exclusions]");
+	}
+
 	switch (event->type) {
 	case LTTNG_EVENT_TRACEPOINT:
 	{
@@ -229,22 +281,22 @@ static void print_events(struct lttng_event *event)
 				mi_lttng_loglevel_string(event->loglevel, handle->domain.type),
 				event->loglevel,
 				enabled_string(event->enabled),
-				exclusion_string(event->exclusion),
-				filter_string(event->filter));
+				safe_string(exclusion_msg),
+				safe_string(filter_msg));
 		} else {
 			MSG("%s%s (type: tracepoint)%s%s%s",
 				indent6,
 				event->name,
 				enabled_string(event->enabled),
-				exclusion_string(event->exclusion),
-				filter_string(event->filter));
+				safe_string(exclusion_msg),
+				safe_string(filter_msg));
 		}
 		break;
 	}
 	case LTTNG_EVENT_FUNCTION:
 		MSG("%s%s (type: function)%s%s", indent6,
 				event->name, enabled_string(event->enabled),
-				filter_string(event->filter));
+				safe_string(filter_msg));
 		if (event->attr.probe.addr != 0) {
 			MSG("%saddr: 0x%" PRIx64, indent8, event->attr.probe.addr);
 		} else {
@@ -255,7 +307,7 @@ static void print_events(struct lttng_event *event)
 	case LTTNG_EVENT_PROBE:
 		MSG("%s%s (type: probe)%s%s", indent6,
 				event->name, enabled_string(event->enabled),
-				filter_string(event->filter));
+				safe_string(filter_msg));
 		if (event->attr.probe.addr != 0) {
 			MSG("%saddr: 0x%" PRIx64, indent8, event->attr.probe.addr);
 		} else {
@@ -266,25 +318,29 @@ static void print_events(struct lttng_event *event)
 	case LTTNG_EVENT_FUNCTION_ENTRY:
 		MSG("%s%s (type: function)%s%s", indent6,
 				event->name, enabled_string(event->enabled),
-				filter_string(event->filter));
+				safe_string(filter_msg));
 		MSG("%ssymbol: \"%s\"", indent8, event->attr.ftrace.symbol_name);
 		break;
 	case LTTNG_EVENT_SYSCALL:
-		MSG("%s%s%s%s%s", indent6, event->name,
+		MSG("%s%s%s%s%s%s", indent6, event->name,
 				(opt_syscall ? "" : " (type:syscall)"),
 				enabled_string(event->enabled),
-				bitness_event(event->flags));
+				bitness_event(event->flags),
+				safe_string(filter_msg));
 		break;
 	case LTTNG_EVENT_NOOP:
 		MSG("%s (type: noop)%s%s", indent6,
 				enabled_string(event->enabled),
-				filter_string(event->filter));
+				safe_string(filter_msg));
 		break;
 	case LTTNG_EVENT_ALL:
 		/* We should never have "all" events in list. */
 		assert(0);
 		break;
 	}
+
+	free(filter_msg);
+	free(exclusion_msg);
 }
 
 static const char *field_type(struct lttng_event_field *field)
@@ -349,7 +405,7 @@ static int mi_list_agent_ust_events(struct lttng_event *events, int count,
 	for (i = 0; i < count; i++) {
 		if (cur_pid != events[i].pid) {
 			if (pid_element_open) {
-				/* Close the previous events and  pid element */
+				/* Close the previous events and pid element */
 				ret = mi_lttng_close_multi_element(writer, 2);
 				if (ret) {
 					goto end;
@@ -565,6 +621,8 @@ static int mi_list_ust_event_fields(struct lttng_event_field *fields, int count,
 	int event_element_open = 0;
 	struct lttng_event cur_event;
 
+	memset(&cur_event, 0, sizeof(cur_event));
+
 	/* Open domains element */
 	ret = mi_lttng_domains_open(writer);
 	if (ret) {
@@ -587,7 +645,6 @@ static int mi_list_ust_event_fields(struct lttng_event_field *fields, int count,
 		if (cur_pid != fields[i].event.pid) {
 			if (pid_element_open) {
 				if (event_element_open) {
-
 					/* Close the previous field element and event. */
 					ret = mi_lttng_close_multi_element(writer, 2);
 					if (ret) {
@@ -985,21 +1042,43 @@ static int list_session_agent_events(void)
 		}
 
 		for (i = 0; i < count; i++) {
-			if (events[i].loglevel_type !=
-					LTTNG_EVENT_LOGLEVEL_ALL) {
-				MSG("%s- %s%s (loglevel%s %s)", indent4,
-						events[i].name,
-						enabled_string(
-							events[i].enabled),
-						logleveltype_string(
-							events[i].loglevel_type),
-						mi_lttng_loglevel_string(
-							events[i].loglevel,
-							handle->domain.type));
-			} else {
-				MSG("%s- %s%s", indent4, events[i].name,
-				    enabled_string(events[i].enabled));
+			const char *filter_str;
+			char *filter_msg = NULL;
+			struct lttng_event *event = &events[i];
+
+			ret = lttng_event_get_filter_expression(event,
+					&filter_str);
+			if (ret) {
+				filter_msg = strdup(" [failed to retrieve filter]");
+			} else if (filter_str) {
+				const char * const filter_fmt =
+						" [filter: '%s']";
+
+				filter_msg = malloc(strlen(filter_str) +
+						strlen(filter_fmt) + 1);
+				if (filter_msg) {
+					sprintf(filter_msg, filter_fmt,
+							filter_str);
+				}
 			}
+
+			if (event->loglevel_type !=
+					LTTNG_EVENT_LOGLEVEL_ALL) {
+				MSG("%s- %s%s (loglevel%s %s)%s", indent4,
+						event->name,
+						enabled_string(event->enabled),
+						logleveltype_string(
+							event->loglevel_type),
+						mi_lttng_loglevel_string(
+							event->loglevel,
+							handle->domain.type),
+						safe_string(filter_msg));
+			} else {
+				MSG("%s- %s%s%s", indent4, event->name,
+						enabled_string(event->enabled),
+						safe_string(filter_msg));
+			}
+			free(filter_msg);
 		}
 
 		MSG("");
@@ -1086,6 +1165,23 @@ error:
  */
 static void print_channel(struct lttng_channel *channel)
 {
+	int ret;
+	uint64_t discarded_events, lost_packets;
+
+	ret = lttng_channel_get_discarded_event_count(channel,
+			&discarded_events);
+	if (ret) {
+		ERR("Failed to retrieve discarded event count of channel");
+		return;
+	}
+
+	ret = lttng_channel_get_lost_packet_count(channel,
+			&lost_packets);
+	if (ret) {
+		ERR("Failed to retrieve lost packet count of channel");
+		return;
+	}
+
 	MSG("- %s:%s\n", channel->name, enabled_string(channel->enabled));
 
 	MSG("%sAttributes:", indent4);
@@ -1096,6 +1192,8 @@ static void print_channel(struct lttng_channel *channel)
 	MSG("%sread timer interval: %u", indent6, channel->attr.read_timer_interval);
 	MSG("%strace file count: %" PRIu64, indent6, channel->attr.tracefile_count);
 	MSG("%strace file size (bytes): %" PRIu64, indent6, channel->attr.tracefile_size);
+	MSG("%sdiscarded events: %" PRIu64, indent6, discarded_events);
+	MSG("%slost packets: %" PRIu64, indent6, lost_packets);
 	switch (channel->attr.output) {
 		case LTTNG_EVENT_SPLICE:
 			MSG("%soutput: splice()", indent6);
@@ -1601,7 +1699,6 @@ int cmd_list(int argc, const char **argv)
 	memset(&domain, 0, sizeof(domain));
 
 	if (argc < 1) {
-		usage(stderr);
 		ret = CMD_ERROR;
 		goto end;
 	}
@@ -1612,7 +1709,7 @@ int cmd_list(int argc, const char **argv)
 	while ((opt = poptGetNextOpt(pc)) != -1) {
 		switch (opt) {
 		case OPT_HELP:
-			usage(stdout);
+			SHOW_HELP();
 			goto end;
 		case OPT_USERSPACE:
 			opt_userspace = 1;
@@ -1621,7 +1718,6 @@ int cmd_list(int argc, const char **argv)
 			list_cmd_options(stdout, long_options);
 			goto end;
 		default:
-			usage(stderr);
 			ret = CMD_UNDEFINED;
 			goto end;
 		}

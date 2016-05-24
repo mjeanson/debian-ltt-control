@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 - David Goulet <david.goulet@polymtl.ca>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -15,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <ctype.h>
 #include <popt.h>
@@ -33,25 +33,22 @@
 
 #include "../command.h"
 
-#define PRINT_LINE_LEN	80
-
 static char *opt_channel_name;
 static char *opt_session_name;
 static int opt_kernel;
 static int opt_userspace;
+static int opt_jul;
+static int opt_log4j;
 static char *opt_type;
-
-#if 0
-/* Not implemented yet */
-static char *opt_cmd_name;
-static pid_t opt_pid;
-#endif
 
 enum {
 	OPT_HELP = 1,
 	OPT_TYPE,
 	OPT_USERSPACE,
+	OPT_JUL,
+	OPT_LOG4J,
 	OPT_LIST_OPTIONS,
+	OPT_LIST,
 };
 
 static struct lttng_handle *handle;
@@ -76,6 +73,11 @@ enum context_type {
 	CONTEXT_IP           = 12,
 	CONTEXT_PERF_CPU_COUNTER = 13,
 	CONTEXT_PERF_THREAD_COUNTER = 14,
+	CONTEXT_APP_CONTEXT  = 15,
+	CONTEXT_INTERRUPTIBLE = 16,
+	CONTEXT_PREEMPTIBLE  = 17,
+	CONTEXT_NEED_RESCHEDULE = 18,
+	CONTEXT_MIGRATABLE   = 19,
 };
 
 /*
@@ -151,7 +153,10 @@ static struct poptOption long_options[] = {
 	{"channel",        'c', POPT_ARG_STRING, &opt_channel_name, 0, 0, 0},
 	{"kernel",         'k', POPT_ARG_VAL, &opt_kernel, 1, 0, 0},
 	{"userspace",      'u', POPT_ARG_NONE, 0, OPT_USERSPACE, 0, 0},
+	{"jul",            'j', POPT_ARG_NONE, 0, OPT_JUL, 0, 0},
+	{"log4j",          'l', POPT_ARG_NONE, 0, OPT_LOG4J, 0, 0},
 	{"type",           't', POPT_ARG_STRING, &opt_type, OPT_TYPE, 0, 0},
+	{"list",           0, POPT_ARG_NONE, NULL, OPT_LIST, NULL, NULL},
 	{"list-options",   0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{0, 0, 0, 0, 0, 0, 0}
 };
@@ -206,6 +211,10 @@ const struct ctx_opts {
 			uint32_t type;
 			uint64_t config;
 		} perf;
+		struct {
+			char *provider_name;
+			char *ctx_name;
+		} app_ctx;
 	} u;
 } ctx_opts[] = {
 	{ "pid", CONTEXT_PID },
@@ -220,6 +229,10 @@ const struct ctx_opts {
 	{ "vppid", CONTEXT_VPPID },
 	{ "hostname", CONTEXT_HOSTNAME },
 	{ "ip", CONTEXT_IP },
+	{ "interruptible", CONTEXT_INTERRUPTIBLE },
+	{ "preemptible", CONTEXT_PREEMPTIBLE },
+	{ "need_reschedule", CONTEXT_NEED_RESCHEDULE },
+	{ "migratable", CONTEXT_MIGRATABLE },
 
 	/* Perf options */
 
@@ -448,7 +461,7 @@ const struct ctx_opts {
  * Context type for command line option parsing.
  */
 struct ctx_type {
-	const struct ctx_opts *opt;
+	struct ctx_opts *opt;
 	struct cds_list_head list;
 };
 
@@ -467,76 +480,24 @@ struct ctx_type_list {
  */
 static void print_ctx_type(FILE *ofp)
 {
-	const char *indent = "                               ";
-	int indent_len = strlen(indent);
-	int len, i = 0;
+	int i = 0;
 
-	fprintf(ofp, "%s", indent);
-	len = indent_len;
 	while (ctx_opts[i].symbol != NULL) {
 		if (!ctx_opts[i].hide_help) {
-			if (len > indent_len) {
-				if (len + strlen(ctx_opts[i].symbol) + 2
-						>= PRINT_LINE_LEN) {
-					fprintf(ofp, ",\n");
-					fprintf(ofp, "%s", indent);
-					len = indent_len;
-				} else {
-					len += fprintf(ofp, ", ");
-				}
-			}
-			len += fprintf(ofp, "%s", ctx_opts[i].symbol);
+			fprintf(ofp, "%s\n", ctx_opts[i].symbol);
 		}
 		i++;
 	}
 }
 
 /*
- * usage
- */
-static void usage(FILE *ofp)
-{
-	fprintf(ofp, "usage: lttng add-context -t TYPE [-k|-u] [OPTIONS]\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "If no channel is given (-c), the context is added to\n");
-	fprintf(ofp, "all channels.\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Otherwise the context is added only to the channel (-c).\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Exactly one domain (-k or -u) must be specified.\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Options:\n");
-	fprintf(ofp, "  -h, --help               Show this help\n");
-	fprintf(ofp, "      --list-options       Simple listing of options\n");
-	fprintf(ofp, "  -s, --session NAME       Apply to session name\n");
-	fprintf(ofp, "  -c, --channel NAME       Apply to channel\n");
-	fprintf(ofp, "  -k, --kernel             Apply to the kernel tracer\n");
-	fprintf(ofp, "  -u, --userspace          Apply to the user-space tracer\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Context:\n");
-	fprintf(ofp, "  -t, --type TYPE          Context type. You can repeat that option on\n");
-	fprintf(ofp, "                           the command line to specify multiple contexts at once.\n");
-	fprintf(ofp, "                           (--kernel preempts --userspace)\n");
-	fprintf(ofp, "                           TYPE can be one of the strings below:\n");
-	print_ctx_type(ofp);
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Note that the vpid, vppid and vtid context types represent the virtual process id,\n"
-			"virtual parent process id and virtual thread id as seen from the current execution context\n"
-			"as opposed to the pid, ppid and tid which are kernel internal data structures.\n\n");
-	fprintf(ofp, "Example:\n");
-	fprintf(ofp, "This command will add the context information 'prio' and two per-cpu\n"
-			"perf counters (hardware branch misses and cache misses), to all channels\n"
-			"in the trace data output:\n");
-	fprintf(ofp, "# lttng add-context -k -t prio -t perf:cpu:branch-misses -t perf:cpu:cache-misses\n");
-	fprintf(ofp, "\n");
-}
-
-/*
  * Find context numerical value from string.
+ *
+ * Return -1 if not found.
  */
 static int find_ctx_type_idx(const char *opt)
 {
-	int ret = -1, i = 0;
+	int ret, i = 0;
 
 	while (ctx_opts[i].symbol != NULL) {
 		if (strcmp(opt, ctx_opts[i].symbol) == 0) {
@@ -546,8 +507,25 @@ static int find_ctx_type_idx(const char *opt)
 		i++;
 	}
 
+	ret = -1;
 end:
 	return ret;
+}
+
+static
+enum lttng_domain_type get_domain(void)
+{
+	if (opt_kernel) {
+		return LTTNG_DOMAIN_KERNEL;
+	} else if (opt_userspace) {
+		return LTTNG_DOMAIN_UST;
+	} else if (opt_jul) {
+		return LTTNG_DOMAIN_JUL;
+	} else if (opt_log4j) {
+		return LTTNG_DOMAIN_LOG4J;
+	} else {
+		assert(0);
+	}
 }
 
 /*
@@ -564,14 +542,7 @@ static int add_context(char *session_name)
 	memset(&context, 0, sizeof(context));
 	memset(&dom, 0, sizeof(dom));
 
-	if (opt_kernel) {
-		dom.type = LTTNG_DOMAIN_KERNEL;
-	} else if (opt_userspace) {
-		dom.type = LTTNG_DOMAIN_UST;
-	} else {
-		assert(0);
-	}
-
+	dom.type = get_domain();
 	handle = lttng_create_handle(session_name, &dom);
 	if (handle == NULL) {
 		ret = CMD_ERROR;
@@ -606,6 +577,12 @@ static int add_context(char *session_name)
 				*ptr = '_';
 			}
 			break;
+		case LTTNG_EVENT_CONTEXT_APP_CONTEXT:
+			context.u.app_ctx.provider_name =
+					type->opt->u.app_ctx.provider_name;
+			context.u.app_ctx.ctx_name =
+					type->opt->u.app_ctx.ctx_name;
+			break;
 		default:
 			break;
 		}
@@ -628,11 +605,11 @@ static int add_context(char *session_name)
 		} else {
 			if (opt_channel_name) {
 				MSG("%s context %s added to channel %s",
-						opt_kernel ? "kernel" : "UST", type->opt->symbol,
+						get_domain_str(dom.type), type->opt->symbol,
 						opt_channel_name);
 			} else {
 				MSG("%s context %s added to all channels",
-						opt_kernel ? "kernel" : "UST", type->opt->symbol)
+						get_domain_str(dom.type), type->opt->symbol);
 			}
 			success = 1;
 		}
@@ -678,19 +655,139 @@ error:
 	return ret;
 }
 
+static
+void destroy_ctx_type(struct ctx_type *type)
+{
+	if (!type) {
+		return;
+	}
+	free(type->opt->symbol);
+	free(type->opt);
+	free(type);
+}
+
+static
+struct ctx_type *create_ctx_type(void)
+{
+	struct ctx_type *type = zmalloc(sizeof(*type));
+
+	if (!type) {
+		PERROR("malloc ctx_type");
+		goto end;
+	}
+
+	type->opt = zmalloc(sizeof(*type->opt));
+	if (!type->opt) {
+		PERROR("malloc ctx_type options");
+		destroy_ctx_type(type);
+		type = NULL;
+		goto end;
+	}
+end:
+	return type;
+}
+
+static
+struct ctx_type *get_context_type(const char *ctx)
+{
+	int opt_index;
+	struct ctx_type *type = NULL;
+	const char app_ctx_prefix[] = "$app.";
+	char *provider_name = NULL, *ctx_name = NULL;
+	size_t i, len, colon_pos = 0, provider_name_len, ctx_name_len;
+
+	if (!ctx) {
+		goto not_found;
+	}
+
+	type = create_ctx_type();
+	if (!type) {
+		goto not_found;
+	}
+
+	/* Check if ctx matches a known static context. */
+	opt_index = find_ctx_type_idx(ctx);
+	if (opt_index >= 0) {
+		*type->opt = ctx_opts[opt_index];
+		type->opt->symbol = strdup(ctx_opts[opt_index].symbol);
+		goto found;
+	}
+
+	/*
+	 * No match found against static contexts; check if it is an app
+	 * context.
+	 */
+	len = strlen(ctx);
+	if (len <= sizeof(app_ctx_prefix) - 1) {
+		goto not_found;
+	}
+
+	/* String starts with $app. */
+	if (strncmp(ctx, app_ctx_prefix, sizeof(app_ctx_prefix) - 1)) {
+		goto not_found;
+	}
+
+	/* Validate that the ':' separator is present. */
+	for (i = sizeof(app_ctx_prefix); i < len; i++) {
+		const char c = ctx[i];
+
+		if (c == ':') {
+			colon_pos = i;
+			break;
+		}
+	}
+
+	/*
+	 * No colon found or no ctx name ("$app.provider:") or no provider name
+	 * given ("$app.:..."), which is invalid.
+	 */
+	if (!colon_pos || colon_pos == len ||
+			colon_pos == sizeof(app_ctx_prefix)) {
+		ERR("Invalid application context provided: no provider or context name provided.");
+		goto not_found;
+	}
+
+	provider_name_len = colon_pos - sizeof(app_ctx_prefix) + 2;
+	provider_name = zmalloc(provider_name_len);
+	if (!provider_name) {
+		PERROR("malloc provider_name");
+		goto not_found;
+	}
+	strncpy(provider_name, ctx + sizeof(app_ctx_prefix) - 1,
+			provider_name_len - 1);
+	type->opt->u.app_ctx.provider_name = provider_name;
+
+	ctx_name_len = len - colon_pos;
+	ctx_name = zmalloc(ctx_name_len);
+	if (!ctx_name) {
+		PERROR("malloc ctx_name");
+		goto not_found;
+	}
+	strncpy(ctx_name, ctx + colon_pos + 1, ctx_name_len - 1);
+	type->opt->u.app_ctx.ctx_name = ctx_name;
+	type->opt->ctx_type = CONTEXT_APP_CONTEXT;
+	type->opt->symbol = strdup(ctx);
+found:
+	return type;
+not_found:
+	free(provider_name);
+	free(ctx_name);
+	destroy_ctx_type(type);
+	return NULL;
+}
+
 /*
  * Add context to channel or event.
  */
 int cmd_add_context(int argc, const char **argv)
 {
-	int index, opt, ret = CMD_SUCCESS, command_ret = CMD_SUCCESS;
+	int opt, ret = CMD_SUCCESS, command_ret = CMD_SUCCESS;
 	int success = 1;
 	static poptContext pc;
 	struct ctx_type *type, *tmptype;
 	char *session_name = NULL;
 
 	if (argc < 2) {
-		usage(stderr);
 		ret = CMD_ERROR;
 		goto end;
 	}
@@ -701,55 +798,42 @@ int cmd_add_context(int argc, const char **argv)
 	while ((opt = poptGetNextOpt(pc)) != -1) {
 		switch (opt) {
 		case OPT_HELP:
-			usage(stdout);
+			SHOW_HELP();
+			goto end;
+		case OPT_LIST:
+			print_ctx_type(stdout);
 			goto end;
 		case OPT_TYPE:
-			/*
-			 * Look up the index of opt_type in ctx_opts[] first, so we don't
-			 * have to free(type) on failure.
-			 */
-			index = find_ctx_type_idx(opt_type);
-			if (index < 0) {
+		{
+			type = get_context_type(opt_type);
+			if (!type) {
 				ERR("Unknown context type %s", opt_type);
-				ret = CMD_ERROR;
-				goto end;
-			}
-
-			type = zmalloc(sizeof(struct ctx_type));
-			if (type == NULL) {
-				PERROR("malloc ctx_type");
 				ret = CMD_FATAL;
 				goto end;
 			}
-
-			type->opt = &ctx_opts[index];
-			if (type->opt->symbol == NULL) {
-				ERR("Unknown context type %s", opt_type);
-				free(type);
-				ret = CMD_ERROR;
-				goto end;
-			} else {
-				cds_list_add_tail(&type->list, &ctx_type_list.head);
-			}
+			cds_list_add_tail(&type->list, &ctx_type_list.head);
 			break;
+		}
 		case OPT_USERSPACE:
 			opt_userspace = 1;
-#if 0
-			opt_cmd_name = poptGetOptArg(pc);
-#endif
+			break;
+		case OPT_JUL:
+			opt_jul = 1;
+			break;
+		case OPT_LOG4J:
+			opt_log4j = 1;
 			break;
 		case OPT_LIST_OPTIONS:
 			list_cmd_options(stdout, long_options);
 			goto end;
 		default:
-			usage(stderr);
 			ret = CMD_UNDEFINED;
 			goto end;
 		}
 	}
 
-	ret = print_missing_or_multiple_domains(opt_kernel + opt_userspace);
-
+	ret = print_missing_or_multiple_domains(opt_kernel + opt_userspace +
+			opt_jul + opt_log4j);
 	if (ret) {
 		ret = CMD_ERROR;
 		goto end;
@@ -757,7 +841,6 @@ int cmd_add_context(int argc, const char **argv)
 
 	if (!opt_type) {
 		ERR("Missing mandatory -t TYPE");
-		usage(stderr);
 		ret = CMD_ERROR;
 		goto end;
 	}
@@ -840,7 +923,7 @@ end:
 
 	/* Cleanup allocated memory */
 	cds_list_for_each_entry_safe(type, tmptype, &ctx_type_list.head, list) {
-		free(type);
+		destroy_ctx_type(type);
 	}
 
 	/* Overwrite ret if an error occurred during add_context() */

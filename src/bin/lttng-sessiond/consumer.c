@@ -15,7 +15,6 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <stdio.h>
@@ -564,6 +563,8 @@ struct consumer_output *consumer_copy_output(struct consumer_output *obj)
 	output->net_seq_index = obj->net_seq_index;
 	memcpy(output->subdir, obj->subdir, PATH_MAX);
 	output->snapshot = obj->snapshot;
+	output->relay_major_version = obj->relay_major_version;
+	output->relay_minor_version = obj->relay_minor_version;
 	memcpy(&output->dst, &obj->dst, sizeof(output->dst));
 	ret = consumer_copy_sockets(output, obj);
 	if (ret < 0) {
@@ -714,7 +715,10 @@ int consumer_set_network_uri(struct consumer_output *obj,
 			goto error;
 		}
 
-		strncpy(obj->subdir, tmp_path, sizeof(obj->subdir));
+		if (lttng_strncpy(obj->subdir, tmp_path, sizeof(obj->subdir))) {
+			ret = -LTTNG_ERR_INVALID;
+			goto error;
+		}
 		DBG3("Consumer set network uri subdir path %s", tmp_path);
 	}
 
@@ -1085,7 +1089,11 @@ int consumer_set_subdir(struct consumer_output *consumer,
 		goto error;
 	}
 
-	strncpy(consumer->subdir, tmp_path, sizeof(consumer->subdir));
+	if (lttng_strncpy(consumer->subdir, tmp_path,
+			sizeof(consumer->subdir))) {
+		ret = -EINVAL;
+		goto error;
+	}
 	DBG2("Consumer subdir set to %s", consumer->subdir);
 
 error:
@@ -1093,11 +1101,8 @@ error:
 }
 
 /*
- * Ask the consumer if the data is ready to read (NOT pending) for the specific
- * session id.
- *
- * This function has a different behavior with the consumer i.e. that it waits
- * for a reply from the consumer if yes or no the data is pending.
+ * Ask the consumer if the data is pending for the specific session id.
+ * Returns 1 if data is pending, 0 otherwise, or < 0 on error.
  */
 int consumer_is_data_pending(uint64_t session_id,
 		struct consumer_output *consumer)
@@ -1171,6 +1176,38 @@ int consumer_flush_channel(struct consumer_socket *socket, uint64_t key)
 	memset(&msg, 0, sizeof(msg));
 	msg.cmd_type = LTTNG_CONSUMER_FLUSH_CHANNEL;
 	msg.u.flush_channel.key = key;
+
+	pthread_mutex_lock(socket->lock);
+	health_code_update();
+
+	ret = consumer_send_msg(socket, &msg);
+	if (ret < 0) {
+		goto end;
+	}
+
+end:
+	health_code_update();
+	pthread_mutex_unlock(socket->lock);
+	return ret;
+}
+
+/*
+ * Send a clear quiescent command to consumer using the given channel key.
+ *
+ * Return 0 on success else a negative value.
+ */
+int consumer_clear_quiescent_channel(struct consumer_socket *socket, uint64_t key)
+{
+	int ret;
+	struct lttcomm_consumer_msg msg;
+
+	assert(socket);
+
+	DBG2("Consumer clear quiescent channel key %" PRIu64, key);
+
+	memset(&msg, 0, sizeof(msg));
+	msg.cmd_type = LTTNG_CONSUMER_CLEAR_QUIESCENT_CHANNEL;
+	msg.u.clear_quiescent_channel.key = key;
 
 	pthread_mutex_lock(socket->lock);
 	health_code_update();
@@ -1261,7 +1298,7 @@ end:
  */
 int consumer_push_metadata(struct consumer_socket *socket,
 		uint64_t metadata_key, char *metadata_str, size_t len,
-		size_t target_offset)
+		size_t target_offset, uint64_t version)
 {
 	int ret;
 	struct lttcomm_consumer_msg msg;
@@ -1277,6 +1314,7 @@ int consumer_push_metadata(struct consumer_socket *socket,
 	msg.u.push_metadata.key = metadata_key;
 	msg.u.push_metadata.target_offset = target_offset;
 	msg.u.push_metadata.len = len;
+	msg.u.push_metadata.version = version;
 
 	health_code_update();
 	ret = consumer_send_msg(socket, &msg);
@@ -1371,5 +1409,119 @@ int consumer_snapshot_channel(struct consumer_socket *socket, uint64_t key,
 
 error:
 	health_code_update();
+	return ret;
+}
+
+/*
+ * Ask the consumer the number of discarded events for a channel.
+ */
+int consumer_get_discarded_events(uint64_t session_id, uint64_t channel_key,
+		struct consumer_output *consumer, uint64_t *discarded)
+{
+	int ret;
+	struct consumer_socket *socket;
+	struct lttng_ht_iter iter;
+	struct lttcomm_consumer_msg msg;
+
+	assert(consumer);
+
+	DBG3("Consumer discarded events id %" PRIu64, session_id);
+
+	memset(&msg, 0, sizeof(msg));
+	msg.cmd_type = LTTNG_CONSUMER_DISCARDED_EVENTS;
+	msg.u.discarded_events.session_id = session_id;
+	msg.u.discarded_events.channel_key = channel_key;
+
+	*discarded = 0;
+
+	/* Send command for each consumer */
+	rcu_read_lock();
+	cds_lfht_for_each_entry(consumer->socks->ht, &iter.iter, socket,
+			node.node) {
+		uint64_t consumer_discarded = 0;
+		pthread_mutex_lock(socket->lock);
+		ret = consumer_socket_send(socket, &msg, sizeof(msg));
+		if (ret < 0) {
+			pthread_mutex_unlock(socket->lock);
+			goto end;
+		}
+
+		/*
+		 * No need for a recv reply status because the answer to the
+		 * command is the reply status message.
+		 */
+		ret = consumer_socket_recv(socket, &consumer_discarded,
+				sizeof(consumer_discarded));
+		if (ret < 0) {
+			ERR("get discarded events");
+			pthread_mutex_unlock(socket->lock);
+			goto end;
+		}
+		pthread_mutex_unlock(socket->lock);
+		*discarded += consumer_discarded;
+	}
+	ret = 0;
+	DBG("Consumer discarded %" PRIu64 " events in session id %" PRIu64,
+			*discarded, session_id);
+
+end:
+	rcu_read_unlock();
+	return ret;
+}
+
+/*
+ * Ask the consumer the number of lost packets for a channel.
+ */
+int consumer_get_lost_packets(uint64_t session_id, uint64_t channel_key,
+		struct consumer_output *consumer, uint64_t *lost)
+{
+	int ret;
+	struct consumer_socket *socket;
+	struct lttng_ht_iter iter;
+	struct lttcomm_consumer_msg msg;
+
+	assert(consumer);
+
+	DBG3("Consumer lost packets id %" PRIu64, session_id);
+
+	memset(&msg, 0, sizeof(msg));
+	msg.cmd_type = LTTNG_CONSUMER_LOST_PACKETS;
+	msg.u.lost_packets.session_id = session_id;
+	msg.u.lost_packets.channel_key = channel_key;
+
+	*lost = 0;
+
+	/* Send command for each consumer */
+	rcu_read_lock();
+	cds_lfht_for_each_entry(consumer->socks->ht, &iter.iter, socket,
+			node.node) {
+		uint64_t consumer_lost = 0;
+		pthread_mutex_lock(socket->lock);
+		ret = consumer_socket_send(socket, &msg, sizeof(msg));
+		if (ret < 0) {
+			pthread_mutex_unlock(socket->lock);
+			goto end;
+		}
+
+		/*
+		 * No need for a recv reply status because the answer to the
+		 * command is the reply status message.
+		 */
+		ret = consumer_socket_recv(socket, &consumer_lost,
+				sizeof(consumer_lost));
+		if (ret < 0) {
+			ERR("get lost packets");
+			pthread_mutex_unlock(socket->lock);
+			goto end;
+		}
+		pthread_mutex_unlock(socket->lock);
+		*lost += consumer_lost;
+	}
+	ret = 0;
+	DBG("Consumer lost %" PRIu64 " packets in session id %" PRIu64,
+			*lost, session_id);
+
+end:
+	rcu_read_unlock();
 	return ret;
 }

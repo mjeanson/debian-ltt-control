@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 - David Goulet <david.goulet@polymtl.ca>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -18,7 +19,6 @@
 #ifndef _LTT_TRACE_UST_H
 #define _LTT_TRACE_UST_H
 
-#include <config.h>
 #include <limits.h>
 #include <urcu/list.h>
 
@@ -27,8 +27,9 @@
 #include <common/defaults.h>
 
 #include "consumer.h"
-#include "agent.h"
 #include "ust-ctl.h"
+
+struct agent;
 
 struct ltt_ust_ht_key {
 	const char *name;
@@ -40,7 +41,7 @@ struct ltt_ust_ht_key {
 
 /* Context hash table nodes */
 struct ltt_ust_context {
-	struct lttng_ust_context ctx;
+	struct lttng_ust_context_attr ctx;
 	struct lttng_ht_node_ulong node;
 	struct cds_list_head list;
 };
@@ -53,6 +54,12 @@ struct ltt_ust_event {
 	char *filter_expression;
 	struct lttng_filter_bytecode *filter;
 	struct lttng_event_exclusion *exclusion;
+	/*
+	 * An internal event is an event which was created by the session daemon
+	 * through which, for example, events emitted in Agent domains are
+	 * "funelled". This is used to hide internal events from external
+	 * clients as they should never be modified by the external world.
+	 */
 	bool internal;
 };
 
@@ -73,6 +80,8 @@ struct ltt_ust_channel {
 	struct lttng_ht_node_str node;
 	uint64_t tracefile_size;
 	uint64_t tracefile_count;
+	uint64_t per_pid_closed_app_discarded;
+	uint64_t per_pid_closed_app_lost;
 };
 
 /* UST domain global (LTTNG_DOMAIN_UST) */
@@ -203,6 +212,7 @@ void trace_ust_delete_channel(struct lttng_ht *ht,
 void trace_ust_destroy_session(struct ltt_ust_session *session);
 void trace_ust_destroy_channel(struct ltt_ust_channel *channel);
 void trace_ust_destroy_event(struct ltt_ust_event *event);
+void trace_ust_destroy_context(struct ltt_ust_context *ctx);
 
 int trace_ust_track_pid(struct ltt_ust_session *session, int pid);
 int trace_ust_untrack_pid(struct ltt_ust_session *session, int pid);

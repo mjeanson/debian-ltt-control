@@ -45,6 +45,8 @@ struct ust_registry_session {
 	uint32_t next_channel_id;
 	/* Once this value reaches UINT32_MAX, no more id can be allocated. */
 	uint32_t used_channel_id;
+	/* Next enumeration ID available. */
+	uint64_t next_enum_id;
 	/* Universal unique identifier used by the tracer. */
 	unsigned char uuid[UUID_LEN];
 
@@ -66,6 +68,8 @@ struct ust_registry_session {
 	size_t metadata_len, metadata_alloc_len;
 	/* Length of bytes sent to the consumer. */
 	size_t metadata_len_sent;
+	/* Current version of the metadata. */
+	uint64_t metadata_version;
 
 	char root_shm_path[PATH_MAX];
 	char shm_path[PATH_MAX];
@@ -91,6 +95,16 @@ struct ust_registry_session {
 	/* User and group owning the session. */
 	uid_t uid;
 	gid_t gid;
+
+	/* Enumerations table. */
+	struct lttng_ht *enums;
+
+	/*
+	 * Copy of the tracer version when the first app is registered.
+	 * It is used if we need to regenerate the metadata.
+	 */
+	uint32_t major;
+	uint32_t minor;
 };
 
 struct ust_registry_channel {
@@ -153,6 +167,17 @@ struct ust_registry_event {
 	 * initialize the node and the event_name/signature for the match function.
 	 */
 	struct lttng_ht_node_u64 node;
+};
+
+struct ust_registry_enum {
+	char name[LTTNG_UST_SYM_NAME_LEN];
+	struct ustctl_enum_entry *entries;
+	size_t nr_entries;
+	uint64_t id;	/* enum id in session */
+	/* Enumeration node in session hash table. */
+	struct lttng_ht_node_str node;
+	/* For delayed reclaim. */
+	struct rcu_head rcu_head;
 };
 
 /*
@@ -260,6 +285,13 @@ int ust_metadata_channel_statedump(struct ust_registry_session *session,
 int ust_metadata_event_statedump(struct ust_registry_session *session,
 		struct ust_registry_channel *chan,
 		struct ust_registry_event *event);
+int ust_registry_create_or_find_enum(struct ust_registry_session *session,
+		int session_objd, char *name,
+		struct ustctl_enum_entry *entries, size_t nr_entries,
+		uint64_t *enum_id);
+struct ust_registry_enum *
+	ust_registry_lookup_enum_by_id(struct ust_registry_session *session,
+		const char *name, uint64_t id);
 
 #else /* HAVE_LIBLTTNG_UST_CTL */
 
@@ -322,7 +354,7 @@ void ust_registry_destroy_event(struct ust_registry_channel *chan,
 /* The app object can be NULL for registry shared across applications. */
 static inline
 int ust_metadata_session_statedump(struct ust_registry_session *session,
-		struct ust_app *app)
+		struct ust_app *app, uint32_t major, uint32_t minor)
 {
 	return 0;
 }
@@ -338,6 +370,21 @@ int ust_metadata_event_statedump(struct ust_registry_session *session,
 		struct ust_registry_event *event)
 {
 	return 0;
+}
+static inline
+int ust_registry_create_or_find_enum(struct ust_registry_session *session,
+		int session_objd, char *name,
+		struct ustctl_enum_entry *entries, size_t nr_entries,
+		uint64_t *enum_id)
+{
+	return 0;
+}
+static inline
+struct ust_registry_enum *
+	ust_registry_lookup_enum_by_id(struct ust_registry_session *session,
+		const char *name, uint64_t id)
+{
+	return NULL;
 }
 
 #endif /* HAVE_LIBLTTNG_UST_CTL */

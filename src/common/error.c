@@ -15,17 +15,25 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <inttypes.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <lttng/lttng-error.h>
 #include <common/common.h>
+#include <common/compat/getenv.h>
 
 #include "error.h"
 
 #define ERROR_INDEX(code) (code - LTTNG_OK)
+
+/*
+ * lttng_opt_abort_on_error: unset: -1, disabled: 0, enabled: 1.
+ * Controlled by the LTTNG_ABORT_ON_ERROR environment variable.
+ */
+static int lttng_opt_abort_on_error = -1;
 
 /* TLS variable that contains the time of one single log entry. */
 DEFINE_URCU_TLS(struct log_time, error_log_time);
@@ -170,6 +178,11 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_PID_TRACKED) ] = "PID already tracked",
 	[ ERROR_INDEX(LTTNG_ERR_PID_NOT_TRACKED) ] = "PID not tracked",
 	[ ERROR_INDEX(LTTNG_ERR_INVALID_CHANNEL_DOMAIN) ] = "Invalid channel domain",
+	[ ERROR_INDEX(LTTNG_ERR_OVERFLOW) ] = "Overflow occured",
+	[ ERROR_INDEX(LTTNG_ERR_SESSION_NOT_STARTED) ] = "Session not started",
+	[ ERROR_INDEX(LTTNG_ERR_LIVE_SESSION) ] = "Live sessions are not supported",
+	[ ERROR_INDEX(LTTNG_ERR_PER_PID_SESSION) ] = "Per-PID tracing sessions are not supported",
+	[ ERROR_INDEX(LTTNG_ERR_KERN_CONTEXT_UNAVAILABLE) ] = "Context unavailable on this kernel",
 
 	/* Last element */
 	[ ERROR_INDEX(LTTNG_ERR_NR) ] = "Unknown error code"
@@ -191,4 +204,23 @@ const char *error_get_str(int32_t code)
 	}
 
 	return error_string_array[ERROR_INDEX(code)];
+}
+
+LTTNG_HIDDEN
+void lttng_abort_on_error(void)
+{
+	if (lttng_opt_abort_on_error < 0) {
+		/* Use lttng_secure_getenv() to query its state. */
+		const char *value;
+
+		value = lttng_secure_getenv("LTTNG_ABORT_ON_ERROR");
+		if (value && !strcmp(value, "1")) {
+			lttng_opt_abort_on_error = 1;
+		} else {
+			lttng_opt_abort_on_error = 0;
+		}
+	}
+	if (lttng_opt_abort_on_error > 0) {
+		abort();
+	}
 }

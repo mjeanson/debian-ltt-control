@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2014 - David Goulet <dgoulet@efficios.com>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This library is free software; you can redistribute it and/or modify it
  * under the terms of the GNU Lesser General Public License, version 2.1 only,
@@ -121,21 +122,26 @@ enum lttng_event_output {
 
 /* Event context possible type */
 enum lttng_event_context_type {
-	LTTNG_EVENT_CONTEXT_PID               = 0,
-	LTTNG_EVENT_CONTEXT_PERF_COUNTER      = 1,	/* Backward compat. */
-	LTTNG_EVENT_CONTEXT_PROCNAME          = 2,
-	LTTNG_EVENT_CONTEXT_PRIO              = 3,
-	LTTNG_EVENT_CONTEXT_NICE              = 4,
-	LTTNG_EVENT_CONTEXT_VPID              = 5,
-	LTTNG_EVENT_CONTEXT_TID               = 6,
-	LTTNG_EVENT_CONTEXT_VTID              = 7,
-	LTTNG_EVENT_CONTEXT_PPID              = 8,
-	LTTNG_EVENT_CONTEXT_VPPID             = 9,
-	LTTNG_EVENT_CONTEXT_PTHREAD_ID        = 10,
-	LTTNG_EVENT_CONTEXT_HOSTNAME          = 11,
-	LTTNG_EVENT_CONTEXT_IP                = 12,
-	LTTNG_EVENT_CONTEXT_PERF_CPU_COUNTER  = 13,
+	LTTNG_EVENT_CONTEXT_PID			= 0,
+	LTTNG_EVENT_CONTEXT_PERF_COUNTER	= 1,	/* Backward compat. */
+	LTTNG_EVENT_CONTEXT_PROCNAME		= 2,
+	LTTNG_EVENT_CONTEXT_PRIO		= 3,
+	LTTNG_EVENT_CONTEXT_NICE		= 4,
+	LTTNG_EVENT_CONTEXT_VPID		= 5,
+	LTTNG_EVENT_CONTEXT_TID			= 6,
+	LTTNG_EVENT_CONTEXT_VTID		= 7,
+	LTTNG_EVENT_CONTEXT_PPID		= 8,
+	LTTNG_EVENT_CONTEXT_VPPID		= 9,
+	LTTNG_EVENT_CONTEXT_PTHREAD_ID		= 10,
+	LTTNG_EVENT_CONTEXT_HOSTNAME		= 11,
+	LTTNG_EVENT_CONTEXT_IP			= 12,
+	LTTNG_EVENT_CONTEXT_PERF_CPU_COUNTER	= 13,
 	LTTNG_EVENT_CONTEXT_PERF_THREAD_COUNTER = 14,
+	LTTNG_EVENT_CONTEXT_APP_CONTEXT		= 15,
+	LTTNG_EVENT_CONTEXT_INTERRUPTIBLE	= 16,
+	LTTNG_EVENT_CONTEXT_PREEMPTIBLE		= 17,
+	LTTNG_EVENT_CONTEXT_NEED_RESCHEDULE	= 18,
+	LTTNG_EVENT_CONTEXT_MIGRATABLE		= 19,
 };
 
 enum lttng_event_field_type {
@@ -178,6 +184,10 @@ struct lttng_event_context {
 
 	union {
 		struct lttng_event_perf_counter_ctx perf_counter;
+		struct {
+			char *provider_name;
+			char *ctx_name;
+		} app_ctx;
 		char padding[LTTNG_EVENT_CONTEXT_PADDING2];
 	} u;
 };
@@ -216,25 +226,50 @@ struct lttng_event_function_attr {
  *
  * The structures should be initialized to zero before use.
  */
-#define LTTNG_EVENT_PADDING1               10
+#define LTTNG_EVENT_PADDING1               12
 #define LTTNG_EVENT_PADDING2               LTTNG_SYMBOL_NAME_LEN + 32
 struct lttng_event {
+	/* Offset 0 */
 	enum lttng_event_type type;
+
+	/* Offset 4 */
 	char name[LTTNG_SYMBOL_NAME_LEN];
 
+	/* Offset 260 */
 	enum lttng_loglevel_type loglevel_type;
+
+	/* Offset 264 */
 	int loglevel;
 
+	/* Offset 268 */
 	int32_t enabled;	/* Does not apply: -1 */
+
+	/* Offset 272 */
 	pid_t pid;
+
+	/* Offset 276 */
 	unsigned char filter;	/* filter enabled ? */
+
+	/* Offset 277 */
 	unsigned char exclusion; /* exclusions added ? */
 
+	/* Offset 278 */
+	char padding2[2];
+
+	/* Offset 280 */
 	/* Event flag, from 2.6 and above. */
 	enum lttng_event_flag flags;
 
-	char padding[LTTNG_EVENT_PADDING1];
+	/* Offset 284 */
+	char padding[4];
 
+	/* Offset 288 */
+	union {
+		uint64_t padding;
+		void *ptr;
+	} extended;
+
+	/* Offset 296 */
 	/* Per event type configuration */
 	union {
 		struct lttng_event_probe_attr probe;
@@ -263,6 +298,38 @@ struct lttng_event_field {
  */
 extern int lttng_list_events(struct lttng_handle *handle,
 		const char *channel_name, struct lttng_event **events);
+
+/*
+ * Get the filter expression of a specific LTTng event.
+ *
+ * If the call is successful, then the filter expression's address is put
+ * in *filter_expression. If the event has no filter expression,
+ * *filter_expression is set to NULL. The caller does NOT own
+ * *filter_expression.
+ *
+ * Returns 0 on success, or a negative LTTng error code on error.
+ */
+extern int lttng_event_get_filter_expression(struct lttng_event *event,
+		const char **filter_string);
+
+/*
+ * Get the number of exclusion names of a specific LTTng event.
+ *
+ * Returns the number of exclusion names on success, or a negative
+ * LTTng error code on error.
+ */
+extern int lttng_event_get_exclusion_name_count(struct lttng_event *event);
+
+/*
+ * Get an LTTng event's exclusion name at a given index.
+ *
+ * If the call is successful, then the exclusion name string's address
+ * is put in *exclusion_name. The caller does NOT own *exclusion_name.
+ *
+ * Returns 0 on success, or a negative LTTng error code on error.
+ */
+extern int lttng_event_get_exclusion_name(struct lttng_event *event,
+		size_t index, const char **exclusion_name);
 
 /*
  * List the available tracepoints of a specific lttng domain.

@@ -29,7 +29,7 @@ EVENT_NAME="tp:tptest"
 
 DIR=$(readlink -f $TESTDIR)
 
-NUM_TESTS=28
+NUM_TESTS=30
 
 source $TESTDIR/utils/utils.sh
 
@@ -50,6 +50,8 @@ function test_basic_load()
 function test_complex_load()
 {
 	local sess="$SESSION_NAME-complex"
+	local mi_result=""
+	local ret=1
 	diag "Test complex load"
 
 	# Start relayd with localhost binding. The complex session uses those
@@ -74,12 +76,24 @@ function test_complex_load()
 		break;
 	fi
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN --mi XML list $sess -c chan2 > $mi_output_file
-	mi_result=$($CURDIR/../mi/extract_xml $mi_output_file "//command/output/sessions/session/domains/domain/channels/channel[name='chan2']/events/event[name='uevent_disabled']/enabled/text()")
+	mi_result=$($CURDIR/../mi/extract_xml $mi_output_file "//lttng:command/lttng:output/lttng:sessions/lttng:session/lttng:domains/lttng:domain[lttng:type='UST']/lttng:channels/lttng:channel[lttng:name='chan2']/lttng:events/lttng:event[lttng:name='uevent_disabled']/lttng:enabled/text()")
 	if [[ $mi_result = "false" ]]; then
 	    ok 0 "Disabled event is loaded in disabled state"
 	else
 	    fail "Disabled event is loaded in disabled state"
 	fi
+
+	mi_result=$($CURDIR/../mi/extract_xml $mi_output_file "//lttng:command/lttng:output/lttng:sessions/lttng:session/lttng:domains/lttng:domain/lttng:channels/lttng:channel[lttng:name='chan2']/lttng:events/lttng:event[lttng:name='uevent_disabled']/lttng:enabled/text()")
+	test $mi_result = "false"
+	ok $? "Disabled event is loaded in disabled state"
+
+	# Check that uevent_same_name_diff_llevel with log level 6 (TRACE_INFO) is enabled
+	# This ensure that the state of events with similar name but not same
+	# descriptor tuple (exclusion,filter,loglevel) is restored correctly.
+	mi_result=$($CURDIR/../mi/extract_xml $mi_output_file "//lttng:command/lttng:output/lttng:sessions/lttng:session/lttng:domains/lttng:domain/lttng:channels/lttng:channel[lttng:name='chan2']/lttng:events/lttng:event[lttng:name='uevent_same_name_diff_llevel' and lttng:loglevel='TRACE_INFO']/lttng:enabled/text()")
+	test $mi_result = "true"
+	ok $?  "Enabled event with same name but different loglevel is in disabled state"
+
 	destroy_lttng_session_ok $sess
 
 	stop_lttng_relayd
@@ -126,7 +140,7 @@ function test_trackers()
 		break;
 	fi
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN --mi XML list "$SESSION_NAME-trackers" > $mi_output_file
-	mi_result=$($CURDIR/../mi/extract_xml -e $mi_output_file "//command/output/sessions/session/domains/domain/trackers/pid_tracker/targets/pid_target")
+	mi_result=$($CURDIR/../mi/extract_xml -e $mi_output_file "//lttng:command/lttng:output/lttng:sessions/lttng:session/lttng:domains/lttng:domain/lttng:trackers/lttng:pid_tracker/lttng:targets/lttng:pid_target")
 	if [[ $mi_result = "true" ]]; then
 	    ok 0 "Pid target is present"
 	else

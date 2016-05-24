@@ -15,7 +15,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -50,17 +49,24 @@ int kernel_add_channel_context(struct ltt_kernel_channel *chan,
 	DBG("Adding context to channel %s", chan->channel->name);
 	ret = kernctl_add_context(chan->fd, &ctx->ctx);
 	if (ret < 0) {
-		if (errno != EEXIST) {
-			PERROR("add context ioctl");
-		} else {
+		switch (errno) {
+		case ENOSYS:
+			/* Exists but not available for this kernel */
+			ret = LTTNG_ERR_KERN_CONTEXT_UNAVAILABLE;
+			goto error;
+		case EEXIST:
 			/* If EEXIST, we just ignore the error */
 			ret = 0;
+			goto end;
+		default:
+			PERROR("add context ioctl");
+			ret = LTTNG_ERR_KERN_CONTEXT_FAIL;
+			goto error;
 		}
-		goto error;
 	}
 
+end:
 	cds_list_add_tail(&ctx->list, &chan->ctx_list);
-
 	return 0;
 
 error:
@@ -830,7 +836,7 @@ int kernel_validate_version(int tracer_fd)
 
 	ret = kernctl_tracer_version(tracer_fd, &version);
 	if (ret < 0) {
-		ERR("Failed at getting the lttng-modules version");
+		ERR("Failed to retrieve the lttng-modules version");
 		goto error;
 	}
 
@@ -842,11 +848,11 @@ int kernel_validate_version(int tracer_fd)
 	}
 	ret = kernctl_tracer_abi_version(tracer_fd, &abi_version);
 	if (ret < 0) {
-		ERR("Failed at getting lttng-modules ABI version");
+		ERR("Failed to retrieve lttng-modules ABI version");
 		goto error;
 	}
 	if (abi_version.major != LTTNG_MODULES_ABI_MAJOR_VERSION) {
-		ERR("Kernel tracer ABI version (%d.%d) is not compatible with expected ABI major version (%d.*)",
+		ERR("Kernel tracer ABI version (%d.%d) does not match the expected ABI major version (%d.*)",
 			abi_version.major, abi_version.minor,
 			LTTNG_MODULES_ABI_MAJOR_VERSION);
 		goto error;
@@ -860,6 +866,7 @@ error_version:
 	ret = -1;
 
 error:
+	ERR("Kernel tracer version check failed; kernel tracing will not be available");
 	return ret;
 }
 

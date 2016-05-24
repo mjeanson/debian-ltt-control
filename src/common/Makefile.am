@@ -1,50 +1,85 @@
-AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src \
+	-DMANPATH=\""$(mandir)"\"
 
 AUTOMAKE_OPTIONS = subdir-objects
 
-SUBDIRS = compat health hashtable kernel-ctl sessiond-comm relayd \
-		  kernel-consumer ust-consumer testpoint index config
+SUBDIRS =
+
+# Make sure to always distribute all folders
+# since SUBDIRS is decided at configure time.
+DIST_SUBDIRS = compat health hashtable kernel-ctl sessiond-comm relayd \
+	  kernel-consumer ust-consumer testpoint index config consumer
+
+if BUILD_LIB_COMPAT
+SUBDIRS += compat
+endif
+
+if BUILD_LIB_HEALTH
+SUBDIRS += health
+endif
+
+if BUILD_LIB_HASHTABLE
+SUBDIRS += hashtable
+endif
+
+if BUILD_LIB_KERNEL_CTL
+SUBDIRS += kernel-ctl
+endif
+
+if BUILD_LIB_SESSIOND_COMM
+SUBDIRS += sessiond-comm
+endif
+
+if BUILD_LIB_RELAYD
+SUBDIRS += relayd
+endif
+
+if BUILD_LIB_KERNEL_CONSUMER
+SUBDIRS += kernel-consumer
+endif
+
+if BUILD_LIB_UST_CONSUMER
+SUBDIRS += ust-consumer
+endif
+
+if BUILD_LIB_TESTPOINT
+SUBDIRS += testpoint
+endif
+
+if BUILD_LIB_INDEX
+SUBDIRS += index
+endif
+
+if BUILD_LIB_CONFIG
+SUBDIRS += config
+endif
+
+if BUILD_LIB_CONSUMER
+SUBDIRS += consumer
+endif
 
 AM_CFLAGS = -fno-strict-aliasing
 
 noinst_HEADERS = lttng-kernel.h defaults.h macros.h error.h futex.h \
 				 uri.h utils.h lttng-kernel-old.h \
-				 consumer-metadata-cache.h consumer-timer.h \
-				 consumer-testpoint.h align.h bitfield.h bug.h
+				 align.h bitfield.h bug.h
 
 # Common library
 noinst_LTLIBRARIES = libcommon.la
-EXTRA_DIST = mi_lttng.xsd
+EXTRA_DIST = mi-lttng-3.0.xsd
 
 libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
                        common.h futex.c futex.h uri.c uri.h defaults.c \
                        pipe.c pipe.h readwrite.c readwrite.h \
                        mi-lttng.h mi-lttng.c \
                        daemonize.c daemonize.h \
-                       sessiond-comm/unix.c sessiond-comm/unix.h
+                       unix.c unix.h \
+                       filter.c filter.h context.c context.h
 
 libcommon_la_LIBADD = \
 		-luuid \
 		-lrt \
 		$(top_builddir)/src/common/config/libconfig.la
-
-# Consumer library
-noinst_LTLIBRARIES += libconsumer.la
-
-libconsumer_la_SOURCES = consumer.c consumer.h consumer-metadata-cache.c \
-                         consumer-timer.c consumer-stream.c consumer-stream.h
-
-libconsumer_la_LIBADD = \
-		$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \
-		$(top_builddir)/src/common/kernel-consumer/libkernel-consumer.la \
-		$(top_builddir)/src/common/hashtable/libhashtable.la \
-		$(top_builddir)/src/common/compat/libcompat.la \
-		$(top_builddir)/src/common/relayd/librelayd.la
-
-if HAVE_LIBLTTNG_UST_CTL
-libconsumer_la_LIBADD += \
-		$(top_builddir)/src/common/ust-consumer/libust-consumer.la
-endif
 
 all-local:
 	@if [ x"$(srcdir)" != x"$(builddir)" ]; then \

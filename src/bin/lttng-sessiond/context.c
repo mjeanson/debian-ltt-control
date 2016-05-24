@@ -1,5 +1,6 @@
 /*
- * Copyright (C)  2011 - David Goulet <david.goulet@polymtl.ca>
+ * Copyright (C) 2011 - David Goulet <david.goulet@polymtl.ca>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -15,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +30,7 @@
 #include "kernel.h"
 #include "ust-app.h"
 #include "trace-ust.h"
+#include "agent.h"
 
 /*
  * Add kernel context to all channel.
@@ -48,8 +49,7 @@ static int add_kctx_all_channels(struct ltt_kernel_session *ksession,
 	/* Go over all channels */
 	cds_list_for_each_entry(kchan, &ksession->channel_list.head, list) {
 		ret = kernel_add_channel_context(kchan, kctx);
-		if (ret < 0) {
-			ret = LTTNG_ERR_KERN_CONTEXT_FAIL;
+		if (ret != 0) {
 			goto error;
 		}
 	}
@@ -74,8 +74,7 @@ static int add_kctx_to_channel(struct ltt_kernel_context *kctx,
 	DBG("Add kernel context to channel '%s'", kchan->channel->name);
 
 	ret = kernel_add_channel_context(kchan, kctx);
-	if (ret < 0) {
-		ret = LTTNG_ERR_KERN_CONTEXT_FAIL;
+	if (ret != 0) {
 		goto error;
 	}
 
@@ -88,11 +87,12 @@ error:
 /*
  * Add UST context to channel.
  */
-static int add_uctx_to_channel(struct ltt_ust_session *usess, int domain,
+static int add_uctx_to_channel(struct ltt_ust_session *usess,
+		enum lttng_domain_type domain,
 		struct ltt_ust_channel *uchan, struct lttng_event_context *ctx)
 {
 	int ret;
-	struct ltt_ust_context *uctx;
+	struct ltt_ust_context *uctx = NULL;
 
 	assert(usess);
 	assert(uchan);
@@ -105,6 +105,44 @@ static int add_uctx_to_channel(struct ltt_ust_session *usess, int domain,
 			goto duplicate;
 		}
 	}
+	uctx = NULL;
+
+	switch (domain) {
+	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_LOG4J:
+	{
+		struct agent *agt;
+
+		if (ctx->ctx != LTTNG_EVENT_CONTEXT_APP_CONTEXT) {
+			/* Other contexts are not needed by the agent. */
+			break;
+		}
+		agt = trace_ust_find_agent(usess, domain);
+
+		if (!agt) {
+			agt = agent_create(domain);
+			if (!agt) {
+				ret = LTTNG_ERR_NOMEM;
+				goto error;
+			}
+			agent_add(agt, usess->agents);
+		}
+		ret = agent_add_context(ctx, agt);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+
+		ret = agent_enable_context(ctx, domain);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+		break;
+	}
+	case LTTNG_DOMAIN_UST:
+		break;
+	default:
+		assert(0);
+	}
 
 	/* Create ltt UST context */
 	uctx = trace_ust_create_context(ctx);
@@ -113,15 +151,8 @@ static int add_uctx_to_channel(struct ltt_ust_session *usess, int domain,
 		goto error;
 	}
 
-	switch (domain) {
-	case LTTNG_DOMAIN_UST:
-		ret = ust_app_add_ctx_channel_glb(usess, uchan, uctx);
-		if (ret < 0) {
-			goto error;
-		}
-		break;
-	default:
-		ret = -ENOSYS;
+	ret = ust_app_add_ctx_channel_glb(usess, uchan, uctx);
+	if (ret < 0) {
 		goto error;
 	}
 
@@ -198,6 +229,18 @@ int context_kernel_add(struct ltt_kernel_session *ksession,
 	case LTTNG_EVENT_CONTEXT_PERF_COUNTER:
 		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_PERF_CPU_COUNTER;
 		break;
+	case LTTNG_EVENT_CONTEXT_INTERRUPTIBLE:
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_INTERRUPTIBLE;
+		break;
+	case LTTNG_EVENT_CONTEXT_PREEMPTIBLE:
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_PREEMPTIBLE;
+		break;
+	case LTTNG_EVENT_CONTEXT_NEED_RESCHEDULE:
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_NEED_RESCHEDULE;
+		break;
+	case LTTNG_EVENT_CONTEXT_MIGRATABLE:
+		kctx->ctx.ctx = LTTNG_KERNEL_CONTEXT_MIGRATABLE;
+		break;
 	default:
 		ret = LTTNG_ERR_KERN_CONTEXT_FAIL;
 		goto error;
@@ -240,8 +283,9 @@ error:
 /*
  * Add UST context to tracer.
  */
-int context_ust_add(struct ltt_ust_session *usess, int domain,
-		struct lttng_event_context *ctx, char *channel_name)
+int context_ust_add(struct ltt_ust_session *usess,
+		enum lttng_domain_type domain, struct lttng_event_context *ctx,
+		char *channel_name)
 {
 	int ret = LTTNG_OK;
 	struct lttng_ht_iter iter;
@@ -254,18 +298,7 @@ int context_ust_add(struct ltt_ust_session *usess, int domain,
 
 	rcu_read_lock();
 
-	/*
-	 * Define which channel's hashtable to use from the domain or quit if
-	 * unknown domain.
-	 */
-	switch (domain) {
-	case LTTNG_DOMAIN_UST:
-		chan_ht = usess->domain_global.channels;
-		break;
-	default:
-		ret = LTTNG_ERR_UND;
-		goto error;
-	}
+	chan_ht = usess->domain_global.channels;
 
 	/* Get UST channel if defined */
 	if (channel_name[0] != '\0') {
@@ -285,7 +318,8 @@ int context_ust_add(struct ltt_ust_session *usess, int domain,
 		cds_lfht_for_each_entry(chan_ht->ht, &iter.iter, uchan, node.node) {
 			ret = add_uctx_to_channel(usess, domain, uchan, ctx);
 			if (ret < 0) {
-				ERR("Context failed for channel %s", uchan->name);
+				ERR("Failed to add context to channel %s",
+						uchan->name);
 				continue;
 			}
 		}

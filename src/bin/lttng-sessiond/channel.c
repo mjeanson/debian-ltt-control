@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 - David Goulet <david.goulet@polymtl.ca>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -15,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <inttypes.h>
 #include <string.h>
@@ -31,6 +31,7 @@
 #include "ust-ctl.h"
 #include "utils.h"
 #include "ust-app.h"
+#include "agent.h"
 
 /*
  * Return allocated channel attributes.
@@ -39,17 +40,12 @@ struct lttng_channel *channel_new_default_attr(int dom,
 		enum lttng_buffer_type type)
 {
 	struct lttng_channel *chan;
+	const char *channel_name = DEFAULT_CHANNEL_NAME;
 
 	chan = zmalloc(sizeof(struct lttng_channel));
 	if (chan == NULL) {
 		PERROR("zmalloc channel init");
 		goto error_alloc;
-	}
-
-	if (snprintf(chan->name, sizeof(chan->name), "%s",
-				DEFAULT_CHANNEL_NAME) < 0) {
-		PERROR("snprintf default channel name");
-		goto error;
 	}
 
 	/* Same for all domains. */
@@ -68,7 +64,17 @@ struct lttng_channel *channel_new_default_attr(int dom,
 		chan->attr.read_timer_interval = DEFAULT_KERNEL_CHANNEL_READ_TIMER;
 		chan->attr.live_timer_interval = DEFAULT_KERNEL_CHANNEL_LIVE_TIMER;
 		break;
+	case LTTNG_DOMAIN_JUL:
+		channel_name = DEFAULT_JUL_CHANNEL_NAME;
+		goto common_ust;
+	case LTTNG_DOMAIN_LOG4J:
+		channel_name = DEFAULT_LOG4J_CHANNEL_NAME;
+		goto common_ust;
+	case LTTNG_DOMAIN_PYTHON:
+		channel_name = DEFAULT_PYTHON_CHANNEL_NAME;
+		goto common_ust;
 	case LTTNG_DOMAIN_UST:
+common_ust:
 		switch (type) {
 		case LTTNG_BUFFER_PER_UID:
 			chan->attr.subbuf_size = default_get_ust_uid_channel_subbuf_size();
@@ -99,6 +105,11 @@ struct lttng_channel *channel_new_default_attr(int dom,
 		goto error;	/* Not implemented */
 	}
 
+	if (snprintf(chan->name, sizeof(chan->name), "%s",
+			channel_name) < 0) {
+		PERROR("snprintf default channel name");
+		goto error;
+	}
 	return chan;
 
 error:
@@ -262,6 +273,7 @@ int channel_ust_create(struct ltt_ust_session *usess,
 	int ret = LTTNG_OK;
 	struct ltt_ust_channel *uchan = NULL;
 	struct lttng_channel *defattr = NULL;
+	enum lttng_domain_type domain = LTTNG_DOMAIN_UST;
 
 	assert(usess);
 
@@ -273,6 +285,18 @@ int channel_ust_create(struct ltt_ust_session *usess,
 			goto error;
 		}
 		attr = defattr;
+	} else {
+		/*
+		 * HACK: Set the channel's subdomain (JUL, Log4j, Python, etc.)
+		 * based on the default name.
+		 */
+		if (!strcmp(attr->name, DEFAULT_JUL_CHANNEL_NAME)) {
+			domain = LTTNG_DOMAIN_JUL;
+		} else if (!strcmp(attr->name, DEFAULT_LOG4J_CHANNEL_NAME)) {
+			domain = LTTNG_DOMAIN_LOG4J;
+		} else if (!strcmp(attr->name, DEFAULT_PYTHON_CHANNEL_NAME)) {
+			domain = LTTNG_DOMAIN_PYTHON;
+		}
 	}
 
 	if (usess->snapshot_mode) {
@@ -333,22 +357,10 @@ int channel_ust_create(struct ltt_ust_session *usess,
 	}
 
 	/* Create UST channel */
-	uchan = trace_ust_create_channel(attr, LTTNG_DOMAIN_UST);
+	uchan = trace_ust_create_channel(attr, domain);
 	if (uchan == NULL) {
 		ret = LTTNG_ERR_FATAL;
 		goto error;
-	}
-
-	/*
-	 * HACK: Set the channel's subdomain (JUL, Log4j, Python, etc.)
-	 * based on the default name.
-	 */
-	if (!strcmp(uchan->name, DEFAULT_JUL_CHANNEL_NAME)) {
-		uchan->domain = LTTNG_DOMAIN_JUL;
-	} else if (!strcmp(uchan->name, DEFAULT_LOG4J_CHANNEL_NAME)) {
-		uchan->domain = LTTNG_DOMAIN_LOG4J;
-	} else if (!strcmp(uchan->name, DEFAULT_PYTHON_CHANNEL_NAME)) {
-		uchan->domain = LTTNG_DOMAIN_PYTHON;
 	}
 
 	uchan->enabled = 1;
@@ -395,6 +407,18 @@ int channel_ust_create(struct ltt_ust_session *usess,
 	rcu_read_unlock();
 
 	DBG2("Channel %s created successfully", uchan->name);
+	if (domain != LTTNG_DOMAIN_UST) {
+		struct agent *agt = trace_ust_find_agent(usess, domain);
+
+		if (!agt) {
+			agt = agent_create(domain);
+			if (!agt) {
+				ret = LTTNG_ERR_NOMEM;
+				goto error_free_chan;
+			}
+			agent_add(agt, usess->agents);
+		}
+	}
 
 	free(defattr);
 	return LTTNG_OK;
