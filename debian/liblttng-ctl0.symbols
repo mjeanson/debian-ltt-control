@@ -111,6 +111,8 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttcomm_inet_tcp_timeout@Base 2.3.0
  lttng_add_context@Base 2.3.0
  lttng_calibrate@Base 2.3.0
+ lttng_channel_get_discarded_event_count@Base 2.8.0
+ lttng_channel_get_lost_packet_count@Base 2.8.0
  lttng_channel_set_default_attr@Base 2.3.0
  lttng_create_handle@Base 2.3.0
  lttng_create_session@Base 2.3.0
@@ -119,6 +121,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_data_pending@Base 2.3.0
  lttng_destroy_handle@Base 2.3.0
  lttng_destroy_session@Base 2.3.0
+ lttng_destroy_session_no_wait@Base 2.8.0
  lttng_disable_channel@Base 2.3.0
  lttng_disable_consumer@Base 2.3.0
  lttng_disable_event@Base 2.3.0
@@ -128,6 +131,9 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_enable_event@Base 2.3.0
  lttng_enable_event_with_exclusions@Base 2.4.0~rc4
  lttng_enable_event_with_filter@Base 2.3.0
+ lttng_event_get_exclusion_name@Base 2.8.0
+ lttng_event_get_exclusion_name_count@Base 2.8.0
+ lttng_event_get_filter_expression@Base 2.8.0
  lttng_health_create_consumerd@Base 2.4.0~rc4
  lttng_health_create_relayd@Base 2.4.0~rc4
  lttng_health_create_sessiond@Base 2.4.0~rc4
@@ -156,6 +162,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_load_session_attr_set_input_url@Base 2.5.0
  lttng_load_session_attr_set_overwrite@Base 2.5.0
  lttng_load_session_attr_set_session_name@Base 2.5.0
+ lttng_metadata_regenerate@Base 2.8.0
  lttng_opt_mi@Base 2.6.0
  lttng_opt_quiet@Base 2.3.0
  lttng_opt_verbose@Base 2.3.0
