@@ -2,8 +2,8 @@ Source: ltt-control
 Section: libs
 Priority: extra
 Maintainer: Jon Bernard <jbernard@debian.org>
-Build-Depends: debhelper (>= 9), libpopt-dev, libxml2-dev,
-  bison, dh-autoreconf, bash-completion, pkg-config,
+Build-Depends: debhelper (>= 9), libpopt-dev, libxml2-dev, libkmod-dev,
+  bison, dh-autoreconf, bash-completion, pkg-config, uuid-dev,
   python3-all-dev, swig (>= 2.0),
   liburcu-dev (>= 0.8.4),
   liblttng-ust-dev (>= 2.8.0~),
