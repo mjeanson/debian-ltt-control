@@ -15,7 +15,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <errno.h>
 #include <stdio.h>
@@ -25,7 +24,7 @@
 #include <inttypes.h>
 
 #include <common/common.h>
-#include <common/consumer.h>
+#include <common/consumer/consumer.h>
 #include <common/defaults.h>
 
 #include "consumer.h"

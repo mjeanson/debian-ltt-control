@@ -15,7 +15,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <popt.h>
 #include <stdio.h>
@@ -45,19 +44,6 @@ static struct poptOption long_options[] = {
 	{"list-options",   0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{0, 0, 0, 0, 0, 0, 0}
 };
-
-/*
- * usage
- */
-static void usage(FILE *ofp)
-{
-	fprintf(ofp, "usage: lttng set-session NAME [OPTIONS]\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Options:\n");
-	fprintf(ofp, "  -h, --help               Show this help\n");
-	fprintf(ofp, "      --list-options       Simple listing of options\n");
-	fprintf(ofp, "\n");
-}
 
 /*
  * Print the necessary mi for a session and name.
@@ -175,13 +161,12 @@ int cmd_set_session(int argc, const char **argv)
 	while ((opt = poptGetNextOpt(pc)) != -1) {
 		switch (opt) {
 		case OPT_HELP:
-			usage(stdout);
+			SHOW_HELP();
 			goto end;
 		case OPT_LIST_OPTIONS:
 			list_cmd_options(stdout, long_options);
 			goto end;
 		default:
-			usage(stderr);
 			ret = CMD_UNDEFINED;
 			goto end;
 		}
@@ -190,7 +175,6 @@ int cmd_set_session(int argc, const char **argv)
 	opt_session_name = (char *) poptGetArg(pc);
 	if (opt_session_name == NULL) {
 		ERR("Missing session name");
-		usage(stderr);
 		ret = CMD_ERROR;
 		goto end;
 	}

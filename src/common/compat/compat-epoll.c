@@ -15,7 +15,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <fcntl.h>
@@ -24,7 +23,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <config.h>
 
 #include <common/error.h>
 #include <common/defaults.h>
@@ -210,7 +208,6 @@ int compat_epoll_wait(struct lttng_poll_event *events, int timeout)
 		ERR("Wrong arguments in compat_epoll_wait");
 		goto error;
 	}
-	assert(events->nb_fd >= 0);
 
 	if (events->nb_fd == 0) {
 		errno = EINVAL;

@@ -16,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <popt.h>
 #include <stdio.h>
@@ -36,11 +35,6 @@
 static int opt_event_type;
 static int opt_kernel;
 static int opt_userspace;
-#if 0
-/* Not implemented yet */
-static char *opt_cmd_name;
-static pid_t opt_pid;
-#endif
 
 enum {
 	OPT_HELP = 1,
@@ -61,58 +55,12 @@ static struct mi_writer *writer;
 static struct poptOption long_options[] = {
 	/* longName, shortName, argInfo, argPtr, value, descrip, argDesc */
 	{"help",           'h', POPT_ARG_NONE, 0, OPT_HELP, 0, 0},
-#if 0
-	/* Not implemented yet */
-	{"userspace",      'u', POPT_ARG_STRING | POPT_ARGFLAG_OPTIONAL, &opt_cmd_name, OPT_USERSPACE, 0, 0},
-	{"pid",            'p', POPT_ARG_INT, &opt_pid, 0, 0, 0},
-	{"tracepoint",     0,   POPT_ARG_NONE, 0, OPT_TRACEPOINT, 0, 0},
-	{"marker",         0,   POPT_ARG_NONE, 0, OPT_MARKER, 0, 0},
-	{"probe",          0,   POPT_ARG_NONE, 0, OPT_PROBE, 0, 0},
-#else
 	{"kernel",         'k', POPT_ARG_NONE, 0, OPT_KERNEL, 0, 0},
 	{"userspace",      'u', POPT_ARG_NONE, 0, OPT_USERSPACE, 0, 0},
 	{"function",       0,   POPT_ARG_NONE, 0, OPT_FUNCTION, 0, 0},
-#endif
-#if 0
-	/*
-	 * Removed from options to discourage its use. Not in kernel
-	 * tracer anymore.
-	 */
-	{"function:entry", 0,   POPT_ARG_NONE, 0, OPT_FUNCTION_ENTRY, 0, 0},
-	{"syscall",        0,   POPT_ARG_NONE, 0, OPT_SYSCALL, 0, 0},
-#endif
 	{"list-options", 0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{0, 0, 0, 0, 0, 0, 0}
 };
-
-/*
- * usage
- */
-static void usage(FILE *ofp)
-{
-	fprintf(ofp, "usage: lttng calibrate [-k|-u] [OPTIONS]\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Options:\n");
-	fprintf(ofp, "  -h, --help               Show this help\n");
-	fprintf(ofp, "      --list-options       Simple listing of options\n");
-	fprintf(ofp, "  -k, --kernel             Apply to the kernel tracer\n");
-	fprintf(ofp, "  -u, --userspace          Apply to the user-space tracer\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Calibrate options:\n");
-	fprintf(ofp, "    --function             Dynamic function entry/return probe (default)\n");
-#if 0
-	fprintf(ofp, "    --tracepoint           Tracepoint event (default)\n");
-	fprintf(ofp, "    --probe\n");
-	fprintf(ofp, "                           Dynamic probe.\n");
-#if 0
-	fprintf(ofp, "    --function:entry symbol\n");
-	fprintf(ofp, "                           Function tracer event\n");
-#endif
-	fprintf(ofp, "    --syscall              System call eventl\n");
-	fprintf(ofp, "    --marker               User-space marker (deprecated)\n");
-#endif
-	fprintf(ofp, "\n");
-}
 
 /*
  * Calibrate LTTng.
@@ -206,7 +154,7 @@ int cmd_calibrate(int argc, const char **argv)
 	while ((opt = poptGetNextOpt(pc)) != -1) {
 		switch (opt) {
 		case OPT_HELP:
-			usage(stdout);
+			SHOW_HELP();
 			goto end;
 		case OPT_TRACEPOINT:
 			ret = CMD_UNDEFINED;
@@ -236,7 +184,6 @@ int cmd_calibrate(int argc, const char **argv)
 			list_cmd_options(stdout, long_options);
 			goto end;
 		default:
-			usage(stderr);
 			ret = CMD_UNDEFINED;
 			goto end;
 		}

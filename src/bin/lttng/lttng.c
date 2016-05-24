@@ -15,7 +15,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <getopt.h>
 #include <signal.h>
@@ -25,12 +24,12 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <config.h>
 #include <ctype.h>
 
 #include <lttng/lttng.h>
 #include <common/error.h>
 #include <common/compat/getenv.h>
+#include <common/utils.h>
 
 #include "command.h"
 
@@ -66,74 +65,31 @@ static struct option long_options[] = {
 
 /* First level command */
 static struct cmd_struct commands[] =  {
-	{ "list", cmd_list},
+	{ "add-context", cmd_add_context},
+	{ "calibrate", cmd_calibrate},
 	{ "create", cmd_create},
 	{ "destroy", cmd_destroy},
-	{ "start", cmd_start},
-	{ "stop", cmd_stop},
-	{ "enable-event", cmd_enable_events},
+	{ "disable-channel", cmd_disable_channels},
 	{ "disable-event", cmd_disable_events},
 	{ "enable-channel", cmd_enable_channels},
-	{ "disable-channel", cmd_disable_channels},
-	{ "add-context", cmd_add_context},
-	{ "set-session", cmd_set_session},
-	{ "version", cmd_version},
-	{ "calibrate", cmd_calibrate},
-	{ "view", cmd_view},
-	{ "snapshot", cmd_snapshot},
-	{ "save", cmd_save},
+	{ "enable-event", cmd_enable_events},
+	{ "help", NULL},
+	{ "list", cmd_list},
 	{ "load", cmd_load},
+	{ "metadata", cmd_metadata},
+	{ "save", cmd_save},
+	{ "set-session", cmd_set_session},
+	{ "snapshot", cmd_snapshot},
+	{ "start", cmd_start},
+	{ "status", cmd_status},
+	{ "stop", cmd_stop},
 	{ "track", cmd_track},
 	{ "untrack", cmd_untrack},
+	{ "help", NULL},
+	{ "version", cmd_version},
+	{ "view", cmd_view},
 	{ NULL, NULL}	/* Array closure */
 };
-
-static void usage(FILE *ofp)
-{
-	fprintf(ofp, "LTTng Trace Control " VERSION " - " VERSION_NAME "%s\n\n",
-		GIT_VERSION[0] == '\0' ? "" : " - " GIT_VERSION);
-	fprintf(ofp, "usage: lttng [OPTIONS] <COMMAND> [<ARGS>]\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Options:\n");
-	fprintf(ofp, "  -V, --version              Show version\n");
-	fprintf(ofp, "  -h, --help                 Show this help\n");
-	fprintf(ofp, "      --list-options         Simple listing of lttng options\n");
-	fprintf(ofp, "      --list-commands        Simple listing of lttng commands\n");
-	fprintf(ofp, "  -v, --verbose              Increase verbosity\n");
-	fprintf(ofp, "  -q, --quiet                Quiet mode\n");
-	fprintf(ofp, "  -m, --mi TYPE              Machine Interface mode.\n");
-	fprintf(ofp, "                                 Type: xml\n");
-	fprintf(ofp, "  -g, --group NAME           Unix tracing group name. (default: tracing)\n");
-	fprintf(ofp, "  -n, --no-sessiond          Don't spawn a session daemon\n");
-	fprintf(ofp, "      --sessiond-path PATH   Session daemon full path\n");
-	fprintf(ofp, "      --relayd-path PATH     Relayd daemon full path\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Commands:\n");
-	fprintf(ofp, "    add-context       Add context to event and/or channel\n");
-	fprintf(ofp, "    calibrate         Quantify LTTng overhead\n");
-	fprintf(ofp, "    create            Create tracing session\n");
-	fprintf(ofp, "    destroy           Tear down tracing session\n");
-	fprintf(ofp, "    enable-channel    Enable tracing channel\n");
-	fprintf(ofp, "    enable-event      Enable tracing event\n");
-	fprintf(ofp, "    disable-channel   Disable tracing channel\n");
-	fprintf(ofp, "    disable-event     Disable tracing event\n");
-	fprintf(ofp, "    list              List possible tracing options\n");
-	fprintf(ofp, "    set-session       Set current session name\n");
-	fprintf(ofp, "    snapshot          Snapshot buffers of current session name\n");
-	fprintf(ofp, "    start             Start tracing\n");
-	fprintf(ofp, "    stop              Stop tracing\n");
-	fprintf(ofp, "    version           Show version information\n");
-	fprintf(ofp, "    view              Start trace viewer\n");
-	fprintf(ofp, "    save              Save session configuration\n");
-	fprintf(ofp, "    load              Load session configuration\n");
-	fprintf(ofp, "    track             Track specific system resources\n");
-	fprintf(ofp, "    untrack           Untrack specific system resources\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Each command also has its own -h, --help option.\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Please see the lttng(1) man page for full documentation.\n");
-	fprintf(ofp, "See http://lttng.org for updates, bug reports and news.\n");
-}
 
 static void version(FILE *ofp)
 {
@@ -262,8 +218,14 @@ static int handle_command(int argc, char **argv)
 		goto end;
 	}
 
+	/* Special case for help command which needs the commands array */
+	if (strcmp(argv[0], "help") == 0) {
+		ret = cmd_help(argc, (const char**) argv, commands);
+		goto end;
+	}
+
 	cmd = &commands[i];
-	while (cmd->func != NULL) {
+	while (cmd->name != NULL) {
 		/* Find command */
 		if (strcmp(argv[0], cmd->name) == 0) {
 			ret = cmd->func(argc, (const char**) argv);
@@ -278,6 +240,55 @@ static int handle_command(int argc, char **argv)
 
 end:
 	return ret;
+}
+
+static void show_basic_help(void)
+{
+	puts("Usage: lttng [--group=GROUP] [--mi=TYPE] [--no-sessiond | --sessiond-path=PATH]");
+	puts("             [--quiet | -v | -vv | -vvv] COMMAND [COMMAND OPTIONS]");
+	puts("");
+	puts("Available commands:");
+	puts("");
+	puts("Tracing sessions:");
+	puts("  create            " CONFIG_CMD_DESCR_CREATE);
+	puts("  destroy           " CONFIG_CMD_DESCR_DESTROY);
+	puts("  load              " CONFIG_CMD_DESCR_LOAD);
+	puts("  metadata          " CONFIG_CMD_DESCR_METADATA);
+	puts("  save              " CONFIG_CMD_DESCR_SAVE);
+	puts("  set-session       " CONFIG_CMD_DESCR_SET_SESSION);
+	puts("");
+	puts("Channels:");
+	puts("  add-context       " CONFIG_CMD_DESCR_ADD_CONTEXT);
+	puts("  disable-channel   " CONFIG_CMD_DESCR_DISABLE_CHANNEL);
+	puts("  enable-channel    " CONFIG_CMD_DESCR_ENABLE_CHANNEL);
+	puts("");
+	puts("Event rules:");
+	puts("  disable-event     " CONFIG_CMD_DESCR_DISABLE_EVENT);
+	puts("  enable-event      " CONFIG_CMD_DESCR_ENABLE_EVENT);
+	puts("");
+	puts("Status:");
+	puts("  list              " CONFIG_CMD_DESCR_LIST);
+	puts("  status            " CONFIG_CMD_DESCR_STATUS);
+	puts("");
+	puts("Control:");
+	puts("  snapshot          " CONFIG_CMD_DESCR_SNAPSHOT);
+	puts("  start             " CONFIG_CMD_DESCR_START);
+	puts("  stop              " CONFIG_CMD_DESCR_STOP);
+	puts("");
+	puts("Resource tracking:");
+	puts("  track             " CONFIG_CMD_DESCR_TRACK);
+	puts("  untrack           " CONFIG_CMD_DESCR_UNTRACK);
+	puts("");
+	puts("Miscellaneous:");
+	puts("  calibrate         " CONFIG_CMD_DESCR_CALIBRATE);
+	puts("  help              " CONFIG_CMD_DESCR_HELP);
+	puts("  version           " CONFIG_CMD_DESCR_VERSION);
+	puts("  view              " CONFIG_CMD_DESCR_VIEW);
+	puts("");
+	puts("Run `lttng help COMMAND` or `lttng COMMAND --help` to get help with");
+	puts("command COMMAND.");
+	puts("");
+	puts("See `man lttng` for more help with the lttng command.");
 }
 
 /*
@@ -296,7 +307,7 @@ static int parse_args(int argc, char **argv)
 	}
 
 	if (argc < 2) {
-		usage(stderr);
+		show_basic_help();
 		clean_exit(EXIT_FAILURE);
 	}
 
@@ -307,8 +318,12 @@ static int parse_args(int argc, char **argv)
 			ret = 0;
 			goto end;
 		case 'h':
-			usage(stdout);
-			ret = 0;
+			ret = utils_show_man_page(1, "lttng");
+
+			if (ret) {
+				ERR("Cannot view man page lttng(1)");
+				perror("exec");
+			}
 			goto end;
 		case 'v':
 			/* There is only 3 possible level of verbosity. (-vvv) */
@@ -333,6 +348,7 @@ static int parse_args(int argc, char **argv)
 			opt_no_sessiond = 1;
 			break;
 		case OPT_SESSION_PATH:
+			free(opt_sessiond_path);
 			opt_sessiond_path = strdup(optarg);
 			if (!opt_sessiond_path) {
 				ret = -1;
@@ -340,6 +356,7 @@ static int parse_args(int argc, char **argv)
 			}
 			break;
 		case OPT_RELAYD_PATH:
+			free(opt_relayd_path);
 			opt_relayd_path = strdup(optarg);
 			if (!opt_relayd_path) {
 				ret = -1;
@@ -355,7 +372,6 @@ static int parse_args(int argc, char **argv)
 			ret = 0;
 			goto end;
 		default:
-			usage(stderr);
 			ret = 1;
 			goto error;
 		}
@@ -366,9 +382,8 @@ static int parse_args(int argc, char **argv)
 		lttng_opt_verbose = 0;
 	}
 
-	/* No leftovers, print usage and quit */
+	/* No leftovers, quit */
 	if ((argc - optind) == 0) {
-		usage(stderr);
 		ret = 1;
 		goto error;
 	}
@@ -394,7 +409,7 @@ static int parse_args(int argc, char **argv)
 		ERR("Command error");
 		break;
 	case CMD_UNDEFINED:
-		ERR("Undefined command");
+		ERR("Undefined command or invalid arguments");
 		break;
 	case CMD_FATAL:
 		ERR("Fatal error");
@@ -403,7 +418,6 @@ static int parse_args(int argc, char **argv)
 		ERR("Unsupported command");
 		break;
 	case -1:
-		usage(stderr);
 		ret = 1;
 		break;
 	case 0:

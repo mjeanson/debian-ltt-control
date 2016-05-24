@@ -1,0 +1,411 @@
+'\" t
+.\"     Title: lttng-snapshot
+.\"    Author: [see the "AUTHORS" section]
+.\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
+.\"      Date: 05/20/2016
+.\"    Manual: LTTng Manual
+.\"    Source: LTTng 2.8.0
+.\"  Language: English
+.\"
+.TH "LTTNG\-SNAPSHOT" "1" "05/20/2016" "LTTng 2\&.8\&.0" "LTTng Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+lttng-snapshot \- Take LTTng snapshots and configure snapshot outputs
+.SH "SYNOPSIS"
+.sp
+Add a snapshot output:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBsnapshot add\-output\fR [\fB--max-size\fR=\fISIZE\fR]
+      [\fB--name\fR=\fINAME\fR] [\fB--session\fR=\fISESSION\fR]
+      (\fB--ctrl-url\fR=\fIURL\fR \fB--data-url\fR=\fIURL\fR | \fIURL\fR)
+.fi
+.sp
+Remove a snapshot output:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBsnapshot del\-output\fR [\fB--session\fR=\fISESSION\fR]
+      (\fIID\fR | \fINAME\fR)
+.fi
+.sp
+List current snapshot outputs:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBsnapshot list\-output\fR [\fB--session\fR=\fISESSION\fR]
+.fi
+.sp
+Take a snapshot:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBsnapshot record\fR [\fB--max-size\fR=\fISIZE\fR]
+      [\fB--name\fR=\fINAME\fR] [\fB--session\fR=\fISESSION\fR]
+      (\fB--ctrl-url\fR=\fIURL\fR \fB--data-url\fR=\fIURL\fR | \fIURL\fR)
+.fi
+.SH "DESCRIPTION"
+.sp
+The \fBlttng snapshot\fR command manages the snapshot outputs and takes snapshots\&.
+.sp
+A \fIsnapshot\fR is a dump of the current sub\-buffers of all the channels of a given tracing session\&. When a snapshot is taken, the memory dump is sent to the registered snapshot outputs\&.
+.sp
+The tracing session should be created in \fIsnapshot mode\fR to make sure taking snapshots is allowed\&. This is done at tracing session creation time using the \fBlttng-create\fR(1) command\&.
+.sp
+Note that, when a snapshot is taken, the sub\-buffers are not cleared\&. This means that different recorded snapshots may contain the same events\&.
+.SS "Snapshot outputs"
+.sp
+Snapshot outputs are the destinations of snapshot files when a snapshot is taken using the \fBrecord\fR action\&.
+.sp
+As of this version, only one snapshot output is allowed\&.
+.sp
+A snapshot output can be added using the \fBadd-output\fR action\&. The output destination URL is set using either the \fIURL\fR positional argument, or both the \fB--ctrl-url\fR and \fB--data-url\fR options\&. See \fBlttng-create\fR(1) to learn more about the URL format\&.
+.sp
+A name can be assigned to an output when adding it using the \fB--name\fR option\&. This name is part of the names of the snapshot files written to this output\&.
+.sp
+By default, the snapshot files can be as big as the sum of the sizes of all the sub\-buffers or all the channels of the selected tracing session\&. The maximum total size of all the snapshot files can be configured using the \fB--max-size\fR option\&.
+.sp
+Snapshot outputs can be listed using the \fBlist-output\fR action\&.
+.sp
+Snapshot outputs can be removed using the \fBdel-output\fR action\&. The configured name can be used when removing an output, or an ID as listed by the \fBlist-output\fR action\&.
+.SS "Taking a snapshot"
+.sp
+Taking a snapshot of the current tracing session is as easy as:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+lttng snapshot record
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+This writes the snapshot files to the configured output\&. It is possible to use a custom, unregistered output at record time using the same options supported by the \fBadd-output\fR action\&.
+.if n \{\
+.sp
+.\}
+.RS 4
+.it 1 an-trap
+.nr an-no-space-flag 1
+.nr an-break-flag 1
+.br
+.ps +1
+\fBNote\fR
+.ps -1
+.br
+.sp
+Before taking a snapshot on a system with a high event throughput, it is recommended to first run \fBlttng stop\fR (see \fBlttng-stop\fR(1))\&. Otherwise, the snapshot could contain "holes", the result of the tracers overwriting unconsumed trace packets during the record operation\&. After the snapshot is recorded, the tracers can be started again with \fBlttng start\fR (see \fBlttng-start\fR(1))\&.
+.sp .5v
+.RE
+.SH "OPTIONS"
+.sp
+General options are described in \fBlttng\fR(1)\&.
+.SS "Target"
+.PP
+\fB-s\fR, \fB--session\fR=\fISESSION\fR
+.RS 4
+Take a snapshot of the sub\-buffers of the channels contained in the tracing session named
+\fISESSION\fR
+instead of the current tracing session\&.
+.RE
+.SS "Snapshot output"
+.PP
+\fB-C\fR, \fB--ctrl-url\fR=\fIURL\fR
+.RS 4
+Set control path URL to
+\fIURL\fR
+(must use
+\fB--data-url\fR
+option also)\&.
+.RE
+.PP
+\fB-D\fR, \fB--data-url\fR=\fIURL\fR
+.RS 4
+Set data path URL to
+\fIURL\fR
+(must use
+\fB--ctrl-url\fR
+option also)\&.
+.RE
+.PP
+\fB-m\fR, \fB--max-size\fR=\fISIZE\fR
+.RS 4
+Limit the total size of all the snapshot files written when recording a snapshot to
+\fISIZE\fR
+bytes\&. The
+\fBk\fR
+(kiB),
+\fBM\fR
+(MiB), and
+\fBG\fR
+(GiB) suffixes are supported\&.
+.RE
+.PP
+\fB-n\fR, \fB--name\fR=\fINAME\fR
+.RS 4
+Assign the name
+\fINAME\fR
+to the snapshot output\&.
+.RE
+.SS "Program information"
+.PP
+\fB-h\fR, \fB--help\fR
+.RS 4
+Show command help\&.
+.sp
+This option, like
+\fBlttng-help\fR(1), attempts to launch
+\fB/usr/bin/man\fR
+to view the command\(cqs man page\&. The path to the man pager can be overridden by the
+\fBLTTNG_MAN_BIN_PATH\fR
+environment variable\&.
+.RE
+.PP
+\fB--list-options\fR
+.RS 4
+List available command options\&.
+.RE
+.SH "ENVIRONMENT VARIABLES"
+.PP
+\fBLTTNG_ABORT_ON_ERROR\fR
+.RS 4
+Set to 1 to abort the process after the first error is encountered\&.
+.RE
+.PP
+\fBLTTNG_HOME\fR
+.RS 4
+Overrides the
+\fB$HOME\fR
+environment variable\&. Useful when the user running the commands has a non\-writable home directory\&.
+.RE
+.PP
+\fBLTTNG_MAN_BIN_PATH\fR
+.RS 4
+Absolute path to the man pager to use for viewing help information about LTTng commands (using
+\fBlttng-help\fR(1)
+or
+\fBlttng COMMAND --help\fR)\&.
+.RE
+.PP
+\fBLTTNG_SESSION_CONFIG_XSD_PATH\fR
+.RS 4
+Path in which the
+\fBsession.xsd\fR
+session configuration XML schema may be found\&.
+.RE
+.PP
+\fBLTTNG_SESSIOND_PATH\fR
+.RS 4
+Full session daemon binary path\&.
+.sp
+The
+\fB--sessiond-path\fR
+option has precedence over this environment variable\&.
+.RE
+.sp
+Note that the \fBlttng-create\fR(1) command can spawn an LTTng session daemon automatically if none is running\&. See \fBlttng-sessiond\fR(8) for the environment variables influencing the execution of the session daemon\&.
+.SH "FILES"
+.PP
+\fB$LTTNG_HOME/.lttngrc\fR
+.RS 4
+User LTTng runtime configuration\&.
+.sp
+This is where the per\-user current tracing session is stored between executions of
+\fBlttng\fR(1)\&. The current tracing session can be set with
+\fBlttng-set-session\fR(1)\&. See
+\fBlttng-create\fR(1)
+for more information about tracing sessions\&.
+.RE
+.PP
+\fB$LTTNG_HOME/lttng-traces\fR
+.RS 4
+Default output directory of LTTng traces\&. This can be overridden with the
+\fB--output\fR
+option of the
+\fBlttng-create\fR(1)
+command\&.
+.RE
+.PP
+\fB$LTTNG_HOME/.lttng\fR
+.RS 4
+User LTTng runtime and configuration directory\&.
+.RE
+.PP
+\fB$LTTNG_HOME/.lttng/sessions\fR
+.RS 4
+Default location of saved user tracing sessions (see
+\fBlttng-save\fR(1)
+and
+\fBlttng-load\fR(1))\&.
+.RE
+.PP
+\fB/usr/local/etc/lttng/sessions\fR
+.RS 4
+System\-wide location of saved tracing sessions (see
+\fBlttng-save\fR(1)
+and
+\fBlttng-load\fR(1))\&.
+.RE
+.if n \{\
+.sp
+.\}
+.RS 4
+.it 1 an-trap
+.nr an-no-space-flag 1
+.nr an-break-flag 1
+.br
+.ps +1
+\fBNote\fR
+.ps -1
+.br
+.sp
+\fB$LTTNG_HOME\fR defaults to \fB$HOME\fR when not explicitly set\&.
+.sp .5v
+.RE
+.SH "EXIT STATUS"
+.PP
+\fB0\fR
+.RS 4
+Success
+.RE
+.PP
+\fB1\fR
+.RS 4
+Command error
+.RE
+.PP
+\fB2\fR
+.RS 4
+Undefined command
+.RE
+.PP
+\fB3\fR
+.RS 4
+Fatal error
+.RE
+.PP
+\fB4\fR
+.RS 4
+Command warning (something went wrong during the command)
+.RE
+.SH "BUGS"
+.sp
+If you encounter any issue or usability problem, please report it on the LTTng bug tracker <https://bugs.lttng.org/projects/lttng-tools>\&.
+.SH "RESOURCES"
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+LTTng project website <http://lttng.org>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+LTTng documentation <http://lttng.org/docs>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Git repositories <http://git.lttng.org>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+GitHub organization <http://github.com/lttng>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Continuous integration <http://ci.lttng.org/>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Mailing list <http://lists.lttng.org>
+for support and development:
+\fBlttng-dev@lists.lttng.org\fR
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+IRC channel <irc://irc.oftc.net/lttng>:
+\fB#lttng\fR
+on
+\fBirc.oftc.net\fR
+.RE
+.SH "COPYRIGHTS"
+.sp
+This program is part of the LTTng\-tools project\&.
+.sp
+LTTng\-tools is distributed under the GNU General Public License version 2 <http://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html>\&. See the \fBLICENSE\fR <https://github.com/lttng/lttng-tools/blob/master/LICENSE> file for details\&.
+.SH "THANKS"
+.sp
+Special thanks to Michel Dagenais and the DORSAL laboratory <http://www.dorsal.polymtl.ca/> at \('Ecole Polytechnique de Montr\('eal for the LTTng journey\&.
+.sp
+Also thanks to the Ericsson teams working on tracing which helped us greatly with detailed bug reports and unusual test cases\&.
+.SH "AUTHORS"
+.sp
+LTTng\-tools was originally written by Mathieu Desnoyers, Julien Desfossez, and David Goulet\&. More people have since contributed to it\&.
+.sp
+LTTng\-tools is currently maintained by J\('er\('emie Galarneau <mailto:jeremie.galarneau@efficios.com>\&.
+.SH "SEE ALSO"
+.sp
+\fBlttng\fR(1)

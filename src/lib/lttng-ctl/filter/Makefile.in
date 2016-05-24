@@ -92,29 +92,36 @@ build_triplet = @build@
 host_triplet = @host@
 target_triplet = @target@
 noinst_PROGRAMS = filter-grammar-test$(EXEEXT)
+
+# we have bison: we can clean the generated parser files
+@HAVE_BISON_TRUE@am__append_1 = filter-parser.c filter-parser.h filter-parser.output
+
+# we have flex: we can clean the generated lexer files
+@HAVE_FLEX_TRUE@am__append_2 = filter-lexer.c
 subdir = src/lib/lttng-ctl/filter
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/config/ac_define_dir.m4 \
-	$(top_srcdir)/config/ax_check_class.m4 \
-	$(top_srcdir)/config/ax_check_classpath.m4 \
-	$(top_srcdir)/config/ax_compare_version.m4 \
-	$(top_srcdir)/config/ax_java_options.m4 \
-	$(top_srcdir)/config/ax_pkg_swig.m4 \
-	$(top_srcdir)/config/ax_prog_bison_version.m4 \
-	$(top_srcdir)/config/ax_prog_flex_version.m4 \
-	$(top_srcdir)/config/ax_prog_jar.m4 \
-	$(top_srcdir)/config/ax_prog_java.m4 \
-	$(top_srcdir)/config/ax_prog_java_works.m4 \
-	$(top_srcdir)/config/ax_prog_javac.m4 \
-	$(top_srcdir)/config/ax_prog_javac_works.m4 \
-	$(top_srcdir)/config/ax_try_compile_java.m4 \
-	$(top_srcdir)/config/config_feature.m4 \
-	$(top_srcdir)/config/epoll.m4 $(top_srcdir)/config/libtool.m4 \
-	$(top_srcdir)/config/libxml.m4 \
-	$(top_srcdir)/config/ltoptions.m4 \
-	$(top_srcdir)/config/ltsugar.m4 \
-	$(top_srcdir)/config/ltversion.m4 \
-	$(top_srcdir)/config/lt~obsolete.m4 $(top_srcdir)/configure.ac
+am__aclocal_m4_deps = $(top_srcdir)/m4/ac_define_dir.m4 \
+	$(top_srcdir)/m4/ax_c___attribute__.m4 \
+	$(top_srcdir)/m4/ax_check_class.m4 \
+	$(top_srcdir)/m4/ax_check_classpath.m4 \
+	$(top_srcdir)/m4/ax_compare_version.m4 \
+	$(top_srcdir)/m4/ax_java_options.m4 \
+	$(top_srcdir)/m4/ax_lib_socket_nsl.m4 \
+	$(top_srcdir)/m4/ax_pkg_swig.m4 \
+	$(top_srcdir)/m4/ax_prog_bison_version.m4 \
+	$(top_srcdir)/m4/ax_prog_flex_version.m4 \
+	$(top_srcdir)/m4/ax_prog_jar.m4 \
+	$(top_srcdir)/m4/ax_prog_java.m4 \
+	$(top_srcdir)/m4/ax_prog_java_works.m4 \
+	$(top_srcdir)/m4/ax_prog_javac.m4 \
+	$(top_srcdir)/m4/ax_prog_javac_works.m4 \
+	$(top_srcdir)/m4/ax_pthread.m4 \
+	$(top_srcdir)/m4/ax_try_compile_java.m4 \
+	$(top_srcdir)/m4/config_feature.m4 $(top_srcdir)/m4/epoll.m4 \
+	$(top_srcdir)/m4/libtool.m4 $(top_srcdir)/m4/libxml.m4 \
+	$(top_srcdir)/m4/ltoptions.m4 $(top_srcdir)/m4/ltsugar.m4 \
+	$(top_srcdir)/m4/ltversion.m4 $(top_srcdir)/m4/lt~obsolete.m4 \
+	$(top_srcdir)/m4/pprint.m4 $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 DIST_COMMON = $(srcdir)/Makefile.am $(noinst_HEADERS) \
@@ -125,8 +132,8 @@ CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 LTLIBRARIES = $(noinst_LTLIBRARIES)
 libfilter_la_LIBADD =
-am_libfilter_la_OBJECTS = libfilter_la-filter-lexer.lo \
-	libfilter_la-filter-parser.lo \
+am_libfilter_la_OBJECTS = libfilter_la-filter-parser.lo \
+	libfilter_la-filter-lexer.lo \
 	libfilter_la-filter-visitor-set-parent.lo \
 	libfilter_la-filter-visitor-xml.lo \
 	libfilter_la-filter-visitor-generate-ir.lo \
@@ -232,6 +239,7 @@ ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
 AR = @AR@
+ASCIIDOC = @ASCIIDOC@
 AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
@@ -242,6 +250,28 @@ BISON_VERSION = @BISON_VERSION@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
+CMD_DESCR_ADD_CONTEXT = @CMD_DESCR_ADD_CONTEXT@
+CMD_DESCR_CALIBRATE = @CMD_DESCR_CALIBRATE@
+CMD_DESCR_CREATE = @CMD_DESCR_CREATE@
+CMD_DESCR_DESTROY = @CMD_DESCR_DESTROY@
+CMD_DESCR_DISABLE_CHANNEL = @CMD_DESCR_DISABLE_CHANNEL@
+CMD_DESCR_DISABLE_EVENT = @CMD_DESCR_DISABLE_EVENT@
+CMD_DESCR_ENABLE_CHANNEL = @CMD_DESCR_ENABLE_CHANNEL@
+CMD_DESCR_ENABLE_EVENT = @CMD_DESCR_ENABLE_EVENT@
+CMD_DESCR_HELP = @CMD_DESCR_HELP@
+CMD_DESCR_LIST = @CMD_DESCR_LIST@
+CMD_DESCR_LOAD = @CMD_DESCR_LOAD@
+CMD_DESCR_METADATA = @CMD_DESCR_METADATA@
+CMD_DESCR_SAVE = @CMD_DESCR_SAVE@
+CMD_DESCR_SET_SESSION = @CMD_DESCR_SET_SESSION@
+CMD_DESCR_SNAPSHOT = @CMD_DESCR_SNAPSHOT@
+CMD_DESCR_START = @CMD_DESCR_START@
+CMD_DESCR_STATUS = @CMD_DESCR_STATUS@
+CMD_DESCR_STOP = @CMD_DESCR_STOP@
+CMD_DESCR_TRACK = @CMD_DESCR_TRACK@
+CMD_DESCR_UNTRACK = @CMD_DESCR_UNTRACK@
+CMD_DESCR_VERSION = @CMD_DESCR_VERSION@
+CMD_DESCR_VIEW = @CMD_DESCR_VIEW@
 CONFDIR = @CONFDIR@
 CONFIG_LTTNG_SYSTEM_DATADIR = @CONFIG_LTTNG_SYSTEM_DATADIR@
 CONSUMERD32_BIN = @CONSUMERD32_BIN@
@@ -251,7 +281,40 @@ CONSUMERD64_LIBDIR = @CONSUMERD64_LIBDIR@
 CPP = @CPP@
 CPPFLAGS = @CPPFLAGS@
 CYGPATH_W = @CYGPATH_W@
+DEFAULT_AGENT_BIND_ADDRESS = @DEFAULT_AGENT_BIND_ADDRESS@
+DEFAULT_AGENT_TCP_PORT = @DEFAULT_AGENT_TCP_PORT@
+DEFAULT_APP_SOCKET_RW_TIMEOUT = @DEFAULT_APP_SOCKET_RW_TIMEOUT@
+DEFAULT_CHANNEL_SUBBUF_SIZE = @DEFAULT_CHANNEL_SUBBUF_SIZE@
+DEFAULT_CHANNEL_TRACEFILE_COUNT = @DEFAULT_CHANNEL_TRACEFILE_COUNT@
+DEFAULT_CHANNEL_TRACEFILE_SIZE = @DEFAULT_CHANNEL_TRACEFILE_SIZE@
 DEFAULT_INCLUDES = @DEFAULT_INCLUDES@
+DEFAULT_KERNEL_CHANNEL_LIVE_TIMER = @DEFAULT_KERNEL_CHANNEL_LIVE_TIMER@
+DEFAULT_KERNEL_CHANNEL_READ_TIMER = @DEFAULT_KERNEL_CHANNEL_READ_TIMER@
+DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM = @DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM@
+DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE = @DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE@
+DEFAULT_KERNEL_CHANNEL_SWITCH_TIMER = @DEFAULT_KERNEL_CHANNEL_SWITCH_TIMER@
+DEFAULT_LTTNG_LIVE_TIMER = @DEFAULT_LTTNG_LIVE_TIMER@
+DEFAULT_METADATA_CACHE_SIZE = @DEFAULT_METADATA_CACHE_SIZE@
+DEFAULT_METADATA_READ_TIMER = @DEFAULT_METADATA_READ_TIMER@
+DEFAULT_METADATA_SUBBUF_NUM = @DEFAULT_METADATA_SUBBUF_NUM@
+DEFAULT_METADATA_SUBBUF_SIZE = @DEFAULT_METADATA_SUBBUF_SIZE@
+DEFAULT_METADATA_SWITCH_TIMER = @DEFAULT_METADATA_SWITCH_TIMER@
+DEFAULT_NETWORK_CONTROL_BIND_ADDRESS = @DEFAULT_NETWORK_CONTROL_BIND_ADDRESS@
+DEFAULT_NETWORK_CONTROL_PORT = @DEFAULT_NETWORK_CONTROL_PORT@
+DEFAULT_NETWORK_DATA_BIND_ADDRESS = @DEFAULT_NETWORK_DATA_BIND_ADDRESS@
+DEFAULT_NETWORK_DATA_PORT = @DEFAULT_NETWORK_DATA_PORT@
+DEFAULT_NETWORK_VIEWER_BIND_ADDRESS = @DEFAULT_NETWORK_VIEWER_BIND_ADDRESS@
+DEFAULT_NETWORK_VIEWER_PORT = @DEFAULT_NETWORK_VIEWER_PORT@
+DEFAULT_UST_PID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_PID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_PID_CHANNEL_READ_TIMER = @DEFAULT_UST_PID_CHANNEL_READ_TIMER@
+DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM@
+DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE@
+DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER = @DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER@
+DEFAULT_UST_UID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_UID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_UID_CHANNEL_READ_TIMER = @DEFAULT_UST_UID_CHANNEL_READ_TIMER@
+DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM@
+DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE@
+DEFAULT_UST_UID_CHANNEL_SWITCH_TIMER = @DEFAULT_UST_UID_CHANNEL_SWITCH_TIMER@
 DEFS = @DEFS@
 DEPDIR = @DEPDIR@
 DLLTOOL = @DLLTOOL@
@@ -299,6 +362,7 @@ MINOR_VERSION = @MINOR_VERSION@
 MKDIR_P = @MKDIR_P@
 NM = @NM@
 NMEDIT = @NMEDIT@
+OBJCOPY = @OBJCOPY@
 OBJDUMP = @OBJDUMP@
 OBJEXT = @OBJEXT@
 OTOOL = @OTOOL@
@@ -312,11 +376,15 @@ PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATCHLEVEL_VERSION = @PATCHLEVEL_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
+PGREP = @PGREP@
 PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POPT_CFLAGS = @POPT_CFLAGS@
 POPT_LIBS = @POPT_LIBS@
+PTHREAD_CC = @PTHREAD_CC@
+PTHREAD_CFLAGS = @PTHREAD_CFLAGS@
+PTHREAD_LIBS = @PTHREAD_LIBS@
 PYTHON = @PYTHON@
 PYTHON2_AGENT = @PYTHON2_AGENT@
 PYTHON2_BIN = @PYTHON2_BIN@
@@ -342,6 +410,7 @@ UUID_CFLAGS = @UUID_CFLAGS@
 UUID_LIBS = @UUID_LIBS@
 VERSION = @VERSION@
 XML2_CONFIG = @XML2_CONFIG@
+XMLTO = @XMLTO@
 XML_CPPFLAGS = @XML_CPPFLAGS@
 XML_LIBS = @XML_LIBS@
 YACC = @YACC@
@@ -358,6 +427,7 @@ am__leading_dot = @am__leading_dot@
 am__quote = @am__quote@
 am__tar = @am__tar@
 am__untar = @am__untar@
+ax_pthread_config = @ax_pthread_config@
 bindir = @bindir@
 build = @build@
 build_alias = @build_alias@
@@ -391,11 +461,13 @@ oldincludedir = @oldincludedir@
 pdfdir = @pdfdir@
 pkgpyexecdir = @pkgpyexecdir@
 pkgpythondir = @pkgpythondir@
+pprint_tput = @pprint_tput@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
+report_fold = @report_fold@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -416,8 +488,8 @@ noinst_HEADERS = filter-ast.h \
 		filter-symbols.h
 
 BUILT_SOURCES = filter-parser.h
-AM_YFLAGS = -t -d -v
-libfilter_la_SOURCES = filter-lexer.l filter-parser.y \
+libfilter_la_SOURCES = \
+	filter-parser.y filter-lexer.l \
 	filter-visitor-set-parent.c \
 	filter-visitor-xml.c \
 	filter-visitor-generate-ir.c \
@@ -430,9 +502,22 @@ libfilter_la_SOURCES = filter-lexer.l filter-parser.y \
 	memstream.h
 
 libfilter_la_CFLAGS = -include filter-symbols.h
+AM_YFLAGS = -t -d -v
+
+# start with empty files to clean
+CLEANFILES = $(am__append_1) $(am__append_2)
+# create target used to stop the build if we want to build the parser,
+# but we don't have the necessary tool to do so
+@HAVE_BISON_FALSE@ERR_MSG = "Error: Cannot build target because bison \
+@HAVE_BISON_FALSE@	is missing." "Make sure bison is installed \
+@HAVE_BISON_FALSE@	and run the configure script again."
+# create target used to stop the build if we want to build the lexer,
+# but we don't have the necessary tool to do so
+@HAVE_FLEX_FALSE@ERR_MSG = "Error: Cannot build target because flex is \
+@HAVE_FLEX_FALSE@	missing." "Make sure flex is installed and \
+@HAVE_FLEX_FALSE@	run the configure script again."
 filter_grammar_test_SOURCES = filter-grammar-test.c
 filter_grammar_test_LDADD = libfilter.la
-CLEANFILES = filter-lexer.c filter-parser.c filter-parser.h filter-parser.output
 all: $(BUILT_SOURCES)
 	$(MAKE) $(AM_MAKEFLAGS) all-am
 
@@ -535,19 +620,19 @@ distclean-compile:
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LTCOMPILE) -c -o $@ $<
 
-libfilter_la-filter-lexer.lo: filter-lexer.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -MT libfilter_la-filter-lexer.lo -MD -MP -MF $(DEPDIR)/libfilter_la-filter-lexer.Tpo -c -o libfilter_la-filter-lexer.lo `test -f 'filter-lexer.c' || echo '$(srcdir)/'`filter-lexer.c
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libfilter_la-filter-lexer.Tpo $(DEPDIR)/libfilter_la-filter-lexer.Plo
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='filter-lexer.c' object='libfilter_la-filter-lexer.lo' libtool=yes @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -c -o libfilter_la-filter-lexer.lo `test -f 'filter-lexer.c' || echo '$(srcdir)/'`filter-lexer.c
-
 libfilter_la-filter-parser.lo: filter-parser.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -MT libfilter_la-filter-parser.lo -MD -MP -MF $(DEPDIR)/libfilter_la-filter-parser.Tpo -c -o libfilter_la-filter-parser.lo `test -f 'filter-parser.c' || echo '$(srcdir)/'`filter-parser.c
 @am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libfilter_la-filter-parser.Tpo $(DEPDIR)/libfilter_la-filter-parser.Plo
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='filter-parser.c' object='libfilter_la-filter-parser.lo' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -c -o libfilter_la-filter-parser.lo `test -f 'filter-parser.c' || echo '$(srcdir)/'`filter-parser.c
+
+libfilter_la-filter-lexer.lo: filter-lexer.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -MT libfilter_la-filter-lexer.lo -MD -MP -MF $(DEPDIR)/libfilter_la-filter-lexer.Tpo -c -o libfilter_la-filter-lexer.lo `test -f 'filter-lexer.c' || echo '$(srcdir)/'`filter-lexer.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libfilter_la-filter-lexer.Tpo $(DEPDIR)/libfilter_la-filter-lexer.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='filter-lexer.c' object='libfilter_la-filter-lexer.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -c -o libfilter_la-filter-lexer.lo `test -f 'filter-lexer.c' || echo '$(srcdir)/'`filter-lexer.c
 
 libfilter_la-filter-visitor-set-parent.lo: filter-visitor-set-parent.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -MT libfilter_la-filter-visitor-set-parent.lo -MD -MP -MF $(DEPDIR)/libfilter_la-filter-visitor-set-parent.Tpo -c -o libfilter_la-filter-visitor-set-parent.lo `test -f 'filter-visitor-set-parent.c' || echo '$(srcdir)/'`filter-visitor-set-parent.c
@@ -688,7 +773,8 @@ distdir: $(DISTFILES)
 check-am: all-am
 check: $(BUILT_SOURCES)
 	$(MAKE) $(AM_MAKEFLAGS) check-am
-all-am: Makefile $(LTLIBRARIES) $(PROGRAMS) $(HEADERS)
+@HAVE_BISON_TRUE@@HAVE_FLEX_TRUE@all-local:
+all-am: Makefile $(LTLIBRARIES) $(PROGRAMS) $(HEADERS) all-local
 installdirs:
 install: $(BUILT_SOURCES)
 	$(MAKE) $(AM_MAKEFLAGS) install-am
@@ -799,22 +885,34 @@ uninstall-am:
 
 .MAKE: all check install install-am install-strip
 
-.PHONY: CTAGS GTAGS TAGS all all-am check check-am clean clean-generic \
-	clean-libtool clean-noinstLTLIBRARIES clean-noinstPROGRAMS \
-	cscopelist-am ctags ctags-am distclean distclean-compile \
-	distclean-generic distclean-libtool distclean-tags distdir dvi \
-	dvi-am html html-am info info-am install install-am \
-	install-data install-data-am install-dvi install-dvi-am \
-	install-exec install-exec-am install-html install-html-am \
-	install-info install-info-am install-man install-pdf \
-	install-pdf-am install-ps install-ps-am install-strip \
-	installcheck installcheck-am installdirs maintainer-clean \
-	maintainer-clean-generic mostlyclean mostlyclean-compile \
-	mostlyclean-generic mostlyclean-libtool pdf pdf-am ps ps-am \
-	tags tags-am uninstall uninstall-am
+.PHONY: CTAGS GTAGS TAGS all all-am all-local check check-am clean \
+	clean-generic clean-libtool clean-noinstLTLIBRARIES \
+	clean-noinstPROGRAMS cscopelist-am ctags ctags-am distclean \
+	distclean-compile distclean-generic distclean-libtool \
+	distclean-tags distdir dvi dvi-am html html-am info info-am \
+	install install-am install-data install-data-am install-dvi \
+	install-dvi-am install-exec install-exec-am install-html \
+	install-html-am install-info install-info-am install-man \
+	install-pdf install-pdf-am install-ps install-ps-am \
+	install-strip installcheck installcheck-am installdirs \
+	maintainer-clean maintainer-clean-generic mostlyclean \
+	mostlyclean-compile mostlyclean-generic mostlyclean-libtool \
+	pdf pdf-am ps ps-am tags tags-am uninstall uninstall-am
 
 .PRECIOUS: Makefile
 
+
+@HAVE_BISON_FALSE@filter-parser.c filter-parser.h: filter-parser.y
+@HAVE_BISON_FALSE@	@echo $(ERR_MSG)
+@HAVE_BISON_FALSE@	@false
+
+@HAVE_BISON_FALSE@all-local: filter-parser.c filter-parser.h
+
+@HAVE_FLEX_FALSE@filter-lexer.c: filter-lexer.l
+@HAVE_FLEX_FALSE@	@echo $(ERR_MSG)
+@HAVE_FLEX_FALSE@	@false
+
+@HAVE_FLEX_FALSE@all-local: filter-lexer.c
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.

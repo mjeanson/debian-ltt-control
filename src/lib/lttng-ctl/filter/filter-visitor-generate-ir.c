@@ -213,135 +213,6 @@ struct ir_op *make_op_unary_not(struct ir_op *child, enum ir_side side)
 			child, side);
 }
 
-#if 0
-static
-struct ir_op *make_op_binary_numeric(enum op_type bin_op_type,
-		const char *op_str, struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	struct ir_op *op = NULL;
-
-	if (right->data_type == IR_DATA_STRING
-			|| right->data_type == IR_DATA_STRING) {
-		fprintf(stderr, "[error] binary operation '%s' not allowed on string literal\n", op_str);
-		goto error;
-	}
-	if (left->data_type == IR_DATA_UNKNOWN
-		|| right->data_type == IR_DATA_UNKNOWN) {
-		fprintf(stderr, "[error] binary operation '%s' has unknown type for both children\n", op_str);
-		goto error;
-
-	}
-
-	op = calloc(sizeof(struct ir_op_binary), 1);
-	if (!op)
-		return NULL;
-	op->op = IR_OP_BINARY;
-	op->u.binary.type = bin_op_type;
-	op->u.binary.left = left;
-	op->u.binary.right = right;
-	op->side = side;
-
-	/*
-	 * The field that is not a field ref will select type.
-	 */
-	if (left->data_type != IR_DATA_FIELD_REF
-			&& left->data_type != IR_DATA_GET_CONTEXT_REF)
-		op->data_type = left->data_type;
-	else
-		op->data_type = right->data_type;
-
-	if (left->signedness == IR_SIGNED
-			|| right->signedness == IR_SIGNED) {
-		op->signedness = IR_SIGNED;
-	} else if (left->signedness == IR_SIGN_DYN
-			|| right->signedness == IR_SIGN_DYN) {
-		op->signedness = IR_SIGN_DYN;
-	} else if (left->signedness == IR_UNSIGNED
-			&& right->signedness == IR_UNSIGNED) {
-		op->signedness = IR_UNSIGNED;
-	} else {
-		op->signedness = IR_SIGN_UNKNOWN;
-	}
-
-	return op;
-
-error:
-	free(op);
-	return NULL;
-}
-
-static
-struct ir_op *make_op_binary_mul(struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	return make_op_binary_numeric(AST_OP_MUL, "*", left, right, side);
-}
-
-static
-struct ir_op *make_op_binary_div(struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	return make_op_binary_numeric(AST_OP_DIV, "/", left, right, side);
-}
-
-static
-struct ir_op *make_op_binary_mod(struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	return make_op_binary_numeric(AST_OP_MOD, "%", left, right, side);
-}
-
-static
-struct ir_op *make_op_binary_plus(struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	return make_op_binary_numeric(AST_OP_PLUS, "+", left, right, side);
-}
-
-static
-struct ir_op *make_op_binary_minus(struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	return make_op_binary_numeric(AST_OP_MINUS, "-", left, right, side);
-}
-
-static
-struct ir_op *make_op_binary_rshift(struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	return make_op_binary_numeric(AST_OP_RSHIFT, ">>", left, right, side);
-}
-
-static
-struct ir_op *make_op_binary_lshift(struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	return make_op_binary_numeric(AST_OP_LSHIFT, "<<", left, right, side);
-}
-
-static
-struct ir_op *make_op_binary_and(struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	return make_op_binary_numeric(AST_OP_BIN_AND, "&", left, right, side);
-}
-
-static
-struct ir_op *make_op_binary_or(struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	return make_op_binary_numeric(AST_OP_BIN_OR, "|", left, right, side);
-}
-
-static
-struct ir_op *make_op_binary_xor(struct ir_op *left, struct ir_op *right,
-		enum ir_side side)
-{
-	return make_op_binary_numeric(AST_OP_BIN_XOR, "^", left, right, side);
-}
-#endif //0
-
 static
 struct ir_op *make_op_binary_compare(enum op_type bin_op_type,
 		const char *op_str, struct ir_op *left, struct ir_op *right,
@@ -547,36 +418,30 @@ struct ir_op *make_expression(struct filter_parser_ctx *ctx,
 					side);
 	case AST_EXP_GLOBAL_IDENTIFIER:
 	{
-		struct filter_node *next;
+		const char *name;
 
-		if (node->u.expression.pre_op == AST_LINK_UNKNOWN) {
-			fprintf(stderr, "[error] %s: global identifiers need chained identifier \n", __func__);
-			return NULL;
-		}
-		/* We currently only support $ctx (context) identifiers */
+		/*
+		 * We currently only support $ctx (context) and $app
+		 * identifiers.
+		 */
 		if (strncmp(node->u.expression.u.identifier,
-				"$ctx", strlen("$ctx")) != 0) {
-			fprintf(stderr, "[error] %s: \"%s\" global identifier is unknown. Only \"$ctx\" currently implemented.\n", __func__, node->u.expression.u.identifier);
+				"$ctx.", strlen("$ctx.")) != 0
+			&& strncmp(node->u.expression.u.identifier,
+				"$app.", strlen("$app.")) != 0) {
+			fprintf(stderr, "[error] %s: \"%s\" global identifier is unknown. Only \"$ctx\" and \"$app\" are currently implemented.\n", __func__, node->u.expression.u.identifier);
 			return NULL;
 		}
-		next = node->u.expression.next;
-		if (!next) {
+		name = strchr(node->u.expression.u.identifier, '.');
+		if (!name) {
+			fprintf(stderr, "[error] %s: Expecting '.'\n", __func__);
+			return NULL;
+		}
+		name++;	/* Skip . */
+		if (!strlen(name)) {
 			fprintf(stderr, "[error] %s: Expecting a context name, e.g. \'$ctx.name\'.\n", __func__);
 			return NULL;
 		}
-		if (next->type != NODE_EXPRESSION) {
-			fprintf(stderr, "[error] %s: Expecting expression.\n", __func__);
-			return NULL;
-		}
-		if (next->u.expression.type != AST_EXP_IDENTIFIER) {
-			fprintf(stderr, "[error] %s: Expecting identifier.\n", __func__);
-			return NULL;
-		}
-		if (next->u.expression.pre_op != AST_LINK_UNKNOWN) {
-			fprintf(stderr, "[error] %s: dotted and dereferenced identifiers not supported after identifier\n", __func__);
-			return NULL;
-		}
-		return make_op_load_get_context_ref(next->u.expression.u.identifier,
+		return make_op_load_get_context_ref(node->u.expression.u.identifier,
 					side);
 	}
 	case AST_EXP_NESTED:

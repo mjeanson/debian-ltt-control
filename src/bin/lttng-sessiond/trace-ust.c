@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 - David Goulet <david.goulet@polymtl.ca>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -15,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +30,7 @@
 #include "trace-ust.h"
 #include "utils.h"
 #include "ust-app.h"
+#include "agent.h"
 
 /*
  * Match function for the events hash table lookup.
@@ -116,11 +117,45 @@ int trace_ust_ht_match_event(struct cds_lfht_node *node, const void *_key)
 	}
 
 	if (key->exclusion && event->exclusion) {
-		/* Both exclusions exist; check count followed by names. */
-		if (event->exclusion->count != key->exclusion->count ||
-				memcmp(event->exclusion->names, key->exclusion->names,
-					event->exclusion->count * LTTNG_SYMBOL_NAME_LEN) != 0) {
+		size_t i;
+
+		/* Check exclusion counts first. */
+		if (event->exclusion->count != key->exclusion->count) {
 			goto no_match;
+		}
+
+		/* Compare names individually. */
+		for (i = 0; i < event->exclusion->count; ++i) {
+			size_t j;
+		        bool found = false;
+			const char *name_ev =
+				LTTNG_EVENT_EXCLUSION_NAME_AT(
+					event->exclusion, i);
+
+			/*
+			 * Compare this exclusion name to all the key's
+			 * exclusion names.
+			 */
+			for (j = 0; j < key->exclusion->count; ++j) {
+				const char *name_key =
+					LTTNG_EVENT_EXCLUSION_NAME_AT(
+						key->exclusion, j);
+
+				if (!strncmp(name_ev, name_key,
+						LTTNG_SYMBOL_NAME_LEN)) {
+					/* Names match! */
+					found = true;
+					break;
+				}
+			}
+
+			/*
+			 * If the current exclusion name was not found amongst
+			 * the key's exclusion names, then there's no match.
+			 */
+			if (!found) {
+				goto no_match;
+			}
 		}
 	}
 	/* Match. */
@@ -360,6 +395,39 @@ error:
 }
 
 /*
+ * Validates an exclusion list.
+ *
+ * Returns 0 if valid, negative value if invalid.
+ */
+static int validate_exclusion(struct lttng_event_exclusion *exclusion)
+{
+	size_t i;
+	int ret = 0;
+
+	assert(exclusion);
+
+	for (i = 0; i < exclusion->count; ++i) {
+		size_t j;
+		const char *name_a =
+			LTTNG_EVENT_EXCLUSION_NAME_AT(exclusion, i);
+
+		for (j = 0; j < i; ++j) {
+			const char *name_b =
+				LTTNG_EVENT_EXCLUSION_NAME_AT(exclusion, j);
+
+			if (!strncmp(name_a, name_b, LTTNG_SYMBOL_NAME_LEN)) {
+				/* Match! */
+				ret = -1;
+				goto end;
+			}
+		}
+	}
+
+end:
+	return ret;
+}
+
+/*
  * Allocate and initialize a ust event. Set name and event type.
  * We own filter_expression, filter, and exclusion.
  *
@@ -374,6 +442,10 @@ struct ltt_ust_event *trace_ust_create_event(struct lttng_event *ev,
 	struct ltt_ust_event *lue;
 
 	assert(ev);
+
+	if (exclusion && validate_exclusion(exclusion)) {
+		goto error;
+	}
 
 	lue = zmalloc(sizeof(struct ltt_ust_event));
 	if (lue == NULL) {
@@ -447,7 +519,8 @@ error:
 }
 
 static
-int trace_ust_context_type_event_to_ust(enum lttng_event_context_type type)
+int trace_ust_context_type_event_to_ust(
+		enum lttng_event_context_type type)
 {
 	int utype;
 
@@ -474,6 +547,9 @@ int trace_ust_context_type_event_to_ust(enum lttng_event_context_type type)
 		} else {
 			utype = LTTNG_UST_CONTEXT_PERF_THREAD_COUNTER;
 		}
+		break;
+	case LTTNG_EVENT_CONTEXT_APP_CONTEXT:
+		utype = LTTNG_UST_CONTEXT_APP_CONTEXT;
 		break;
 	default:
 		utype = -1;
@@ -513,6 +589,15 @@ int trace_ust_match_context(struct ltt_ust_context *uctx,
 			return 0;
 		}
 		break;
+	case LTTNG_UST_CONTEXT_APP_CONTEXT:
+		assert(uctx->ctx.u.app_ctx.provider_name);
+		assert(uctx->ctx.u.app_ctx.ctx_name);
+		if (strcmp(uctx->ctx.u.app_ctx.provider_name,
+				ctx->u.app_ctx.provider_name) ||
+				strcmp(uctx->ctx.u.app_ctx.ctx_name,
+				ctx->u.app_ctx.ctx_name)) {
+			return 0;
+		}
 	default:
 		break;
 
@@ -528,7 +613,7 @@ int trace_ust_match_context(struct ltt_ust_context *uctx,
 struct ltt_ust_context *trace_ust_create_context(
 		struct lttng_event_context *ctx)
 {
-	struct ltt_ust_context *uctx;
+	struct ltt_ust_context *uctx = NULL;
 	int utype;
 
 	assert(ctx);
@@ -536,13 +621,13 @@ struct ltt_ust_context *trace_ust_create_context(
 	utype = trace_ust_context_type_event_to_ust(ctx->ctx);
 	if (utype < 0) {
 		ERR("Invalid UST context");
-		return NULL;
+		goto end;
 	}
 
 	uctx = zmalloc(sizeof(struct ltt_ust_context));
-	if (uctx == NULL) {
+	if (!uctx) {
 		PERROR("zmalloc ltt_ust_context");
-		goto error;
+		goto end;
 	}
 
 	uctx->ctx.ctx = (enum lttng_ust_context_type) utype;
@@ -554,14 +639,31 @@ struct ltt_ust_context *trace_ust_create_context(
 				LTTNG_UST_SYM_NAME_LEN);
 		uctx->ctx.u.perf_counter.name[LTTNG_UST_SYM_NAME_LEN - 1] = '\0';
 		break;
+	case LTTNG_UST_CONTEXT_APP_CONTEXT:
+	{
+		char *provider_name = NULL, *ctx_name = NULL;
+
+		provider_name = strdup(ctx->u.app_ctx.provider_name);
+		if (!provider_name) {
+			goto error;
+		}
+		uctx->ctx.u.app_ctx.provider_name = provider_name;
+
+		ctx_name = strdup(ctx->u.app_ctx.ctx_name);
+		if (!ctx_name) {
+			goto error;
+		}
+		uctx->ctx.u.app_ctx.ctx_name = ctx_name;
+		break;
+	}
 	default:
 		break;
 	}
 	lttng_ht_node_init_ulong(&uctx->node, (unsigned long) uctx->ctx.ctx);
-
+end:
 	return uctx;
-
 error:
+	trace_ust_destroy_context(uctx);
 	return NULL;
 }
 
@@ -860,7 +962,7 @@ static void destroy_context_rcu(struct rcu_head *head)
 	struct ltt_ust_context *ctx =
 		caa_container_of(node, struct ltt_ust_context, node);
 
-	free(ctx);
+	trace_ust_destroy_context(ctx);
 }
 
 /*
@@ -903,6 +1005,20 @@ void trace_ust_destroy_event(struct ltt_ust_event *event)
 	free(event->filter);
 	free(event->exclusion);
 	free(event);
+}
+
+/*
+ * Cleanup ust context structure.
+ */
+void trace_ust_destroy_context(struct ltt_ust_context *ctx)
+{
+	assert(ctx);
+
+	if (ctx->ctx.ctx == LTTNG_UST_CONTEXT_APP_CONTEXT) {
+		free(ctx->ctx.u.app_ctx.provider_name);
+		free(ctx->ctx.u.app_ctx.ctx_name);
+	}
+	free(ctx);
 }
 
 /*

@@ -16,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -33,7 +32,7 @@
 #define RANDOM_STRING_LEN	11
 
 /* Number of TAP tests in this file */
-#define NUM_TESTS 10
+#define NUM_TESTS 11
 
 /* For error.h */
 int lttng_opt_quiet = 1;
@@ -135,7 +134,9 @@ static void test_create_kernel_event(void)
 	struct lttng_event ev;
 
 	memset(&ev, 0, sizeof(ev));
-	strncpy(ev.name, get_random_string(), LTTNG_KERNEL_SYM_NAME_LEN);
+	ok(!lttng_strncpy(ev.name, get_random_string(),
+			LTTNG_KERNEL_SYM_NAME_LEN),
+		"Validate string length");
 	ev.type = LTTNG_EVENT_TRACEPOINT;
 	ev.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
 

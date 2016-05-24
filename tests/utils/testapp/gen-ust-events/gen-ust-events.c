@@ -15,7 +15,6 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <arpa/inet.h>
@@ -32,6 +31,7 @@
 #include <signal.h>
 #include <poll.h>
 #include <errno.h>
+#include "utils.h"
 
 #define TRACEPOINT_DEFINE
 #include "tp.h"
@@ -85,7 +85,7 @@ int main(int argc, char **argv)
 	char text[10] = "test";
 	double dbl = 2.0;
 	float flt = 2222.0;
-	int nr_iter = 100;
+	int nr_iter = 100, ret = 0;
 	useconds_t nr_usec = 0;
 	char *after_first_event_file_path = NULL;
 	char *before_last_event_file_path = NULL;
@@ -127,8 +127,14 @@ int main(int argc, char **argv)
 		 * that at least one tracepoint has been hit.
 		 */
 		create_file(after_first_event_file_path);
-		usleep(nr_usec);
+		if (nr_usec) {
+		        if (usleep_safe(nr_usec)) {
+				ret = -1;
+				goto end;
+			}
+		}
 	}
 
-	return 0;
+end:
+	exit(!ret ? EXIT_SUCCESS : EXIT_FAILURE);
 }

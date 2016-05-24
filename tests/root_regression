@@ -1,6 +1,8 @@
 regression/kernel/test_all_events
 regression/kernel/test_event_basic
 regression/kernel/test_syscall
+regression/kernel/test_clock_override
+regression/kernel/test_rotation_destroy_flush
 regression/tools/live/test_kernel
 regression/tools/live/test_lttng_kernel
 regression/tools/streaming/test_high_throughput_limits
@@ -12,4 +14,5 @@ regression/tools/filtering/test_invalid_filter
 regression/tools/filtering/test_unsupported_op
 regression/tools/filtering/test_valid_filter
 regression/tools/wildcard/test_event_wildcard
+regression/tools/metadata-regen/test_kernel
 regression/ust/test_event_perf

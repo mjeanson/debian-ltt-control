@@ -16,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #include <getopt.h>
 #include <signal.h>
 #include <stdio.h>
@@ -29,15 +28,16 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <config.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <byteswap.h>
 #include <inttypes.h>
+#include <stdbool.h>
 
 #include <version.h>
 #include <lttng/lttng.h>
 #include <common/common.h>
+#include <common/utils.h>
 
 #define DEFAULT_VIEWER "babeltrace"
 
@@ -205,27 +205,15 @@ static struct option long_options[] = {
 	{ NULL, 0, NULL, 0 },
 };
 
-static void usage(FILE *ofp)
+static void usage(void)
 {
-	fprintf(ofp, "LTTng Crash Trace Viewer " VERSION " - " VERSION_NAME "%s\n\n",
-		GIT_VERSION[0] == '\0' ? "" : " - " GIT_VERSION);
-	fprintf(ofp, "usage: lttng-crash [OPTIONS] FILE\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Options:\n");
-	fprintf(ofp, "  -V, --version              Show version.\n");
-	fprintf(ofp, "  -h, --help                 Show this help.\n");
-	fprintf(ofp, "      --list-options         Simple listing of lttng-crash options.\n");
-	fprintf(ofp, "  -v, --verbose              Increase verbosity.\n");
-	fprintf(ofp, "  -e, --viewer               Specify viewer and/or options to use. This will\n"
-		     "                             completely override the default viewers so please\n"
-		     "                             make sure to specify the full command. The trace\n"
-		     "                             directory paths appended at the end to the\n"
-		     "                             arguments.\n");
-	fprintf(ofp, "  -x, --extract PATH         Extract trace(s) to specified path. Don't view\n"
-		     "                             trace.\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Please see the lttng-crash(1) man page for full documentation.\n");
-	fprintf(ofp, "See http://lttng.org for updates, bug reports and news.\n");
+	int ret = utils_show_man_page(1, "lttng-crash");
+
+	if (ret) {
+		ERR("Cannot view man page lttng-crash(1)");
+		perror("exec");
+		exit(EXIT_FAILURE);
+	}
 }
 
 static void version(FILE *ofp)
@@ -270,7 +258,7 @@ static int parse_args(int argc, char **argv)
 	int opt, ret = 0;
 
 	if (argc < 2) {
-		usage(stderr);
+		usage();
 		exit(EXIT_FAILURE);
 	}
 
@@ -281,7 +269,7 @@ static int parse_args(int argc, char **argv)
 			ret = 1;
 			goto end;
 		case 'h':
-			usage(stdout);
+			usage();
 			ret = 1;
 			goto end;
 		case 'v':
@@ -303,7 +291,7 @@ static int parse_args(int argc, char **argv)
 			ret = 1;
 			goto end;
 		default:
-			usage(stderr);
+			ERR("Unknown command-line option");
 			goto error;
 		}
 	}
@@ -313,8 +301,8 @@ static int parse_args(int argc, char **argv)
 	}
 
 	/* No leftovers, or more than one input path, print usage and quit */
-	if ((argc - optind) == 0 || (argc - optind) > 1) {
-		usage(stderr);
+	if (argc - optind != 1) {
+		ERR("Command-line error: Specify exactly one input path");
 		goto error;
 	}
 
@@ -977,6 +965,7 @@ int extract_trace_recursive(const char *output_path,
 	DIR *dir;
 	int dir_fd, ret = 0, closeret;
 	struct dirent *entry;
+	size_t path_len;
 	int has_warning = 0;
 
 	/* Open directory */
@@ -985,6 +974,9 @@ int extract_trace_recursive(const char *output_path,
 		PERROR("Cannot open '%s' path", input_path);
 		return -1;
 	}
+
+	path_len = strlen(input_path);
+
 	dir_fd = dirfd(dir);
 	if (dir_fd < 0) {
 		PERROR("dirfd");
@@ -992,13 +984,34 @@ int extract_trace_recursive(const char *output_path,
 	}
 
 	while ((entry = readdir(dir))) {
+		struct stat st;
+		size_t name_len;
+		char filename[PATH_MAX];
+
 		if (!strcmp(entry->d_name, ".")
 				|| !strcmp(entry->d_name, "..")) {
 			continue;
 		}
-		switch (entry->d_type) {
-		case DT_DIR:
-		{
+
+		name_len = strlen(entry->d_name);
+		if (path_len + name_len + 2 > sizeof(filename)) {
+			ERR("Failed to remove file: path name too long (%s/%s)",
+				input_path, entry->d_name);
+			continue;
+		}
+
+		if (snprintf(filename, sizeof(filename), "%s/%s",
+				input_path, entry->d_name) < 0) {
+			ERR("Failed to format path.");
+			continue;
+		}
+
+		if (stat(filename, &st)) {
+			PERROR("stat");
+			continue;
+		}
+
+		if (S_ISDIR(st.st_mode)) {
 			char output_subpath[PATH_MAX];
 			char input_subpath[PATH_MAX];
 
@@ -1030,10 +1043,7 @@ int extract_trace_recursive(const char *output_path,
 			if (ret) {
 				has_warning = 1;
 			}
-			break;
-		}
-		case DT_REG:
-		case DT_LNK:
+		} else if (S_ISREG(st.st_mode) || S_ISLNK(st.st_mode)) {
 			if (!strcmp(entry->d_name, "metadata")) {
 				ret = extract_one_trace(output_path,
 					input_path);
@@ -1043,9 +1053,7 @@ int extract_trace_recursive(const char *output_path,
 					has_warning = 1;
 				}
 			}
-			/* Ignore other files */
-			break;
-		default:
+		} else {
 			has_warning = 1;
 			goto end;
 		}
@@ -1063,6 +1071,7 @@ int delete_dir_recursive(const char *path)
 {
 	DIR *dir;
 	int dir_fd, ret = 0, closeret;
+	size_t path_len;
 	struct dirent *entry;
 
 	/* Open trace directory */
@@ -1072,6 +1081,9 @@ int delete_dir_recursive(const char *path)
 		ret = -errno;
 	        goto end;
 	}
+
+	path_len = strlen(path);
+
 	dir_fd = dirfd(dir);
 	if (dir_fd < 0) {
 		PERROR("dirfd");
@@ -1080,13 +1092,34 @@ int delete_dir_recursive(const char *path)
 	}
 
 	while ((entry = readdir(dir))) {
+		struct stat st;
+		size_t name_len;
+		char filename[PATH_MAX];
+
 		if (!strcmp(entry->d_name, ".")
 				|| !strcmp(entry->d_name, "..")) {
 			continue;
 		}
-		switch (entry->d_type) {
-		case DT_DIR:
-		{
+
+		name_len = strlen(entry->d_name);
+		if (path_len + name_len + 2 > sizeof(filename)) {
+			ERR("Failed to remove file: path name too long (%s/%s)",
+				path, entry->d_name);
+			continue;
+		}
+
+		if (snprintf(filename, sizeof(filename), "%s/%s",
+				path, entry->d_name) < 0) {
+			ERR("Failed to format path.");
+			continue;
+		}
+
+		if (stat(filename, &st)) {
+			PERROR("stat");
+			continue;
+		}
+
+		if (S_ISDIR(st.st_mode)) {
 			char *subpath = zmalloc(PATH_MAX);
 
 			if (!subpath) {
@@ -1107,16 +1140,13 @@ int delete_dir_recursive(const char *path)
 				/* Error occured, abort traversal. */
 				goto end;
 			}
-			break;
-		}
-		case DT_REG:
+		} else if (S_ISREG(st.st_mode)) {
 			ret = unlinkat(dir_fd, entry->d_name, 0);
 			if (ret) {
 				PERROR("Unlinking '%s'", entry->d_name);
 				goto end;
 			}
-			break;
-		default:
+		} else {
 			ret = -EINVAL;
 			goto end;
 		}
@@ -1173,7 +1203,8 @@ int view_trace(const char *viewer_path, const char *trace_path)
  */
 int main(int argc, char *argv[])
 {
-	int ret, has_warning = 0;
+	int ret;
+	bool has_warning = false;
 	const char *output_path = NULL;
 	char tmppath[] = "/tmp/lttng-crash-XXXXXX";
 
@@ -1181,9 +1212,10 @@ int main(int argc, char *argv[])
 
 	ret = parse_args(argc, argv);
 	if (ret > 0) {
-		exit(EXIT_SUCCESS);
+		goto end;
 	} else if (ret < 0) {
-		exit(EXIT_FAILURE);
+		has_warning = true;
+		goto end;
 	}
 
 	if (opt_output_path) {
@@ -1191,35 +1223,38 @@ int main(int argc, char *argv[])
 		ret = mkdir(output_path, S_IRWXU | S_IRWXG);
 		if (ret) {
 			PERROR("mkdir");
-			exit(EXIT_FAILURE);
+			has_warning = true;
+			goto end;
 		}
 	} else {
 		output_path = mkdtemp(tmppath);
 		if (!output_path) {
 			PERROR("mkdtemp");
-			exit(EXIT_FAILURE);
+			has_warning = true;
+			goto end;
 		}
 	}
 
 	ret = extract_trace_recursive(output_path, input_path);
 	if (ret < 0) {
-		exit(EXIT_FAILURE);
+		has_warning = true;
+		goto end;
 	} else if (ret > 0) {
-		has_warning = 1;
+		/* extract_trace_recursive reported a warning. */
+		has_warning = true;
 	}
 	if (!opt_output_path) {
 		/* View trace */
 		ret = view_trace(opt_viewer_path, output_path);
-		if (ret)
-			has_warning = 1;
-
+		if (ret) {
+			has_warning = true;
+		}
 		/* unlink temporary trace */
 		ret = delete_dir_recursive(output_path);
 		if (ret) {
-			has_warning = 1;
+			has_warning = true;
 		}
 	}
-	if (has_warning)
-		exit(EXIT_FAILURE);
-	exit(EXIT_SUCCESS);
+end:
+	exit(has_warning ? EXIT_FAILURE : EXIT_SUCCESS);
 }

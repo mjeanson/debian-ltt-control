@@ -15,7 +15,6 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <common/bitfield.h>
 #include <common/common.h>
@@ -83,7 +82,7 @@ int syscall_init_table(void)
 
 			/* Double memory size. */
 			new_nbmem = max(index, nbmem << 1);
-			if (new_nbmem < nbmem) {
+			if (new_nbmem > (SIZE_MAX / sizeof(*new_list))) {
 				/* Overflow, stop everything, something went really wrong. */
 				ERR("Syscall listing memory size overflow. Stopping");
 				free(syscall_table);
@@ -109,8 +108,13 @@ int syscall_init_table(void)
 		}
 		syscall_table[index].index = index;
 		syscall_table[index].bitness = bitness;
-		strncpy(syscall_table[index].name, name,
-				sizeof(syscall_table[index].name));
+		if (lttng_strncpy(syscall_table[index].name, name,
+				sizeof(syscall_table[index].name))) {
+			ret = -EINVAL;
+			free(syscall_table);
+			syscall_table = NULL;
+			goto error;
+		}
 		/*
 		DBG("Syscall name '%s' at index %" PRIu32 " of bitness %u",
 				syscall_table[index].name,

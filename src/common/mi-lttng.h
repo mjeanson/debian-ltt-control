@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2014 - Jonathan Rajotte <jonathan.r.julien@gmail.com>
  *                    - Olivier Cotte <olivier.cotte@polymtl.ca>
+ * Copyright (C) 2016 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License, version 2 only, as
@@ -23,7 +24,7 @@
 
 #include <common/error.h>
 #include <common/macros.h>
-#include <common/config/config.h>
+#include <common/config/session-config.h>
 #include <lttng/lttng.h>
 
 /* Don't want to reference snapshot-internal.h here */
@@ -39,13 +40,13 @@ struct mi_writer {
  * Version information for the machine interface.
  */
 struct mi_lttng_version {
-	char version[NAME_MAX]; /* Version number of package */
+	char version[LTTNG_NAME_MAX]; /* Version number of package */
 	uint32_t version_major; /* LTTng-Tools major version number */
 	uint32_t version_minor; /* LTTng-Tools minor version number */
 	uint32_t version_patchlevel; /* LTTng-Tools patchlevel version number */
-	char version_commit[NAME_MAX]; /* Commit hash of the current version */
-	char version_name[NAME_MAX];
-	char package_url[NAME_MAX]; /* Define to the home page for this package. */
+	char version_commit[LTTNG_NAME_MAX]; /* Commit hash of the current version */
+	char version_name[LTTNG_NAME_MAX];
+	char package_url[LTTNG_NAME_MAX]; /* Define to the home page for this package. */
 };
 
 /* Strings related to command */
@@ -61,6 +62,8 @@ extern const char * const mi_lttng_element_command_enable_channels;
 extern const char * const mi_lttng_element_command_enable_event;
 extern const char * const mi_lttng_element_command_list;
 extern const char * const mi_lttng_element_command_load;
+extern const char * const mi_lttng_element_command_metadata;
+extern const char * const mi_lttng_element_command_metadata_action;
 extern const char * const mi_lttng_element_command_name;
 extern const char * const mi_lttng_element_command_output;
 extern const char * const mi_lttng_element_command_save;
@@ -91,11 +94,6 @@ extern const char * const mi_lttng_element_version_web;
 /* String related to a lttng_event_field */
 extern const char * const mi_lttng_element_event_field;
 extern const char * const mi_lttng_element_event_fields;
-
-/* String related to lttng_event_context */
-extern const char * const mi_lttng_context_type_perf_counter;
-extern const char * const mi_lttng_context_type_perf_cpu_counter;
-extern const char * const mi_lttng_context_type_perf_thread_counter;
 
 /* String related to lttng_event_perf_counter_ctx */
 extern const char * const mi_lttng_element_perf_counter_context;
@@ -185,6 +183,9 @@ extern const char * const mi_lttng_element_snapshot_n_ptr;
 extern const char * const mi_lttng_element_snapshot_session_name;
 extern const char * const mi_lttng_element_snapshots;
 
+/* String related to track/untrack command */
+const char * const mi_lttng_element_track_untrack_all_wildcard;
+
 /* Utility string function  */
 const char *mi_lttng_loglevel_string(int value, enum lttng_domain_type domain);
 const char *mi_lttng_logleveltype_string(enum lttng_loglevel_type value);
@@ -192,11 +193,6 @@ const char *mi_lttng_eventfieldtype_string(enum lttng_event_field_type value);
 const char *mi_lttng_domaintype_string(enum lttng_domain_type value);
 const char *mi_lttng_buffertype_string(enum lttng_buffer_type value);
 const char *mi_lttng_calibratetype_string(enum lttng_calibrate_type val);
-
-/* String related to track/untrack command */
-const char * const mi_lttng_element_track_untrack_targets;
-const char * const mi_lttng_element_track_untrack_pid_target;
-const char * const mi_lttng_element_track_untrack_all_wildcard;
 
 /*
  * Create an instance of a machine interface writer.

@@ -16,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #define __USE_LINUX_IOCTL_DEFS
 #include <sys/ioctl.h>
@@ -208,6 +207,11 @@ int kernctl_untrack_pid(int fd, int pid)
 int kernctl_list_tracker_pids(int fd)
 {
 	return ioctl(fd, LTTNG_KERNEL_SESSION_LIST_TRACKER_PIDS);
+}
+
+int kernctl_session_metadata_regenerate(int fd)
+{
+	return ioctl(fd, LTTNG_KERNEL_SESSION_METADATA_REGEN);
 }
 
 int kernctl_create_stream(int fd)
@@ -407,6 +411,12 @@ int kernctl_buffer_flush(int fd)
 	return ioctl(fd, RING_BUFFER_FLUSH);
 }
 
+/* returns the version of the metadata. */
+int kernctl_get_metadata_version(int fd, uint64_t *version)
+{
+	return ioctl(fd, RING_BUFFER_GET_METADATA_VERSION, version);
+}
+
 
 /* Buffer operations */
 
@@ -532,4 +542,16 @@ int kernctl_get_stream_id(int fd, uint64_t *stream_id)
 int kernctl_get_current_timestamp(int fd, uint64_t *ts)
 {
 	return ioctl(fd, LTTNG_RING_BUFFER_GET_CURRENT_TIMESTAMP, ts);
+}
+
+/* Returns the packet sequence number of the current sub-buffer. */
+int kernctl_get_sequence_number(int fd, uint64_t *seq)
+{
+	return ioctl(fd, LTTNG_RING_BUFFER_GET_SEQ_NUM, seq);
+}
+
+/* Returns the stream instance id. */
+int kernctl_get_instance_id(int fd, uint64_t *id)
+{
+	return ioctl(fd, LTTNG_RING_BUFFER_INSTANCE_ID, id);
 }

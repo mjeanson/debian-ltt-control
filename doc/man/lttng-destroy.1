@@ -1,0 +1,302 @@
+'\" t
+.\"     Title: lttng-destroy
+.\"    Author: [see the "AUTHORS" section]
+.\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
+.\"      Date: 05/20/2016
+.\"    Manual: LTTng Manual
+.\"    Source: LTTng 2.8.0
+.\"  Language: English
+.\"
+.TH "LTTNG\-DESTROY" "1" "05/20/2016" "LTTng 2\&.8\&.0" "LTTng Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+lttng-destroy \- Destroy an LTTng tracing session
+.SH "SYNOPSIS"
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBdestroy\fR [\fB--all\fR | \fISESSION\fR]
+.fi
+.SH "DESCRIPTION"
+.sp
+The \fBlttng destroy\fR command destroys one or more tracing sessions\&.
+.sp
+If no options are specified, the current tracing session is destroyed (see \fBlttng-create\fR(1) for more information about the current tracing session)\&.
+.sp
+If \fISESSION\fR is specified, the existing tracing session named \fISESSION\fR is destroyed\&. \fBlttng list\fR outputs all the existing tracing sessions (see \fBlttng-list\fR(1))\&.
+.sp
+If the \fB--all\fR option is used, \fBall\fR the tracing sessions, as listed in the output of \fBlttng list\fR, are destroyed\&.
+.sp
+Destroying a tracing session stops any tracing running within the latter\&.
+.sp
+Destroying a tracing session does not destroy the recorded trace data, if any; it frees resources acquired by the session daemon and tracer side, making sure to flush all trace data\&.
+.SH "OPTIONS"
+.sp
+General options are described in \fBlttng\fR(1)\&.
+.PP
+\fB-a\fR, \fB--all\fR
+.RS 4
+Destroy all tracing sessions\&.
+.RE
+.SS "Program information"
+.PP
+\fB-h\fR, \fB--help\fR
+.RS 4
+Show command help\&.
+.sp
+This option, like
+\fBlttng-help\fR(1), attempts to launch
+\fB/usr/bin/man\fR
+to view the command\(cqs man page\&. The path to the man pager can be overridden by the
+\fBLTTNG_MAN_BIN_PATH\fR
+environment variable\&.
+.RE
+.PP
+\fB--list-options\fR
+.RS 4
+List available command options\&.
+.RE
+.SH "ENVIRONMENT VARIABLES"
+.PP
+\fBLTTNG_ABORT_ON_ERROR\fR
+.RS 4
+Set to 1 to abort the process after the first error is encountered\&.
+.RE
+.PP
+\fBLTTNG_HOME\fR
+.RS 4
+Overrides the
+\fB$HOME\fR
+environment variable\&. Useful when the user running the commands has a non\-writable home directory\&.
+.RE
+.PP
+\fBLTTNG_MAN_BIN_PATH\fR
+.RS 4
+Absolute path to the man pager to use for viewing help information about LTTng commands (using
+\fBlttng-help\fR(1)
+or
+\fBlttng COMMAND --help\fR)\&.
+.RE
+.PP
+\fBLTTNG_SESSION_CONFIG_XSD_PATH\fR
+.RS 4
+Path in which the
+\fBsession.xsd\fR
+session configuration XML schema may be found\&.
+.RE
+.PP
+\fBLTTNG_SESSIOND_PATH\fR
+.RS 4
+Full session daemon binary path\&.
+.sp
+The
+\fB--sessiond-path\fR
+option has precedence over this environment variable\&.
+.RE
+.sp
+Note that the \fBlttng-create\fR(1) command can spawn an LTTng session daemon automatically if none is running\&. See \fBlttng-sessiond\fR(8) for the environment variables influencing the execution of the session daemon\&.
+.SH "FILES"
+.PP
+\fB$LTTNG_HOME/.lttngrc\fR
+.RS 4
+User LTTng runtime configuration\&.
+.sp
+This is where the per\-user current tracing session is stored between executions of
+\fBlttng\fR(1)\&. The current tracing session can be set with
+\fBlttng-set-session\fR(1)\&. See
+\fBlttng-create\fR(1)
+for more information about tracing sessions\&.
+.RE
+.PP
+\fB$LTTNG_HOME/lttng-traces\fR
+.RS 4
+Default output directory of LTTng traces\&. This can be overridden with the
+\fB--output\fR
+option of the
+\fBlttng-create\fR(1)
+command\&.
+.RE
+.PP
+\fB$LTTNG_HOME/.lttng\fR
+.RS 4
+User LTTng runtime and configuration directory\&.
+.RE
+.PP
+\fB$LTTNG_HOME/.lttng/sessions\fR
+.RS 4
+Default location of saved user tracing sessions (see
+\fBlttng-save\fR(1)
+and
+\fBlttng-load\fR(1))\&.
+.RE
+.PP
+\fB/usr/local/etc/lttng/sessions\fR
+.RS 4
+System\-wide location of saved tracing sessions (see
+\fBlttng-save\fR(1)
+and
+\fBlttng-load\fR(1))\&.
+.RE
+.if n \{\
+.sp
+.\}
+.RS 4
+.it 1 an-trap
+.nr an-no-space-flag 1
+.nr an-break-flag 1
+.br
+.ps +1
+\fBNote\fR
+.ps -1
+.br
+.sp
+\fB$LTTNG_HOME\fR defaults to \fB$HOME\fR when not explicitly set\&.
+.sp .5v
+.RE
+.SH "EXIT STATUS"
+.PP
+\fB0\fR
+.RS 4
+Success
+.RE
+.PP
+\fB1\fR
+.RS 4
+Command error
+.RE
+.PP
+\fB2\fR
+.RS 4
+Undefined command
+.RE
+.PP
+\fB3\fR
+.RS 4
+Fatal error
+.RE
+.PP
+\fB4\fR
+.RS 4
+Command warning (something went wrong during the command)
+.RE
+.SH "BUGS"
+.sp
+If you encounter any issue or usability problem, please report it on the LTTng bug tracker <https://bugs.lttng.org/projects/lttng-tools>\&.
+.SH "RESOURCES"
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+LTTng project website <http://lttng.org>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+LTTng documentation <http://lttng.org/docs>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Git repositories <http://git.lttng.org>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+GitHub organization <http://github.com/lttng>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Continuous integration <http://ci.lttng.org/>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Mailing list <http://lists.lttng.org>
+for support and development:
+\fBlttng-dev@lists.lttng.org\fR
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+IRC channel <irc://irc.oftc.net/lttng>:
+\fB#lttng\fR
+on
+\fBirc.oftc.net\fR
+.RE
+.SH "COPYRIGHTS"
+.sp
+This program is part of the LTTng\-tools project\&.
+.sp
+LTTng\-tools is distributed under the GNU General Public License version 2 <http://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html>\&. See the \fBLICENSE\fR <https://github.com/lttng/lttng-tools/blob/master/LICENSE> file for details\&.
+.SH "THANKS"
+.sp
+Special thanks to Michel Dagenais and the DORSAL laboratory <http://www.dorsal.polymtl.ca/> at \('Ecole Polytechnique de Montr\('eal for the LTTng journey\&.
+.sp
+Also thanks to the Ericsson teams working on tracing which helped us greatly with detailed bug reports and unusual test cases\&.
+.SH "AUTHORS"
+.sp
+LTTng\-tools was originally written by Mathieu Desnoyers, Julien Desfossez, and David Goulet\&. More people have since contributed to it\&.
+.sp
+LTTng\-tools is currently maintained by J\('er\('emie Galarneau <mailto:jeremie.galarneau@efficios.com>\&.
+.SH "SEE ALSO"
+.sp
+\fBlttng-create\fR(1), \fBlttng-set-session\fR(1), \fBlttng\fR(1)

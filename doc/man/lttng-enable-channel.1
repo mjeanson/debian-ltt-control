@@ -1,0 +1,876 @@
+'\" t
+.\"     Title: lttng-enable-channel
+.\"    Author: [see the "AUTHORS" section]
+.\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
+.\"      Date: 05/20/2016
+.\"    Manual: LTTng Manual
+.\"    Source: LTTng 2.8.0
+.\"  Language: English
+.\"
+.TH "LTTNG\-ENABLE\-CHANN" "1" "05/20/2016" "LTTng 2\&.8\&.0" "LTTng Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+lttng-enable-channel \- Create or enable LTTng channels
+.SH "SYNOPSIS"
+.sp
+Create a Linux kernel channel:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBenable\-channel\fR \fB--kernel\fR
+      [\fB--discard\fR | \fB--overwrite\fR] [\fB--output\fR=(\fBmmap\fR | \fBsplice\fR)]
+      [\fB--subbuf-size\fR=\fISIZE\fR] [\fB--num-subbuf\fR=\fICOUNT\fR]
+      [\fB--switch-timer\fR=\fIPERIODUS\fR] [\fB--read-timer\fR=\fIPERIODUS\fR]
+      [\fB--tracefile-size\fR=\fISIZE\fR] [\fB--tracefile-count\fR=\fICOUNT\fR]
+      [\fB--session\fR=\fISESSION\fR] \fICHANNEL\fR
+.fi
+.sp
+Create a user space channel:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBenable\-channel\fR \fB--userspace\fR
+      [\fB--discard\fR | \fB--overwrite\fR] [\fB--buffers-pid\fR]
+      [\fB--subbuf-size\fR=\fISIZE\fR] [\fB--num-subbuf\fR=\fICOUNT\fR]
+      [\fB--switch-timer\fR=\fIPERIODUS\fR] [\fB--read-timer\fR=\fIPERIODUS\fR]
+      [\fB--tracefile-size\fR=\fISIZE\fR] [\fB--tracefile-count\fR=\fICOUNT\fR]
+      [\fB--session\fR=\fISESSION\fR] \fICHANNEL\fR
+.fi
+.sp
+Enable existing channel(s):
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBenable\-channel\fR (\fB--userspace\fR | \fB--kernel\fR)
+      [\fB--session\fR=\fISESSION\fR] \fICHANNEL\fR[,\fICHANNEL\fR]\&...
+.fi
+.SH "DESCRIPTION"
+.sp
+The \fBlttng enable-channel\fR command can create a new channel, or enable one or more existing and disabled ones\&.
+.sp
+A channel is the owner of sub\-buffers holding recorded events\&. Event, rules, when created using \fBlttng-enable-event\fR(1), are always assigned to a channel\&. When creating a new channel, many parameters related to those sub\-buffers can be fine\-tuned\&. They are described in the subsections below\&.
+.sp
+When \fICHANNEL\fR does not name an existing channel, a channel named \fICHANNEL\fR is created\&. Otherwise, the disabled channel named \fICHANNEL\fR is enabled\&.
+.sp
+Note that the \fBlttng-enable-event\fR(1) command can automatically create default channels when no channel exist\&.
+.sp
+A channel is always contained in a tracing session (see \fBlttng-create\fR(1) for creating a tracing session)\&. The session in which a channel is created using \fBlttng enable-channel\fR can be specified using the \fB--session\fR option\&. If the \fB--session\fR option is omitted, the current tracing session is targeted\&.
+.sp
+Existing enabled channels can be disabled using \fBlttng-disable-channel\fR(1)\&. Channels of a given session can be listed using \fBlttng-list\fR(1)\&.
+.sp
+See the \fILIMITATIONS\fR section below for a list of limitations of this command to consider\&.
+.SS "Event loss modes"
+.sp
+LTTng tracers are non\-blocking: when no empty sub\-buffer exists, losing events is acceptable when the alternative would be to cause substantial delays in the instrumented application\(cqs execution\&.
+.sp
+LTTng privileges performance over integrity, aiming at perturbing the traced system as little as possible in order to make tracing of subtle race conditions and rare interrupt cascades possible\&.
+.sp
+When it comes to losing events because no empty sub\-buffer is available, the channel\(cqs event loss mode, specified by one of the \fB--discard\fR and \fB--overwrite\fR options, determines what to do amongst:
+.PP
+Discard
+.RS 4
+Drop the newest events until a sub\-buffer is released\&.
+.RE
+.PP
+Overwrite
+.RS 4
+Clear the sub\-buffer containing the oldest recorded events and start recording the newest events there\&. This mode is sometimes called
+\fIflight recorder mode\fR
+because it behaves like a flight recorder: always keep a fixed amount of the latest data\&.
+.RE
+.sp
+Which mechanism to choose depends on the context: prioritize the newest or the oldest events in the ring buffer?
+.sp
+Beware that, in overwrite mode (\fB--overwrite\fR option), a whole sub\-buffer is abandoned as soon as a new event doesn\(cqt find an empty sub\-buffer, whereas in discard mode (\fB--discard\fR option), only the event that doesn\(cqt fit is discarded\&.
+.sp
+Also note that a count of lost events is incremented and saved in the trace itself when an event is lost in discard mode, whereas no information is kept when a sub\-buffer gets overwritten before being committed\&.
+.sp
+The probability of losing events, if it is experience in a given context, can be reduced by fine\-tuning the sub\-buffers count and size (see next subsection)\&.
+.SS "Sub\-buffers count and size"
+.sp
+The \fB--num-subbuf\fR and \fB--subbuf-size\fR options respectively set the number of sub\-buffers and their individual size when creating a new channel\&.
+.sp
+Note that there is a noticeable tracer\(cqs CPU overhead introduced when switching sub\-buffers (marking a full one as consumable and switching to an empty one for the following events to be recorded)\&. Knowing this, the following list presents a few practical situations along with how to configure sub\-buffers for them when creating a channel in overwrite mode (\fB--overwrite\fR option):
+.PP
+High event throughput
+.RS 4
+In general, prefer bigger sub\-buffers to lower the risk of losing events\&. Having bigger sub\-buffers also ensures a lower sub\-buffer switching frequency\&. The number of sub\-buffers is only meaningful if the channel is enabled in overwrite mode: in this case, if a sub\-buffer overwrite happens, the other sub\-buffers are left unaltered\&.
+.RE
+.PP
+Low event throughput
+.RS 4
+In general, prefer smaller sub\-buffers since the risk of losing events is already low\&. Since events happen less frequently, the sub\-buffer switching frequency should remain low and thus the tracer\(cqs overhead should not be a problem\&.
+.RE
+.PP
+Low memory system
+.RS 4
+If the target system has a low memory limit, prefer fewer first, then smaller sub\-buffers\&. Even if the system is limited in memory, it is recommended to keep the sub\-buffers as big as possible to avoid a high sub\-buffer switching frequency\&.
+.RE
+.sp
+In discard mode (\fB--discard\fR option), the sub\-buffers count parameter is pointless: using two sub\-buffers and setting their size according to the requirements of the context is fine\&.
+.SS "Switch and read timers"
+.sp
+When a channel\(cqs switch timer fires, a sub\-buffer switch happens\&. This timer may be used to ensure that event data is consumed and committed to trace files periodically in case of a low event throughput\&.
+.sp
+It\(cqs also convenient when big sub\-buffers are used to cope with sporadic high event throughput, even if the throughput is normally lower\&.
+.sp
+By default, a notification mechanism is used to signal a full sub\-buffer so that it can be consumed\&. When such notifications must be avoided, for example in real\-time applications, the channel\(cqs read timer can be used instead\&. When the read timer fires, sub\-buffers are checked for consumption when they are full\&.
+.SS "Buffering scheme"
+.sp
+In the user space tracing domain, two buffering schemes are available when creating a channel:
+.PP
+Per\-process buffering (\fB--buffers-pid\fR option)
+.RS 4
+Keep one ring buffer per process\&.
+.RE
+.PP
+Per\-user buffering (\fB--buffers-uid\fR option)
+.RS 4
+Keep one ring buffer for all the processes of a single user\&.
+.RE
+.sp
+The per\-process buffering scheme consumes more memory than the per\-user option if more than one process is instrumented for LTTng\-UST\&. However, per\-process buffering ensures that one process having a high event throughput won\(cqt fill all the shared sub\-buffers, only its own\&.
+.sp
+The Linux kernel tracing domain only has one available buffering scheme which is to use a single ring buffer for the whole system (\fB--buffers-global\fR option)\&.
+.SS "Trace files limit and size"
+.sp
+By default, trace files can grow as large as needed\&. The maximum size of each trace file written by a channel can be set on creation using the \fB--tracefile-size\fR option\&. When such a trace file\(cqs size reaches the channel\(cqs fixed maximum size, another trace file is created to hold the next recorded events\&. A file count is appended to each trace file name in this case\&.
+.sp
+If the \fB--tracefile-size\fR option is used, the maximum number of created trace files is unlimited\&. To limit them, the \fB--tracefile-count\fR option can be used\&. This option is always used in conjunction with the \fB--tracefile-size\fR option\&.
+.sp
+For example, consider this command:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+lttng enable\-channel \-\-kernel \-\-tracefile\-size=4096 \e
+                     \-\-tracefile\-count=32 my\-channel
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+Here, for each stream, the maximum size of each trace file is 4 kiB and there can be a maximum of 32 different files\&. When there is no space left in the last file, \fItrace file rotation\fR happens: the first file is cleared and new sub\-buffers containing events are written there\&.
+.SH "OPTIONS"
+.sp
+General options are described in \fBlttng\fR(1)\&.
+.SS "Domain"
+.sp
+One of:
+.PP
+\fB-k\fR, \fB--kernel\fR
+.RS 4
+Enable channel in the Linux kernel domain\&.
+.RE
+.PP
+\fB-u\fR, \fB--userspace\fR
+.RS 4
+Enable channel in the user space domain\&.
+.RE
+.SS "Target"
+.PP
+\fB-s\fR, \fB--session\fR=\fISESSION\fR
+.RS 4
+Create or enable channel in the tracing session named
+\fISESSION\fR
+instead of the current tracing session\&.
+.RE
+.SS "Event loss mode"
+.sp
+One of:
+.PP
+\fB--discard\fR
+.RS 4
+Discard events when sub\-buffers are full (default)\&.
+.RE
+.PP
+\fB--overwrite\fR
+.RS 4
+Flight recorder mode: always keep a fixed amount of the latest data\&.
+.RE
+.SS "Sub\-buffers"
+.PP
+\fB--num-subbuf\fR=\fICOUNT\fR
+.RS 4
+Use
+\fICOUNT\fR
+sub\-buffers\&. Rounded up to the next power of two\&.
+.sp
+Default values:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--userspace\fR
+and
+\fB--buffers-uid\fR
+options: 4
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--userspace\fR
+and
+\fB--buffers-pid\fR
+options: 4
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--kernel\fR
+option: 4
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBmetadata\fR
+channel: 2
+.RE
+.RE
+.PP
+\fB--subbuf-size\fR=\fISIZE\fR
+.RS 4
+Set the individual size of sub\-buffers to
+\fISIZE\fR
+bytes\&. The
+\fBk\fR
+(kiB),
+\fBM\fR
+(MiB), and
+\fBG\fR
+(GiB) suffixes are supported\&. Rounded up to the next power of two\&.
+.sp
+The minimum sub\-buffer size, for each tracer, is the maximum value between the default below and the system\(cqs page size\&. The following command shows the current system\(cqs page size:
+\fBgetconf PAGE_SIZE\fR\&.
+.sp
+Default values:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--userspace\fR
+and
+\fB--buffers-uid\fR
+options: 131072
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--userspace\fR
+and
+\fB--buffers-pid\fR
+options: 4096
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--kernel\fR
+option: 262144
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBmetadata\fR
+channel: 4096
+.RE
+.RE
+.PP
+\fB--output\fR=\fITYPE\fR
+.RS 4
+Set channel\(cqs output type to
+\fITYPE\fR\&.
+.sp
+Available types:
+\fBmmap\fR
+(always available) and
+\fBsplice\fR
+(only available with the
+\fB--kernel\fR
+option)\&.
+.sp
+Default values:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--userspace\fR
+and
+\fB--buffers-uid\fR
+options:
+\fBmmap\fR
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--userspace\fR
+and
+\fB--buffers-pid\fR
+options:
+\fBmmap\fR
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--kernel\fR
+option:
+\fBsplice\fR
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBmetadata\fR
+channel:
+\fBmmap\fR
+.RE
+.RE
+.SS "Buffering scheme"
+.sp
+One of:
+.PP
+\fB--buffers-global\fR
+.RS 4
+Use shared sub\-buffers for the whole system (only available with the
+\fB--kernel\fR
+option)\&.
+.RE
+.PP
+\fB--buffers-pid\fR
+.RS 4
+Use different sub\-buffers for each traced process (only available with the the
+\fB--userspace\fR
+option)\&. This is the default buffering scheme for user space channels\&.
+.RE
+.PP
+\fB--buffers-uid\fR
+.RS 4
+Use shared sub\-buffers for all the processes of the user running the command (only available with the
+\fB--userspace\fR
+option)\&.
+.RE
+.SS "Trace files"
+.PP
+\fB--tracefile-count\fR=\fICOUNT\fR
+.RS 4
+Limit the number of trace files created by this channel to
+\fICOUNT\fR\&. 0 means unlimited\&. Default: 0\&.
+.sp
+Use this option in conjunction with the
+\fB--tracefile-size\fR
+option\&.
+.sp
+The file count within a stream is appended to each created trace file\&. If
+\fICOUNT\fR
+files are created and more events need to be recorded, the first trace file of the stream is cleared and used again\&.
+.RE
+.PP
+\fB--tracefile-size\fR=\fISIZE\fR
+.RS 4
+Set the maximum size of each trace file written by this channel within a stream to
+\fISIZE\fR
+bytes\&. 0 means unlimited\&. Default: 0\&.
+.sp
+Note: traces generated with this option may inaccurately report discarded events as of CTF 1\&.8\&.
+.RE
+.SS "Timers"
+.PP
+\fB--read-timer\fR
+.RS 4
+Set the channel\(cqs read timer\(cqs period to
+\fIPERIODUS\fR
+\(mcs\&. 0 means a disabled read timer\&.
+.sp
+Default values:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--userspace\fR
+and
+\fB--buffers-uid\fR
+options: 0
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--userspace\fR
+and
+\fB--buffers-pid\fR
+options: 0
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--kernel\fR
+option: 200000
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBmetadata\fR
+channel: 0
+.RE
+.RE
+.PP
+\fB--switch-timer\fR=\fIPERIODUS\fR
+.RS 4
+Set the channel\(cqs switch timer\(cqs period to
+\fIPERIODUS\fR
+\(mcs\&. 0 means a disabled switch timer\&.
+.sp
+Default values:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--userspace\fR
+and
+\fB--buffers-uid\fR
+options: 0
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--userspace\fR
+and
+\fB--buffers-pid\fR
+options: 0
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB--kernel\fR
+option: 0
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBmetadata\fR
+channel: 0
+.RE
+.RE
+.SS "Program information"
+.PP
+\fB-h\fR, \fB--help\fR
+.RS 4
+Show command help\&.
+.sp
+This option, like
+\fBlttng-help\fR(1), attempts to launch
+\fB/usr/bin/man\fR
+to view the command\(cqs man page\&. The path to the man pager can be overridden by the
+\fBLTTNG_MAN_BIN_PATH\fR
+environment variable\&.
+.RE
+.PP
+\fB--list-options\fR
+.RS 4
+List available command options\&.
+.RE
+.SH "LIMITATIONS"
+.sp
+As of this version of LTTng, it is not possible to perform the following actions with the \fBlttng enable-channel\fR command:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Reconfigure a channel once it is created\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Re\-enable a disabled channel once its tracing session has been active at least once\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Create a channel once its tracing session has been active at least once\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Create a user space channel with a given buffering scheme (\fB--buffers-uid\fR
+or
+\fB--buffers-pid\fR
+options) and create a second user space channel with a different buffering scheme in the same tracing session\&.
+.RE
+.SH "ENVIRONMENT VARIABLES"
+.PP
+\fBLTTNG_ABORT_ON_ERROR\fR
+.RS 4
+Set to 1 to abort the process after the first error is encountered\&.
+.RE
+.PP
+\fBLTTNG_HOME\fR
+.RS 4
+Overrides the
+\fB$HOME\fR
+environment variable\&. Useful when the user running the commands has a non\-writable home directory\&.
+.RE
+.PP
+\fBLTTNG_MAN_BIN_PATH\fR
+.RS 4
+Absolute path to the man pager to use for viewing help information about LTTng commands (using
+\fBlttng-help\fR(1)
+or
+\fBlttng COMMAND --help\fR)\&.
+.RE
+.PP
+\fBLTTNG_SESSION_CONFIG_XSD_PATH\fR
+.RS 4
+Path in which the
+\fBsession.xsd\fR
+session configuration XML schema may be found\&.
+.RE
+.PP
+\fBLTTNG_SESSIOND_PATH\fR
+.RS 4
+Full session daemon binary path\&.
+.sp
+The
+\fB--sessiond-path\fR
+option has precedence over this environment variable\&.
+.RE
+.sp
+Note that the \fBlttng-create\fR(1) command can spawn an LTTng session daemon automatically if none is running\&. See \fBlttng-sessiond\fR(8) for the environment variables influencing the execution of the session daemon\&.
+.SH "FILES"
+.PP
+\fB$LTTNG_HOME/.lttngrc\fR
+.RS 4
+User LTTng runtime configuration\&.
+.sp
+This is where the per\-user current tracing session is stored between executions of
+\fBlttng\fR(1)\&. The current tracing session can be set with
+\fBlttng-set-session\fR(1)\&. See
+\fBlttng-create\fR(1)
+for more information about tracing sessions\&.
+.RE
+.PP
+\fB$LTTNG_HOME/lttng-traces\fR
+.RS 4
+Default output directory of LTTng traces\&. This can be overridden with the
+\fB--output\fR
+option of the
+\fBlttng-create\fR(1)
+command\&.
+.RE
+.PP
+\fB$LTTNG_HOME/.lttng\fR
+.RS 4
+User LTTng runtime and configuration directory\&.
+.RE
+.PP
+\fB$LTTNG_HOME/.lttng/sessions\fR
+.RS 4
+Default location of saved user tracing sessions (see
+\fBlttng-save\fR(1)
+and
+\fBlttng-load\fR(1))\&.
+.RE
+.PP
+\fB/usr/local/etc/lttng/sessions\fR
+.RS 4
+System\-wide location of saved tracing sessions (see
+\fBlttng-save\fR(1)
+and
+\fBlttng-load\fR(1))\&.
+.RE
+.if n \{\
+.sp
+.\}
+.RS 4
+.it 1 an-trap
+.nr an-no-space-flag 1
+.nr an-break-flag 1
+.br
+.ps +1
+\fBNote\fR
+.ps -1
+.br
+.sp
+\fB$LTTNG_HOME\fR defaults to \fB$HOME\fR when not explicitly set\&.
+.sp .5v
+.RE
+.SH "EXIT STATUS"
+.PP
+\fB0\fR
+.RS 4
+Success
+.RE
+.PP
+\fB1\fR
+.RS 4
+Command error
+.RE
+.PP
+\fB2\fR
+.RS 4
+Undefined command
+.RE
+.PP
+\fB3\fR
+.RS 4
+Fatal error
+.RE
+.PP
+\fB4\fR
+.RS 4
+Command warning (something went wrong during the command)
+.RE
+.SH "BUGS"
+.sp
+If you encounter any issue or usability problem, please report it on the LTTng bug tracker <https://bugs.lttng.org/projects/lttng-tools>\&.
+.SH "RESOURCES"
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+LTTng project website <http://lttng.org>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+LTTng documentation <http://lttng.org/docs>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Git repositories <http://git.lttng.org>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+GitHub organization <http://github.com/lttng>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Continuous integration <http://ci.lttng.org/>
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Mailing list <http://lists.lttng.org>
+for support and development:
+\fBlttng-dev@lists.lttng.org\fR
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+IRC channel <irc://irc.oftc.net/lttng>:
+\fB#lttng\fR
+on
+\fBirc.oftc.net\fR
+.RE
+.SH "COPYRIGHTS"
+.sp
+This program is part of the LTTng\-tools project\&.
+.sp
+LTTng\-tools is distributed under the GNU General Public License version 2 <http://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html>\&. See the \fBLICENSE\fR <https://github.com/lttng/lttng-tools/blob/master/LICENSE> file for details\&.
+.SH "THANKS"
+.sp
+Special thanks to Michel Dagenais and the DORSAL laboratory <http://www.dorsal.polymtl.ca/> at \('Ecole Polytechnique de Montr\('eal for the LTTng journey\&.
+.sp
+Also thanks to the Ericsson teams working on tracing which helped us greatly with detailed bug reports and unusual test cases\&.
+.SH "AUTHORS"
+.sp
+LTTng\-tools was originally written by Mathieu Desnoyers, Julien Desfossez, and David Goulet\&. More people have since contributed to it\&.
+.sp
+LTTng\-tools is currently maintained by J\('er\('emie Galarneau <mailto:jeremie.galarneau@efficios.com>\&.
+.SH "SEE ALSO"
+.sp
+\fBlttng-disable-channel\fR(1), \fBlttng\fR(1)

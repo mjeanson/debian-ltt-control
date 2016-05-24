@@ -65,6 +65,8 @@ int kernctl_track_pid(int fd, int pid);
 int kernctl_untrack_pid(int fd, int pid);
 int kernctl_list_tracker_pids(int fd);
 
+int kernctl_session_metadata_regenerate(int fd);
+
 /* Buffer operations */
 
 /* For mmap mode, readable without "get" operation */
@@ -90,6 +92,7 @@ int kernctl_get_subbuf(int fd, unsigned long *pos);
 int kernctl_put_subbuf(int fd);
 
 int kernctl_buffer_flush(int fd);
+int kernctl_get_metadata_version(int fd, uint64_t *version);
 
 /* index */
 int kernctl_get_timestamp_begin(int fd, uint64_t *timestamp_begin);
@@ -99,5 +102,7 @@ int kernctl_get_content_size(int fd, uint64_t *content_size);
 int kernctl_get_packet_size(int fd, uint64_t *packet_size);
 int kernctl_get_stream_id(int fd, uint64_t *stream_id);
 int kernctl_get_current_timestamp(int fd, uint64_t *ts);
+int kernctl_get_sequence_number(int fd, uint64_t *seq);
+int kernctl_get_instance_id(int fd, uint64_t *seq);
 
 #endif /* _LTTNG_KERNEL_CTL_H */

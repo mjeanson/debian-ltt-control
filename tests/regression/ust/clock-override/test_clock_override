@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this library; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
-TEST_DESC="UST - Getcpu override plugin"
+TEST_DESC="UST - Clock override plugin"
 
 CURDIR=$(dirname $0)/
 TESTDIR=$CURDIR/../../..
@@ -48,10 +48,6 @@ UST_CLOCK_TOKEN_VALUE=(
 NUM_TESTS=33
 
 source $TESTDIR/utils/utils.sh
-
-if [ ! -x "$CURDIR/$LIBS_DIR/$LTTNG_UST_CLOCK_PLUGIN_SO" ]; then
-	BAIL_OUT "No shared object generated"
-fi
 
 # MUST set TESTDIR before calling those functions
 function run_app()
@@ -166,6 +162,14 @@ function test_getcpu_override_timestamp()
 plan_tests $NUM_TESTS
 
 print_test_banner "$TEST_DESC"
+
+if [ -x "$CURDIR/$LIBS_DIR/$LTTNG_UST_CLOCK_PLUGIN_SO" ]; then
+	foundobj=1
+else
+	foundobj=0
+fi
+
+skip $foundobj "No shared object generated. Skipping all tests." $NUM_TESTS && exit 0
 
 TESTS=(
 	"test_getcpu_override_metadata"

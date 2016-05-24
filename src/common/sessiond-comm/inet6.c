@@ -15,7 +15,6 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <limits.h>
@@ -102,7 +101,7 @@ int lttcomm_bind_inet6_sock(struct lttcomm_sock *sock)
 {
 	int ret;
 
-	ret = bind(sock->fd, &sock->sockaddr.addr.sin6,
+	ret = bind(sock->fd, (const struct sockaddr *) &sock->sockaddr.addr.sin6,
 			sizeof(sock->sockaddr.addr.sin6));
 	if (ret < 0) {
 		PERROR("bind inet6");
@@ -387,7 +386,7 @@ ssize_t lttcomm_recvmsg_inet6_sock(struct lttcomm_sock *sock, void *buf,
  * Return the size of sent data.
  */
 LTTNG_HIDDEN
-ssize_t lttcomm_sendmsg_inet6_sock(struct lttcomm_sock *sock, void *buf,
+ssize_t lttcomm_sendmsg_inet6_sock(struct lttcomm_sock *sock, const void *buf,
 		size_t len, int flags)
 {
 	struct msghdr msg;
@@ -396,7 +395,7 @@ ssize_t lttcomm_sendmsg_inet6_sock(struct lttcomm_sock *sock, void *buf,
 
 	memset(&msg, 0, sizeof(msg));
 
-	iov[0].iov_base = buf;
+	iov[0].iov_base = (void *) buf;
 	iov[0].iov_len = len;
 	msg.msg_iov = iov;
 	msg.msg_iovlen = 1;

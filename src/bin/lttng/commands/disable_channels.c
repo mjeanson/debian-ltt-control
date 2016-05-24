@@ -15,7 +15,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _GNU_SOURCE
 #define _LGPL_SOURCE
 #include <popt.h>
 #include <stdio.h>
@@ -34,11 +33,6 @@ static char *opt_channels;
 static int opt_kernel;
 static char *opt_session_name;
 static int opt_userspace;
-#if 0
-/* Not implemented yet */
-static char *opt_cmd_name;
-static pid_t opt_pid;
-#endif
 
 enum {
 	OPT_HELP = 1,
@@ -54,32 +48,10 @@ static struct poptOption long_options[] = {
 	{"help",           'h', POPT_ARG_NONE, 0, OPT_HELP, 0, 0},
 	{"session",        's', POPT_ARG_STRING, &opt_session_name, 0, 0, 0},
 	{"kernel",         'k', POPT_ARG_VAL, &opt_kernel, 1, 0, 0},
-#if 0
-	/* Not implemented yet */
-	{"userspace",      'u', POPT_ARG_STRING | POPT_ARGFLAG_OPTIONAL, &opt_cmd_name, OPT_USERSPACE, 0, 0},
-	{"pid",            'p', POPT_ARG_INT, &opt_pid, 0, 0, 0},
-#else
 	{"userspace",      'u', POPT_ARG_NONE, 0, OPT_USERSPACE, 0, 0},
-#endif
 	{"list-options", 0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{0, 0, 0, 0, 0, 0, 0}
 };
-
-/*
- * usage
- */
-static void usage(FILE *ofp)
-{
-	fprintf(ofp, "usage: lttng disable-channel NAME[,NAME2,...] (-k | -u) [OPTIONS]\n");
-	fprintf(ofp, "\n");
-	fprintf(ofp, "Options:\n");
-	fprintf(ofp, "  -h, --help               Show this help\n");
-	fprintf(ofp, "      --list-options       Simple listing of options\n");
-	fprintf(ofp, "  -s, --session NAME       Apply to session name\n");
-	fprintf(ofp, "  -k, --kernel             Apply to the kernel tracer\n");
-	fprintf(ofp, "  -u, --userspace          Apply to the user-space tracer\n");
-	fprintf(ofp, "\n");
-}
 
 static int mi_partial_channel_print(char *channel_name, unsigned int enabled,
 		int success)
@@ -245,7 +217,7 @@ int cmd_disable_channels(int argc, const char **argv)
 	while ((opt = poptGetNextOpt(pc)) != -1) {
 		switch (opt) {
 		case OPT_HELP:
-			usage(stdout);
+			SHOW_HELP();
 			goto end;
 		case OPT_USERSPACE:
 			opt_userspace = 1;
@@ -254,7 +226,6 @@ int cmd_disable_channels(int argc, const char **argv)
 			list_cmd_options(stdout, long_options);
 			goto end;
 		default:
-			usage(stderr);
 			ret = CMD_UNDEFINED;
 			goto end;
 		}
@@ -269,7 +240,6 @@ int cmd_disable_channels(int argc, const char **argv)
 	opt_channels = (char*) poptGetArg(pc);
 	if (opt_channels == NULL) {
 		ERR("Missing channel name(s).\n");
-		usage(stderr);
 		ret = CMD_ERROR;
 		goto end;
 	}
