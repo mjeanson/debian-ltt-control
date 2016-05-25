@@ -1,3 +1,15 @@
+ltt-control (2.8.0-1) unstable; urgency=medium
+
+  [ Michael Jeanson ]
+  * [c4b4b89] New upstream version 2.8.0
+  * [7cb24ab] Bump dependency on ust for 2.8.0
+  * [8d20b7a] Bump standards version to 3.9.8, no changes necessary
+  * [deb1e1c] Update symbols for 2.8.0
+  * [ae9257a] Add build dependencies on libkmod-dev and uuid-dev
+  * [ef265b7] Add session.xsd to liblttng-ctl0
+
+ -- Jon Bernard <jbernard@debian.org>  Tue, 24 May 2016 21:48:57 -0400
+
 ltt-control (2.7.2-1) unstable; urgency=medium
 
   [ Michael Jeanson ]
