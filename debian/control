@@ -58,7 +58,7 @@ Description: LTTng control and utility library (development files)
  implementing trace control in external applications.
 
 Package: python3-lttng
-Architecture: any
+Architecture: linux-any
 Depends: ${shlibs:Depends}, ${misc:Depends}, ${python3:Depends}
 Description: LTTng control and utility Python bindings
  The LTTng project aims at providing highly efficient tracing tools for Linux.
