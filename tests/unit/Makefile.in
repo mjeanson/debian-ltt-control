@@ -742,13 +742,11 @@ test_uri_SOURCES = test_uri.c
 test_uri_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBHASHTABLE)
 
 # Session unit test
-SESSIONS = $(top_builddir)/src/bin/lttng-sessiond/session.o	\
-	 $(top_builddir)/src/bin/lttng-sessiond/consumer.o \
-	 $(top_builddir)/src/bin/lttng-sessiond/utils.o \
-	 $(top_builddir)/src/bin/lttng-sessiond/snapshot.o \
-	 $(top_builddir)/src/common/uri.o \
-	 $(top_builddir)/src/common/utils.o \
-	 $(top_builddir)/src/common/error.o \
+SESSIONS = $(top_builddir)/src/bin/lttng-sessiond/session.$(OBJEXT) \
+	 $(top_builddir)/src/bin/lttng-sessiond/consumer.$(OBJEXT) \
+	 $(top_builddir)/src/bin/lttng-sessiond/utils.$(OBJEXT) \
+	 $(top_builddir)/src/bin/lttng-sessiond/snapshot.$(OBJEXT) \
+	 $(top_builddir)/src/common/libcommon.la \
 	 $(top_builddir)/src/common/health/libhealth.la \
 	 $(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
 
@@ -757,20 +755,19 @@ test_session_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) \
 	$(LIBSESSIOND_COMM) $(LIBHASHTABLE) -lrt $(SESSIONS)
 
 # UST data structures unit test
-@HAVE_LIBLTTNG_UST_CTL_TRUE@UST_DATA_TRACE = $(top_builddir)/src/bin/lttng-sessiond/trace-ust.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@	       $(top_builddir)/src/bin/lttng-sessiond/consumer.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@	       $(top_builddir)/src/bin/lttng-sessiond/utils.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/buffer-registry.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/ust-registry.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/ust-metadata.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/ust-app.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/ust-consumer.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/fd-limit.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/session.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/snapshot.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/agent.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/uri.o \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/utils.o \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@UST_DATA_TRACE = $(top_builddir)/src/bin/lttng-sessiond/trace-ust.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@	       $(top_builddir)/src/bin/lttng-sessiond/consumer.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@	       $(top_builddir)/src/bin/lttng-sessiond/utils.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/buffer-registry.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/ust-registry.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/ust-metadata.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/ust-app.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/ust-consumer.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/fd-limit.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/session.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/snapshot.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/agent.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/libcommon.la \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/health/libhealth.la \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
 
@@ -782,11 +779,10 @@ test_session_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@	-llttng-ust-ctl $(UST_DATA_TRACE)
 
 # Kernel data structures unit test
-KERN_DATA_TRACE = $(top_builddir)/src/bin/lttng-sessiond/trace-kernel.o	\
-		$(top_builddir)/src/bin/lttng-sessiond/consumer.o	\
-		$(top_builddir)/src/bin/lttng-sessiond/utils.o \
-		$(top_builddir)/src/common/uri.o \
-		$(top_builddir)/src/common/utils.o \
+KERN_DATA_TRACE = $(top_builddir)/src/bin/lttng-sessiond/trace-kernel.$(OBJEXT) \
+		$(top_builddir)/src/bin/lttng-sessiond/consumer.$(OBJEXT) \
+		$(top_builddir)/src/bin/lttng-sessiond/utils.$(OBJEXT) \
+		$(top_builddir)/src/common/libcommon.la \
 		$(top_builddir)/src/common/health/libhealth.la \
 		$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
 
@@ -795,9 +791,7 @@ test_kernel_data_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) \
 	$(LIBSESSIOND_COMM) $(LIBHASHTABLE) -lrt $(KERN_DATA_TRACE)
 
 # utils suffix for unit test
-UTILS_SUFFIX = $(top_builddir)/src/common/utils.o \
-		$(top_builddir)/src/common/runas.o
-
+UTILS_SUFFIX = $(top_builddir)/src/common/libcommon.la
 
 # parse_size_suffix unit test
 test_utils_parse_size_suffix_SOURCES = test_utils_parse_size_suffix.c

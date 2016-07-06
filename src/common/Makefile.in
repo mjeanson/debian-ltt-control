@@ -493,9 +493,7 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src \
-	-DMANPATH=\""$(mandir)"\"
-
+AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
 AUTOMAKE_OPTIONS = subdir-objects
 SUBDIRS = $(am__append_1) $(am__append_2) $(am__append_3) \
 	$(am__append_4) $(am__append_5) $(am__append_6) \

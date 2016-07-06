@@ -766,7 +766,7 @@ uninstall-am:
 .PRECIOUS: Makefile
 
 @BUILD_TESTS_TRUE@@HAS_PGREP_TRUE@check-am:
-@BUILD_TESTS_TRUE@@HAS_PGREP_TRUE@	$(top_srcdir)/tests/utils/warn_lttng_processes.sh $(PGREP)
+@BUILD_TESTS_TRUE@@HAS_PGREP_TRUE@	$(top_srcdir)/tests/utils/warn_processes.sh $(PGREP)
 @BUILD_TESTS_FALSE@	@echo "========================================="
 @BUILD_TESTS_FALSE@	@echo "WARNING: Tests were disabled at configure"
 @BUILD_TESTS_FALSE@	@echo "========================================="
