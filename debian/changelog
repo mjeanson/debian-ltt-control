@@ -1,3 +1,14 @@
+ltt-control (2.8.1-1) unstable; urgency=medium
+
+  [ Michael Jeanson ]
+  * [df6f604] python subpackage should also build on linux-any
+  * [75e1e69] Fix watch file
+
+  [ Jon Bernard ]
+  * [90d2c59] Imported Upstream version 2.8.1
+
+ -- Jon Bernard <jbernard@debian.org>  Wed, 06 Jul 2016 04:18:41 +0000
+
 ltt-control (2.8.0-1) unstable; urgency=medium
 
   [ Michael Jeanson ]
