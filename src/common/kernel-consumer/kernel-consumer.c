@@ -118,7 +118,6 @@ int lttng_kconsumer_snapshot_channel(uint64_t key, char *path,
 		struct lttng_consumer_local_data *ctx)
 {
 	int ret;
-	unsigned long consumed_pos, produced_pos;
 	struct lttng_consumer_channel *channel;
 	struct lttng_consumer_stream *stream;
 
@@ -143,6 +142,7 @@ int lttng_kconsumer_snapshot_channel(uint64_t key, char *path,
 	cds_list_for_each_entry(stream, &channel->streams.head, send_node) {
 		/* Are we at a position _before_ the first available packet ? */
 		bool before_first_packet = true;
+		unsigned long consumed_pos, produced_pos;
 
 		health_code_update();
 
@@ -1186,8 +1186,8 @@ int update_stream_stats(struct lttng_consumer_stream *stream)
 	}
 	if (discarded < stream->last_discarded_events) {
 		/*
-		 * Overflow has occured. We assume only one wrap-around
-		 * has occured.
+		 * Overflow has occurred. We assume only one wrap-around
+		 * has occurred.
 		 */
 		stream->chan->discarded_events += (1ULL << (CAA_BITS_PER_LONG - 1)) -
 			stream->last_discarded_events + discarded;

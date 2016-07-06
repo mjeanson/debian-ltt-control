@@ -1,5 +1,5 @@
 AC_PREREQ([2.64])
-AC_INIT([lttng-tools],[2.8.0],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
+AC_INIT([lttng-tools],[2.8.1],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
 
 AC_CONFIG_HEADERS([include/config.h])
 AC_CONFIG_AUX_DIR([config])
@@ -394,7 +394,7 @@ AC_ARG_WITH(kmod-prefix,
 
 AC_ARG_ENABLE(kmod,
 	AS_HELP_STRING([--disable-kmod],[build without kmod support]),
-	kmod_support=zz$enableval, kmod_support=yes)
+	kmod_support=$enableval, kmod_support=yes)
 
 AS_IF([test "x$kmod_support" = "xyes"], [
 	AC_CHECK_LIB([kmod], [kmod_module_probe_insert_module],
@@ -620,6 +620,8 @@ and installing the man pages.
 # asked for it, and if the tools are available
 AM_CONDITIONAL([MAN_PAGES_OPT], [test "x$man_pages_opt" != "xno"])
 AM_CONDITIONAL([HAVE_ASCIIDOC_XMLTO], [test "x$have_asciidoc_xmlto" = "xyes"])
+
+AC_DEFINE_UNQUOTED([MANPATH], ["`eval eval echo $mandir`"], [Path to man pages.])
 
 # Python agent test
 UST_PYTHON_AGENT="lttngust"
