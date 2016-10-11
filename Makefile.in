@@ -110,10 +110,10 @@ am__aclocal_m4_deps = $(top_srcdir)/m4/ac_define_dir.m4 \
 	$(top_srcdir)/m4/ax_pthread.m4 \
 	$(top_srcdir)/m4/ax_try_compile_java.m4 \
 	$(top_srcdir)/m4/config_feature.m4 $(top_srcdir)/m4/epoll.m4 \
-	$(top_srcdir)/m4/libtool.m4 $(top_srcdir)/m4/libxml.m4 \
-	$(top_srcdir)/m4/ltoptions.m4 $(top_srcdir)/m4/ltsugar.m4 \
-	$(top_srcdir)/m4/ltversion.m4 $(top_srcdir)/m4/lt~obsolete.m4 \
-	$(top_srcdir)/m4/pprint.m4 $(top_srcdir)/configure.ac
+	$(top_srcdir)/m4/libtool.m4 $(top_srcdir)/m4/ltoptions.m4 \
+	$(top_srcdir)/m4/ltsugar.m4 $(top_srcdir)/m4/ltversion.m4 \
+	$(top_srcdir)/m4/lt~obsolete.m4 $(top_srcdir)/m4/pprint.m4 \
+	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 DIST_COMMON = $(srcdir)/Makefile.am $(top_srcdir)/configure \
@@ -216,8 +216,7 @@ am__DIST_COMMON = $(srcdir)/Makefile.in $(top_srcdir)/config/compile \
 	$(top_srcdir)/config/missing \
 	$(top_srcdir)/config/tap-driver.sh ChangeLog INSTALL TODO \
 	config/compile config/config.guess config/config.sub \
-	config/depcomp config/install-sh config/ltmain.sh \
-	config/missing config/py-compile config/ylwrap
+	config/install-sh config/ltmain.sh config/missing
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 distdir = $(PACKAGE)-$(VERSION)
 top_distdir = $(distdir)
@@ -434,10 +433,7 @@ UUDECODE = @UUDECODE@
 UUID_CFLAGS = @UUID_CFLAGS@
 UUID_LIBS = @UUID_LIBS@
 VERSION = @VERSION@
-XML2_CONFIG = @XML2_CONFIG@
 XMLTO = @XMLTO@
-XML_CPPFLAGS = @XML_CPPFLAGS@
-XML_LIBS = @XML_LIBS@
 YACC = @YACC@
 YFLAGS = @YFLAGS@
 abs_builddir = @abs_builddir@
@@ -476,6 +472,8 @@ infodir = @infodir@
 install_sh = @install_sh@
 libdir = @libdir@
 libexecdir = @libexecdir@
+libxml2_CFLAGS = @libxml2_CFLAGS@
+libxml2_LIBS = @libxml2_LIBS@
 localedir = @localedir@
 localstatedir = @localstatedir@
 lttngincludedir = @lttngincludedir@
@@ -752,7 +750,7 @@ distdir: $(DISTFILES)
 	  ! -type d ! -perm -444 -exec $(install_sh) -c -m a+r {} {} \; \
 	|| chmod -R a+r "$(distdir)"
 dist-gzip: distdir
-	tardir=$(distdir) && $(am__tar) | GZIP=$(GZIP_ENV) gzip -c >$(distdir).tar.gz
+	tardir=$(distdir) && $(am__tar) | eval GZIP= gzip $(GZIP_ENV) -c >$(distdir).tar.gz
 	$(am__post_remove_distdir)
 dist-bzip2: distdir
 	tardir=$(distdir) && $(am__tar) | BZIP2=$${BZIP2--9} bzip2 -c >$(distdir).tar.bz2
@@ -777,7 +775,7 @@ dist-shar: distdir
 	@echo WARNING: "Support for shar distribution archives is" \
 	               "deprecated." >&2
 	@echo WARNING: "It will be removed altogether in Automake 2.0" >&2
-	shar $(distdir) | GZIP=$(GZIP_ENV) gzip -c >$(distdir).shar.gz
+	shar $(distdir) | eval GZIP= gzip $(GZIP_ENV) -c >$(distdir).shar.gz
 	$(am__post_remove_distdir)
 
 dist-zip: distdir
@@ -795,7 +793,7 @@ dist dist-all:
 distcheck: dist
 	case '$(DIST_ARCHIVES)' in \
 	*.tar.gz*) \
-	  GZIP=$(GZIP_ENV) gzip -dc $(distdir).tar.gz | $(am__untar) ;;\
+	  eval GZIP= gzip $(GZIP_ENV) -dc $(distdir).tar.gz | $(am__untar) ;;\
 	*.tar.bz2*) \
 	  bzip2 -dc $(distdir).tar.bz2 | $(am__untar) ;;\
 	*.tar.lz*) \
@@ -805,7 +803,7 @@ distcheck: dist
 	*.tar.Z*) \
 	  uncompress -c $(distdir).tar.Z | $(am__untar) ;;\
 	*.shar.gz*) \
-	  GZIP=$(GZIP_ENV) gzip -dc $(distdir).shar.gz | unshar ;;\
+	  eval GZIP= gzip $(GZIP_ENV) -dc $(distdir).shar.gz | unshar ;;\
 	*.zip*) \
 	  unzip $(distdir).zip ;;\
 	esac

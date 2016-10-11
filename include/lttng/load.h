@@ -25,7 +25,7 @@ extern "C" {
 
 /*
  * The lttng_load_session_attr object is opaque to the user. Use the helper
- * functions below to use them.
+ * functions below to use it.
  */
 struct lttng_load_session_attr;
 
@@ -41,15 +41,15 @@ void lttng_load_session_attr_destroy(struct lttng_load_session_attr *attr);
 
 
 /*
- * Save session attribute getter family functions.
+ * Load session attribute getter family of functions.
  */
 
-/* Return session name. NULL indicated all sessions must be loadd. */
+/* Return session name. NULL indicates all sessions must be loaded. */
 const char *lttng_load_session_attr_get_session_name(
 	struct lttng_load_session_attr *attr);
 /*
- * Return destination URL. A NULL value indicates the default session
- * configuration location. The URL format used is documented in lttng(1).
+ * Return input URL. A NULL value indicates the default session
+ * configuration location. The URL format used is documented in lttng-create(1).
  * NULL indicates that the default session configuration path is used.
  */
 const char *lttng_load_session_attr_get_input_url(
@@ -57,13 +57,15 @@ const char *lttng_load_session_attr_get_input_url(
 
 /*
  * Return the configuration overwrite attribute. This attribute indicates
- * whether or not existing configuration files must be overwritten.
+ * whether or not the loaded session should be loaded even if a session with the
+ * same name already exists. If such a session exists, it is destroyed before
+ * the replacement is loaded.
  */
 int lttng_load_session_attr_get_overwrite(
 	struct lttng_load_session_attr *attr);
 
 /*
- * Save session attribute setter family functions.
+ * Load session attribute setter family of functions.
  *
  * For every set* call, 0 is returned on success or else -LTTNG_ERR_INVALID is
  * returned indicating that at least one given parameter is invalid.
@@ -71,14 +73,14 @@ int lttng_load_session_attr_get_overwrite(
 
 /*
  * Set the name of the session to load. A NULL name means all sessions
- * known to the session daemon will be loadd.
+ * found at the input URL will be loaded.
  */
 int lttng_load_session_attr_set_session_name(
 	struct lttng_load_session_attr *attr, const char *session_name);
 
 /*
  * Set the URL of the session configuration to load. A NULL value indicates the
- * use of the default location being the session one.
+ * use of the default session configuration location.
  *
  * Note that file:// is the only supported URL format.
  */
@@ -86,14 +88,15 @@ int lttng_load_session_attr_set_input_url(
 	struct lttng_load_session_attr *attr, const char *url);
 
 /*
- * Set the overwrite attribute. If set to true, files of the same name as the
- * current session configuration URL will be overwritten.
+ * Set the overwrite attribute. If set to true, current sessions matching the
+ * loaded sessions will be destroyed and the replaced by the sessions being
+ * loaded.
  */
 int lttng_load_session_attr_set_overwrite(
 	struct lttng_load_session_attr *attr, int overwrite);
 
 /*
- * Save session configuration(s).
+ * Load session configuration(s).
  *
  * The lttng_load_session_attr object must not be NULL. No ownership of the
  * object is kept by the function; it must be released by the caller.

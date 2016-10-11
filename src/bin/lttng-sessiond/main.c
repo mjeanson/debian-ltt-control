@@ -37,6 +37,7 @@
 #include <sys/wait.h>
 #include <urcu/uatomic.h>
 #include <unistd.h>
+#include <ctype.h>
 
 #include <common/common.h>
 #include <common/compat/socket.h>
@@ -2242,10 +2243,12 @@ static void *thread_registration_apps(void *data)
 					 * lttcomm_setsockopt_snd_timeout expect msec as
 					 * parameter.
 					 */
-					(void) lttcomm_setsockopt_rcv_timeout(sock,
-							app_socket_timeout * 1000);
-					(void) lttcomm_setsockopt_snd_timeout(sock,
-							app_socket_timeout * 1000);
+					if (app_socket_timeout >= 0) {
+						(void) lttcomm_setsockopt_rcv_timeout(sock,
+								app_socket_timeout * 1000);
+						(void) lttcomm_setsockopt_snd_timeout(sock,
+								app_socket_timeout * 1000);
+					}
 
 					/*
 					 * Set the CLOEXEC flag. Return code is useless because
@@ -5413,9 +5416,6 @@ error:
 static void sighandler(int sig)
 {
 	switch (sig) {
-	case SIGPIPE:
-		DBG("SIGPIPE caught");
-		return;
 	case SIGINT:
 		DBG("SIGINT caught");
 		stop_threads();
@@ -5447,9 +5447,10 @@ static int set_signal_handler(void)
 		return ret;
 	}
 
-	sa.sa_handler = sighandler;
 	sa.sa_mask = sigset;
 	sa.sa_flags = 0;
+
+	sa.sa_handler = sighandler;
 	if ((ret = sigaction(SIGTERM, &sa, NULL)) < 0) {
 		PERROR("sigaction");
 		return ret;
@@ -5460,12 +5461,13 @@ static int set_signal_handler(void)
 		return ret;
 	}
 
-	if ((ret = sigaction(SIGPIPE, &sa, NULL)) < 0) {
+	if ((ret = sigaction(SIGUSR1, &sa, NULL)) < 0) {
 		PERROR("sigaction");
 		return ret;
 	}
 
-	if ((ret = sigaction(SIGUSR1, &sa, NULL)) < 0) {
+	sa.sa_handler = SIG_IGN;
+	if ((ret = sigaction(SIGPIPE, &sa, NULL)) < 0) {
 		PERROR("sigaction");
 		return ret;
 	}

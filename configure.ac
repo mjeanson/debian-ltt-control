@@ -1,5 +1,5 @@
 AC_PREREQ([2.64])
-AC_INIT([lttng-tools],[2.8.1],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
+AC_INIT([lttng-tools],[2.8.2],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
 
 AC_CONFIG_HEADERS([include/config.h])
 AC_CONFIG_AUX_DIR([config])
@@ -320,7 +320,7 @@ PKG_CHECK_MODULES([POPT], [popt],
 	]
 )
 
-AM_PATH_XML2(2.7.6, true, AC_MSG_ERROR(No supported version of libxml2 found.))
+PKG_CHECK_MODULES([libxml2], [libxml-2.0 >= 2.7.6])
 
 # Check for libuuid
 PKG_CHECK_MODULES([UUID], [uuid],
