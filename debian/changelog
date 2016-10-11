@@ -1,3 +1,16 @@
+ltt-control (2.8.2-1) unstable; urgency=medium
+
+  * [df05929] Add pgpsigurlmangle to watch file
+  * [3f76a5c] Do not consider rc versions in watch file
+  * [b69a1e3] New upstream version 2.8.2
+  * [bdbaeb6] Add asciidoc and xmlto to builddeps
+  * [94e9d19] Added dep on lsb-base for initscript
+  * [74e3528] Added Install section to unit file
+  * [e09aca7] Updated doc url in unit file
+  * [55191bd] Add Michael Jeanson as uploader
+
+ -- Michael Jeanson <mjeanson@ubuntu.com>  Tue, 11 Oct 2016 16:26:47 -0400
+
 ltt-control (2.8.1-1) unstable; urgency=medium
 
   [ Michael Jeanson ]
