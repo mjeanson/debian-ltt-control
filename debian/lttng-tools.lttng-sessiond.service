@@ -4,3 +4,6 @@ Documentation=http://lttng.org/docs/v2.7/#doc-lttng-sessiond
 
 [Service]
 ExecStart=/usr/bin/lttng-sessiond
+
+[Install]
+WantedBy=multi-user.target
