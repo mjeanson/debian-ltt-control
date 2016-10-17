@@ -1,14 +1,6 @@
 #!/bin/sh
 set -e
 
-case "$1" in
-    configure)
-        if which addgroup >/dev/null; then
-            addgroup --system --quiet tracing > /dev/null || true
-        fi
-    ;;
-esac
-
 if dpkg-maintscript-helper supports rm_conffile ; then
     dpkg-maintscript-helper rm_conffile \
         /etc/bash_completion.d/lttng 2.8.2-1~ lttng-tools -- "$@"
