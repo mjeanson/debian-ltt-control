@@ -1,3 +1,9 @@
+ltt-control (2.8.2-2) unstable; urgency=medium
+
+  * [2c14e0e] Remove old bash_completion file on upgrade (Closes: #841088)
+
+ -- Michael Jeanson <mjeanson@ubuntu.com>  Mon, 24 Oct 2016 14:23:55 -0400
+
 ltt-control (2.8.2-1) unstable; urgency=medium
 
   * [df05929] Add pgpsigurlmangle to watch file
