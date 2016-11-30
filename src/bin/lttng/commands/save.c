@@ -29,8 +29,9 @@
 #include <lttng/save.h>
 
 static char *opt_output_path;
-static int opt_force;
-static int opt_save_all;
+static bool opt_force;
+static bool opt_save_all;
+static struct mi_writer *writer;
 
 enum {
 	OPT_HELP = 1,
@@ -41,15 +42,13 @@ enum {
 
 static struct poptOption save_opts[] = {
 	/* longName, shortName, argInfo, argPtr, value, descrip, argDesc */
-	{"help",        'h', POPT_ARG_NONE, 0, OPT_HELP, 0, 0},
-	{"all",         'a', POPT_ARG_NONE, 0, OPT_ALL, 0, 0},
-	{"output-path", 'o', POPT_ARG_STRING, &opt_output_path, 0, 0, 0},
-	{"force",       'f', POPT_ARG_NONE, 0, OPT_FORCE, 0, 0},
+	{"help",        'h', POPT_ARG_NONE, NULL, OPT_HELP, NULL, NULL},
+	{"all",         'a', POPT_ARG_NONE, NULL, OPT_ALL, NULL, NULL},
+	{"output-path", 'o', POPT_ARG_STRING, &opt_output_path, 0, NULL, NULL},
+	{"force",       'f', POPT_ARG_NONE, NULL, OPT_FORCE, NULL, NULL},
 	{"list-options",  0, POPT_ARG_NONE, NULL, OPT_LIST_OPTIONS, NULL, NULL},
 	{0, 0, 0, 0, 0, 0, 0}
 };
-
-static struct mi_writer *writer;
 
 static int mi_partial_session(const char *session_name)
 {
@@ -135,10 +134,10 @@ int cmd_save(int argc, const char **argv)
 			SHOW_HELP();
 			goto end;
 		case OPT_ALL:
-			opt_save_all = 1;
+			opt_save_all = true;
 			break;
 		case OPT_FORCE:
-			opt_force = 1;
+			opt_force = true;
 			break;
 		case OPT_LIST_OPTIONS:
 			list_cmd_options(stdout, save_opts);
@@ -155,7 +154,7 @@ int cmd_save(int argc, const char **argv)
 			DBG2("Session name: %s", session_name);
 		} else {
 			/* default to opt_save_all */
-			opt_save_all = 1;
+			opt_save_all = true;
 		}
 	}
 

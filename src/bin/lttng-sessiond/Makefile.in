@@ -137,8 +137,8 @@ am__lttng_sessiond_SOURCES_DIST = utils.c utils.h trace-kernel.c \
 	lttng-ust-error.h fd-limit.c fd-limit.h kernel-consumer.c \
 	kernel-consumer.h health-sessiond.h cmd.c cmd.h \
 	buffer-registry.c buffer-registry.h testpoint.h ht-cleanup.c \
-	snapshot.c snapshot.h agent.c agent.h save.h save.c \
-	load-session-thread.h load-session-thread.c syscall.h \
+	ht-cleanup.h snapshot.c snapshot.h agent.c agent.h save.h \
+	save.c load-session-thread.h load-session-thread.c syscall.h \
 	syscall.c trace-ust.c ust-registry.c ust-app.c ust-consumer.c \
 	ust-consumer.h ust-thread.c ust-metadata.c ust-clock.h \
 	agent-thread.c agent-thread.h lttng-sessiond.h main.c
@@ -253,7 +253,6 @@ CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
 CMD_DESCR_ADD_CONTEXT = @CMD_DESCR_ADD_CONTEXT@
-CMD_DESCR_CALIBRATE = @CMD_DESCR_CALIBRATE@
 CMD_DESCR_CREATE = @CMD_DESCR_CREATE@
 CMD_DESCR_DESTROY = @CMD_DESCR_DESTROY@
 CMD_DESCR_DISABLE_CHANNEL = @CMD_DESCR_DISABLE_CHANNEL@
@@ -263,7 +262,7 @@ CMD_DESCR_ENABLE_EVENT = @CMD_DESCR_ENABLE_EVENT@
 CMD_DESCR_HELP = @CMD_DESCR_HELP@
 CMD_DESCR_LIST = @CMD_DESCR_LIST@
 CMD_DESCR_LOAD = @CMD_DESCR_LOAD@
-CMD_DESCR_METADATA = @CMD_DESCR_METADATA@
+CMD_DESCR_REGENERATE = @CMD_DESCR_REGENERATE@
 CMD_DESCR_SAVE = @CMD_DESCR_SAVE@
 CMD_DESCR_SET_SESSION = @CMD_DESCR_SET_SESSION@
 CMD_DESCR_SNAPSHOT = @CMD_DESCR_SNAPSHOT@
@@ -469,6 +468,7 @@ psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
 report_fold = @report_fold@
+runstatedir = @runstatedir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -496,13 +496,13 @@ lttng_sessiond_SOURCES = utils.c utils.h trace-kernel.c trace-kernel.h \
 	lttng-ust-abi.h lttng-ust-error.h fd-limit.c fd-limit.h \
 	kernel-consumer.c kernel-consumer.h consumer.h \
 	health-sessiond.h cmd.c cmd.h buffer-registry.c \
-	buffer-registry.h testpoint.h ht-cleanup.c snapshot.c \
-	snapshot.h agent.c agent.h save.h save.c load-session-thread.h \
-	load-session-thread.c syscall.h syscall.c $(am__append_1) \
-	lttng-sessiond.h main.c
+	buffer-registry.h testpoint.h ht-cleanup.c ht-cleanup.h \
+	snapshot.c snapshot.h agent.c agent.h save.h save.c \
+	load-session-thread.h load-session-thread.c syscall.h \
+	syscall.c $(am__append_1) lttng-sessiond.h main.c
 
 # link on liblttngctl for check if sessiond is already alive.
-lttng_sessiond_LDADD = -lrt -lurcu-common -lurcu \
+lttng_sessiond_LDADD = -lurcu-common -lurcu \
 	$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
 	$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \
 	$(top_builddir)/src/common/kernel-ctl/libkernel-ctl.la \

@@ -124,7 +124,8 @@ LTLIBRARIES = $(noinst_LTLIBRARIES)
 libcompat_la_LIBADD =
 am__libcompat_la_SOURCES_DIST = poll.h fcntl.h endian.h mman.h \
 	dirent.h socket.h compat-fcntl.c uuid.h tid.h getenv.h \
-	string.h prctl.h paths.h netdb.h compat-poll.c compat-epoll.c
+	string.h prctl.h paths.h netdb.h compat-poll.c compat-epoll.c \
+	time.h
 @COMPAT_EPOLL_FALSE@am__objects_1 = compat-poll.lo
 @COMPAT_EPOLL_TRUE@am__objects_1 = compat-epoll.lo
 am_libcompat_la_OBJECTS = compat-fcntl.lo $(am__objects_1)
@@ -210,7 +211,6 @@ CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
 CMD_DESCR_ADD_CONTEXT = @CMD_DESCR_ADD_CONTEXT@
-CMD_DESCR_CALIBRATE = @CMD_DESCR_CALIBRATE@
 CMD_DESCR_CREATE = @CMD_DESCR_CREATE@
 CMD_DESCR_DESTROY = @CMD_DESCR_DESTROY@
 CMD_DESCR_DISABLE_CHANNEL = @CMD_DESCR_DISABLE_CHANNEL@
@@ -220,7 +220,7 @@ CMD_DESCR_ENABLE_EVENT = @CMD_DESCR_ENABLE_EVENT@
 CMD_DESCR_HELP = @CMD_DESCR_HELP@
 CMD_DESCR_LIST = @CMD_DESCR_LIST@
 CMD_DESCR_LOAD = @CMD_DESCR_LOAD@
-CMD_DESCR_METADATA = @CMD_DESCR_METADATA@
+CMD_DESCR_REGENERATE = @CMD_DESCR_REGENERATE@
 CMD_DESCR_SAVE = @CMD_DESCR_SAVE@
 CMD_DESCR_SET_SESSION = @CMD_DESCR_SET_SESSION@
 CMD_DESCR_SNAPSHOT = @CMD_DESCR_SNAPSHOT@
@@ -426,6 +426,7 @@ psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
 report_fold = @report_fold@
+runstatedir = @runstatedir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -444,7 +445,8 @@ noinst_LTLIBRARIES = libcompat.la
 @COMPAT_EPOLL_TRUE@COMPAT = compat-epoll.c
 libcompat_la_SOURCES = poll.h fcntl.h endian.h mman.h dirent.h \
 		socket.h compat-fcntl.c uuid.h tid.h \
-		getenv.h string.h prctl.h paths.h netdb.h $(COMPAT)
+		getenv.h string.h prctl.h paths.h netdb.h $(COMPAT) \
+		time.h
 
 all: all-am
 

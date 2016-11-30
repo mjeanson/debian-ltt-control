@@ -2,12 +2,12 @@
 .\"     Title: lttng-load
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 10/07/2016
+.\"      Date: 11/29/2016
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.8.2
+.\"    Source: LTTng 2.9.0
 .\"  Language: English
 .\"
-.TH "LTTNG\-LOAD" "1" "10/07/2016" "LTTng 2\&.8\&.2" "LTTng Manual"
+.TH "LTTNG\-LOAD" "1" "11/29/2016" "LTTng 2\&.9\&.0" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,7 +32,8 @@ lttng-load \- Load LTTng tracing session configurations
 .SH "SYNOPSIS"
 .sp
 .nf
-\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBload\fR [\fB--force\fR] [\fB--input-path\fR=\fIPATH\fR] [\fISESSION\fR]
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBload\fR [\fB--force\fR] [\fB--input-path\fR=\fIPATH\fR]
+      [\fB--override-url\fR=\fIURL\fR] [\fISESSION\fR [\fB--override-name\fR=\fINAME\fR]]
 .fi
 .SH "DESCRIPTION"
 .sp
@@ -135,6 +136,8 @@ is not specified, the
 option is implicit: all the tracing session configurations found in this file are loaded\&.
 .RE
 .sp
+Aspects of the loaded configurations can be overridden at load time using the \fB--override-url\fR and \fB--override-name\fR options\&.
+.sp
 By default, existing tracing sessions are not overwritten when loading: the command fails\&. The \fB--force\fR option can be used to allow this\&.
 .SH "OPTIONS"
 .sp
@@ -150,10 +153,34 @@ Load all tracing session configurations (default)\&.
 Overwrite existing tracing sessions when loading\&.
 .RE
 .PP
-\fB-i\fR, \fB--input-path\fR=\fIPATH\fR
+\fB-i\fR \fIPATH\fR, \fB--input-path\fR=\fIPATH\fR
 .RS 4
 Load tracing session configurations from
 \fIPATH\fR, either a directory or a file, instead of loading them from the default search directories\&.
+.RE
+.PP
+\fB--override-name\fR=\fINAME\fR
+.RS 4
+Override the name of the loaded tracing session configuration,
+\fISESSION\fR, with
+\fINAME\fR\&.
+.sp
+You must specify a tracing session name to load (\fISESSION\fR) and NOT use the
+\fB--all\fR
+option when using this option\&.
+.RE
+.PP
+\fB--override-url\fR=\fIURL\fR
+.RS 4
+Override the URL of the loaded tracing session configurations with
+\fIURL\fR\&.
+.sp
+This is the equivalent of the
+\fB--set-url\fR
+option of
+\fBlttng-create\fR(1)\&. The validity of the URL override depends on the type of tracing session configurations to load\&. This option applies to
+\fIall\fR
+the loaded tracing session configurations\&.
 .RE
 .SS "Program information"
 .PP

@@ -2749,64 +2749,6 @@ int cmd_destroy_session(struct ltt_session *session, int wpipe)
 }
 
 /*
- * Command LTTNG_CALIBRATE processed by the client thread.
- */
-int cmd_calibrate(enum lttng_domain_type domain,
-		struct lttng_calibrate *calibrate)
-{
-	int ret;
-
-	switch (domain) {
-	case LTTNG_DOMAIN_KERNEL:
-	{
-		struct lttng_kernel_calibrate kcalibrate;
-
-		switch (calibrate->type) {
-		case LTTNG_CALIBRATE_FUNCTION:
-		default:
-			/* Default and only possible calibrate option. */
-			kcalibrate.type = LTTNG_KERNEL_CALIBRATE_KRETPROBE;
-			break;
-		}
-
-		ret = kernel_calibrate(kernel_tracer_fd, &kcalibrate);
-		if (ret < 0) {
-			ret = LTTNG_ERR_KERN_ENABLE_FAIL;
-			goto error;
-		}
-		break;
-	}
-	case LTTNG_DOMAIN_UST:
-	{
-		struct lttng_ust_calibrate ucalibrate;
-
-		switch (calibrate->type) {
-		case LTTNG_CALIBRATE_FUNCTION:
-		default:
-			/* Default and only possible calibrate option. */
-			ucalibrate.type = LTTNG_UST_CALIBRATE_TRACEPOINT;
-			break;
-		}
-
-		ret = ust_app_calibrate_glb(&ucalibrate);
-		if (ret < 0) {
-			ret = LTTNG_ERR_UST_CALIBRATE_FAIL;
-			goto error;
-		}
-		break;
-	}
-	default:
-		ret = LTTNG_ERR_UND;
-		goto error;
-	}
-
-	ret = LTTNG_OK;
-
-error:
-	return ret;
-}
-
-/*
  * Command LTTNG_REGISTER_CONSUMER processed by the client thread.
  */
 int cmd_register_consumer(struct ltt_session *session,
@@ -3207,11 +3149,10 @@ int cmd_snapshot_add_output(struct ltt_session *session,
 	DBG("Cmd snapshot add output for session %s", session->name);
 
 	/*
-	 * Permission denied to create an output if the session is not
-	 * set in no output mode.
+	 * Can't create an output if the session is not set in no-output mode.
 	 */
 	if (session->output_traces) {
-		ret = LTTNG_ERR_EPERM;
+		ret = LTTNG_ERR_NOT_SNAPSHOT_SESSION;
 		goto error;
 	}
 
@@ -3275,7 +3216,7 @@ int cmd_snapshot_del_output(struct ltt_session *session,
 	 * set in no output mode.
 	 */
 	if (session->output_traces) {
-		ret = LTTNG_ERR_EPERM;
+		ret = LTTNG_ERR_NOT_SNAPSHOT_SESSION;
 		goto error;
 	}
 
@@ -3327,19 +3268,19 @@ ssize_t cmd_snapshot_list_outputs(struct ltt_session *session,
 	 * set in no output mode.
 	 */
 	if (session->output_traces) {
-		ret = -LTTNG_ERR_EPERM;
-		goto error;
+		ret = -LTTNG_ERR_NOT_SNAPSHOT_SESSION;
+		goto end;
 	}
 
 	if (session->snapshot.nb_output == 0) {
 		ret = 0;
-		goto error;
+		goto end;
 	}
 
 	list = zmalloc(session->snapshot.nb_output * sizeof(*list));
 	if (!list) {
 		ret = -LTTNG_ERR_NOMEM;
-		goto error;
+		goto end;
 	}
 
 	/* Copy list from session to the new list object. */
@@ -3352,14 +3293,14 @@ ssize_t cmd_snapshot_list_outputs(struct ltt_session *session,
 		if (lttng_strncpy(list[idx].name, output->name,
 				sizeof(list[idx].name))) {
 			ret = -LTTNG_ERR_INVALID;
-			goto error_unlock;
+			goto error;
 		}
 		if (output->consumer->type == CONSUMER_DST_LOCAL) {
 			if (lttng_strncpy(list[idx].ctrl_url,
 					output->consumer->dst.trace_path,
 					sizeof(list[idx].ctrl_url))) {
 				ret = -LTTNG_ERR_INVALID;
-				goto error_unlock;
+				goto error;
 			}
 		} else {
 			/* Control URI. */
@@ -3367,7 +3308,7 @@ ssize_t cmd_snapshot_list_outputs(struct ltt_session *session,
 					list[idx].ctrl_url, sizeof(list[idx].ctrl_url));
 			if (ret < 0) {
 				ret = -LTTNG_ERR_NOMEM;
-				goto error_unlock;
+				goto error;
 			}
 
 			/* Data URI. */
@@ -3375,7 +3316,7 @@ ssize_t cmd_snapshot_list_outputs(struct ltt_session *session,
 					list[idx].data_url, sizeof(list[idx].data_url));
 			if (ret < 0) {
 				ret = -LTTNG_ERR_NOMEM;
-				goto error_unlock;
+				goto error;
 			}
 		}
 		idx++;
@@ -3384,10 +3325,10 @@ ssize_t cmd_snapshot_list_outputs(struct ltt_session *session,
 	*outputs = list;
 	list = NULL;
 	ret = session->snapshot.nb_output;
-error_unlock:
-	rcu_read_unlock();
 error:
+	rcu_read_unlock();
 	free(list);
+end:
 	return ret;
 }
 
@@ -3398,7 +3339,7 @@ error:
  * Return 0 if the metadata can be generated, a LTTNG_ERR code otherwise.
  */
 static
-int check_metadata_regenerate_support(struct ltt_session *session)
+int check_regenerate_metadata_support(struct ltt_session *session)
 {
 	int ret;
 
@@ -3437,7 +3378,28 @@ end:
 }
 
 static
-int ust_metadata_regenerate(struct ltt_ust_session *usess)
+int clear_metadata_file(int fd)
+{
+	int ret;
+
+	ret = lseek(fd, 0, SEEK_SET);
+	if (ret < 0) {
+		PERROR("lseek");
+		goto end;
+	}
+
+	ret = ftruncate(fd, 0);
+	if (ret < 0) {
+		PERROR("ftruncate");
+		goto end;
+	}
+
+end:
+	return ret;
+}
+
+static
+int ust_regenerate_metadata(struct ltt_ust_session *usess)
 {
 	int ret = 0;
 	struct buffer_reg_uid *uid_reg = NULL;
@@ -3457,6 +3419,15 @@ int ust_metadata_regenerate(struct ltt_ust_session *usess)
 		memset(registry->metadata, 0, registry->metadata_alloc_len);
 		registry->metadata_len = 0;
 		registry->metadata_version++;
+		if (registry->metadata_fd > 0) {
+			/* Clear the metadata file's content. */
+			ret = clear_metadata_file(registry->metadata_fd);
+			if (ret) {
+				pthread_mutex_unlock(&registry->lock);
+				goto end;
+			}
+		}
+
 		ret = ust_metadata_session_statedump(registry, NULL,
 				registry->major, registry->minor);
 		if (ret) {
@@ -3498,7 +3469,7 @@ end:
 }
 
 /*
- * Command LTTNG_METADATA_REGENERATE from the lttng-ctl library.
+ * Command LTTNG_REGENERATE_METADATA from the lttng-ctl library.
  *
  * Ask the consumer to truncate the existing metadata file(s) and
  * then regenerate the metadata. Live and per-pid sessions are not
@@ -3506,19 +3477,19 @@ end:
  *
  * Return 0 on success or else a LTTNG_ERR code.
  */
-int cmd_metadata_regenerate(struct ltt_session *session)
+int cmd_regenerate_metadata(struct ltt_session *session)
 {
 	int ret;
 
 	assert(session);
 
-	ret = check_metadata_regenerate_support(session);
+	ret = check_regenerate_metadata_support(session);
 	if (ret) {
 		goto end;
 	}
 
 	if (session->kernel_session) {
-		ret = kernctl_session_metadata_regenerate(
+		ret = kernctl_session_regenerate_metadata(
 				session->kernel_session->fd);
 		if (ret < 0) {
 			ERR("Failed to regenerate the kernel metadata");
@@ -3527,7 +3498,7 @@ int cmd_metadata_regenerate(struct ltt_session *session)
 	}
 
 	if (session->ust_session) {
-		ret = ust_metadata_regenerate(session->ust_session);
+		ret = ust_regenerate_metadata(session->ust_session);
 		if (ret < 0) {
 			ERR("Failed to regenerate the UST metadata");
 			goto end;
@@ -3540,6 +3511,60 @@ end:
 	return ret;
 }
 
+/*
+ * Command LTTNG_REGENERATE_STATEDUMP from the lttng-ctl library.
+ *
+ * Ask the tracer to regenerate a new statedump.
+ *
+ * Return 0 on success or else a LTTNG_ERR code.
+ */
+int cmd_regenerate_statedump(struct ltt_session *session)
+{
+	int ret;
+
+	assert(session);
+
+	if (!session->active) {
+		ret = LTTNG_ERR_SESSION_NOT_STARTED;
+		goto end;
+	}
+	ret = 0;
+
+	if (session->kernel_session) {
+		ret = kernctl_session_regenerate_statedump(
+				session->kernel_session->fd);
+		/*
+		 * Currently, the statedump in kernel can only fail if out
+		 * of memory.
+		 */
+		if (ret < 0) {
+			if (ret == -ENOMEM) {
+				ret = LTTNG_ERR_REGEN_STATEDUMP_NOMEM;
+			} else {
+				ret = LTTNG_ERR_REGEN_STATEDUMP_FAIL;
+			}
+			ERR("Failed to regenerate the kernel statedump");
+			goto end;
+		}
+	}
+
+	if (session->ust_session) {
+		ret = ust_app_regenerate_statedump_all(session->ust_session);
+		/*
+		 * Currently, the statedump in UST always returns 0.
+		 */
+		if (ret < 0) {
+			ret = LTTNG_ERR_REGEN_STATEDUMP_FAIL;
+			ERR("Failed to regenerate the UST statedump");
+			goto end;
+		}
+	}
+	DBG("Cmd regenerate statedump for session %s", session->name);
+	ret = LTTNG_OK;
+
+end:
+	return ret;
+}
 
 /*
  * Send relayd sockets from snapshot output to consumer. Ignore request if the
@@ -3807,7 +3832,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 	 * set in no output mode.
 	 */
 	if (session->output_traces) {
-		ret = LTTNG_ERR_EPERM;
+		ret = LTTNG_ERR_NOT_SNAPSHOT_SESSION;
 		goto error;
 	}
 

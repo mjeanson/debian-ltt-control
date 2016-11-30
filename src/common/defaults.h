@@ -188,7 +188,7 @@
 #define DEFAULT_PYTHON_EVENT_COMPONENT    "lttng_python"
 #define DEFAULT_PYTHON_EVENT_NAME         DEFAULT_PYTHON_EVENT_COMPONENT ":*"
 
-#define DEFAULT_CHANNEL_OVERWRITE       0
+#define DEFAULT_CHANNEL_OVERWRITE       -1
 #define DEFAULT_CHANNEL_TRACEFILE_SIZE  CONFIG_DEFAULT_CHANNEL_TRACEFILE_SIZE
 #define DEFAULT_CHANNEL_TRACEFILE_COUNT CONFIG_DEFAULT_CHANNEL_TRACEFILE_COUNT
 
@@ -309,6 +309,9 @@
 /* Default LTTng MI XML namespace. */
 #define DEFAULT_LTTNG_MI_NAMESPACE		"http://lttng.org/xml/ns/lttng-mi"
 
+/* Default thread stack size; the default mandated by pthread_create(3) */
+#define DEFAULT_LTTNG_THREAD_STACK_SIZE		2097152
+
 /*
  * Returns the default subbuf size.
  *
@@ -353,5 +356,17 @@ size_t default_get_ust_pid_channel_subbuf_size(void);
  */
 LTTNG_HIDDEN
 size_t default_get_ust_uid_channel_subbuf_size(void);
+
+/*
+ * Get the default pthread_attr to use on thread creation.
+ *
+ * Some libc, such as musl, don't honor the limit set for the stack size and use
+ * their own empirically chosen static value. This function checks if the
+ * current stack size is smaller than the stack size limit and if so returns a
+ * pthread_attr_t pointer where the thread stack size is set to the soft stack
+ * size limit.
+ */
+LTTNG_HIDDEN
+pthread_attr_t *default_pthread_attr(void);
 
 #endif /* _DEFAULTS_H */

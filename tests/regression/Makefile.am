@@ -22,7 +22,8 @@ TESTS = tools/filtering/test_invalid_filter \
 	tools/mi/test_mi \
 	tools/wildcard/test_event_wildcard \
 	tools/crash/test_crash \
-	tools/metadata-regen/test_ust
+	tools/regen-metadata/test_ust \
+	tools/regen-statedump/test_ust
 
 if HAVE_LIBLTTNG_UST_CTL
 SUBDIRS += ust
@@ -37,7 +38,8 @@ TESTS += ust/before-after/test_before_after \
 	ust/getcpu-override/test_getcpu_override \
 	ust/clock-override/test_clock_override \
 	ust/test_event_basic \
-	ust/test_event_tracef
+	ust/test_event_tracef \
+	ust/test_event_perf
 endif # HAVE_LIBLTTNG_UST_CTL
 
 if PYTHON_BINDING

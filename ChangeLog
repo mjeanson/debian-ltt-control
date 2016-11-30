@@ -1,36 +1,162 @@
-2016-10-07 lttng-tools 2.8.2 (National Frappé Day)
+2016-11-29 lttng-tools 2.9.0 (National Square Dance Day)
+	* Add 2.9.0 release beer description
+	* lttng-add-context(1): fix style
+	* lttng-snapshot(1): fix style
+	* lttng-metadata(1): fix style
+	* doc/man: put short option's argument too
+	* Remove `metadata` command from various help resources
+	* List the `regenerate` command in various help resources
+	* lttng-load(1): fix synopsis and style
+	* Fix: truncate the metadata file in shm-path
+	* Load: add message indication that a name override was carried out
+	* Load: expose overrides elements in mi
+	* Fix: assign values to path, ctrl and data uris during configuration load
+	* Load: test that name override does not have side effects
+	* Docs: remove invalid short option -U and move option descriptions
+	* Fix: add missing refcount of loaded modules
+	* Fix: only unload successfully loaded kernel modules
+	* Fix: test cases now rely on explicit workloads
+	* m4/pprint.m4: update with correct quoting
+	* configure.ac: move warning to end of output for the end user
+	* doc/man: only require asciidoc-attrs.conf when building the man pages
+	* Test fix: increase test count in plan of test_perf_raw
+	* Create a dedicated test suite for Perf
+	* Tests: accommodate stricter mktemp implementations in tests
+	* Add version info to lttng-relayd help
+	* Fix: stop sessiond threads on health thread error
+	* Fix: stop lttng-relayd threads on health thread error
+	* Fix: report an error if unix socket address is too long
+	* Fix: save: leak of configuration file fd
+
+2016-10-07 lttng-tools 2.9.0-rc1 (National Frappé Day)
+	* Set 2.9 codename and description
+	* Fix: warn when a loaded session can't be set as the default
+	* Warning fix: forward declare struct lttng_ust_calibrate
+	* lttng-enable-channel(1): remove redundant --discard from synopsis
+	* test: load --override-name
+	* load: introduce --override-name
+	* man: lttng-load fix up
+	* Docs: grammar fix in load.h
+	* lttng_ctl: add session_name to load override
+	* Fix: test presence of override_attr before accessing its member
+	* load: objects returned by getters do not need to be freed
+	* Remove lttng_load_session_attr_get_override_path_url
+	* Docs: change order of set functions in load.h to match get
+	* Remove calibrate documentation
+	* Remove calibrate from liblttng-ctl
+	* Remove calibrate from lttng-sessiond
+	* Remove calibrate from Python bindings
+	* Remove calibrate from Bash completion script
+	* Remove calibrate tests in Python bindings
+	* Remove calibrate command from lttng CLI
+	* Build fix: remove load-42-stream.lttng from dist target
+	* Test: load --override-url
+	* Add --override-url option to load command
+	* Apply the overrides attributes during configuration load
+	* Clean-up: remove copy-pasted comment from save.c
+	* lttng-ctl: add override helper to load api
+	* Rename override to overwrite for config_load_session
 	* Fix: report truncation on snprintf
 	* Fix: check for a session daemon before running load command
 	* Fix: ignore SIGPIPE
+	* Use lttng api for the load command
 	* Fix: use ssize_type for the return value of uri_parse_str_urls
 	* Docs: grammar fixes in load.h
 	* Fix: wrong api comments for load.h
 	* Fix: do not overwrite ret if already set and session found
+	* lttng-sessiond: auto-load lttng-probe-i2c module
+	* Bump lttng-modules ABI minor version
 	* Fix: handle backward compatibility with lttng-modules 2.7
 	* Clean-up: remove unnecessary autoconf variable substitution
 	* Fix: honor negative (unlimited) app socket timeout
 	* Build: Replace use of deprecated AM_PATH_XML2
-	* Tests: tap.sh spams tests' output when no plan is set
-	* Fix: location of various standard headers
-	* Fix: missing include ctype.h for isdigit()
-	* Fix: error.h -> common/error.h
 	* Test fix: set app and network socket timeouts to unlimited
 	* Test fix: test_fork can hang while waiting for child pids
 	* Test fix: test_daemon can hang while waiting for child pids
 	* Test fix: redirect python test subprocess output to /dev/null
+	* Build fix: macOS Sierra provides clock_gettime
+	* Fix: time redefinition warnings on macOS builds
+	* Clean-up: remove unused variable user
+	* Cleanup: Remove fun from code base
+	* Fix: remove in-place backup suffix argument provided to sed
 	* Fix: pass a valid length to accept() on unix domain sockets
+	* Log signals received by run_as worker
+	* Missing word in worker_sighandler() comment
+	* Clean-up snapshot command error reporting
 	* Fix: RCU lock imbalance on error in cmd_snapshot_list_outputs()
 	* Use -M parameter instead of --manpath when invoking man(1)
 	* OOT Build fix: reference the source directory's Python test app
 	* Fix: pass NULL to config_load_session instead of an empty string
+	* Tests: don't copy test_python_logging explicitly
+	* OOT build fix: Missing include of src directory
+	* Accomodate BSD sed in version.h generation
+	* Port: Detect platforms where librt is required
+	* Port: Add OSX clock_gettime compat
+	* Port: Add OSX support to socket compat
+	* Port: Add OSX support to poll compat
+	* Port: Add OSX support to fcntl compat
+	* Port: Add OSX compat to sessiond-comm/unix.c
+	* Port: Add OSX endian.h compat
+	* Port: Add OSX libuuid compat
+	* Fix: zero-initialize fd_set
+	* Clean-up: missing cast to fd_set*
+	* Fix: usage of FD_SET on fd_set > 1024 results in corruption
+	* Fix: erroneous usage of addr parameter in mmap()
+	* Clean-up: remove useless assignment
+	* Fix: missing unmap in test error handling
+	* Tests: unchecked pthread_join return value
+	* Clean-up: remove negative check against unsigned value
+	* Fix: unchecked init_pipe return value
+	* Tests: Unchecked pthread_create return value
+	* Clean-up: remove useless assignment
+	* Tests: Add tracepoints to libbar, libfoo and libzzz
 	* Fix: Mark ASCIIDOC_ATTRS_CONF as a dependency of man page targets
-
-2016-07-05 lttng-tools 2.8.1 (NASA's Juno spacecraft enters orbit of Jupiter)
+	* Test the parsing of perf raw context
+	* Enable perf PMU counters by raw ID
+	* Run userspace perf tests on non-x86 platforms
+	* Tests: adjust ust-dl planned test count
+	* Test library load/unload events
+	* Add missing ust_app_regenerate_statedump_all stub
+	* Clean-up: remove unused ust_app_regenerate_metadata_all
+	* Add regenerate command to MI schema
+	* Manpage for the regenerate statedump command
+	* Tests for the regenerate statedump command
+	* Allow regenerating the statedump of a running session
+	* Kernel ioctl to regenerate the statedump
+	* UST command to regenerate the statedump
+	* Rename the "metadata regenerate" command to "regenerate metadata"
+	* Typo fix: uninitializez ->uninitialized
+	* Fix: handle negative (unlimited) system stack size limits
+	* Tests: adjust type declaration test count
+	* Fix: protocol mismatch between UST and tools
+	* ust-ctl: use fixed-size integer rather than enum
+	* Test UST's autoincrementing enumeration values
+	* Add support for UST's autoincrementing enum entries
 	* Tests: eliminate process timeouts from Python tests
 	* Fix: English syntax errors in 'lttng status'
+	* Test for select, poll and epoll syscall overrides
+	* Tests: tap.sh spams tests' output when no plan is set
+	* Fix: Set thread stack size to ulimit soft value
+	* Fix: location of various standard headers
+	* Fix: missing include ctype.h for isdigit()
+	* Fix: strerror_r behavior is glibc specific
+	* Fix: error.h -> common/error.h
+	* Fix: snapshot del-output with name on musl
 	* Fix: sessiond ht_match_event() check if filter is NULL
 	* configure.ac: fix --enable/disable-kmod option
+	* Tests: spawn ht_cleanup thread in unit tests
+	* Lazily initialize max poll set size
+	* Revert "Assert that a valid clean-up pipe exists on ht_cleanup_push"
+	* tests: test ust snapshot with discard buffers
+	* tests: test kernel snapshot with discard buffers
+	* Allow channel mode override in snapshot sessions
 	* Fix: validate number of subbuffers after tweaking properties
+	* Use bool type for save command options
+	* Clean-up: harmonize popt option declarations in save.c
+	* Clean-up: move mi_writer declaration with other declarations
+	* Add name omission and output omission on save to lttng-ctl
+	* Express overwrite attribute as a byte in communication protocol
+	* Assert that a valid clean-up pipe exists on ht_cleanup_push
 	* Fix: do not refer to objects as .o
 	* Fix: do not link against libtool .o objects
 	* Fix: Define MANPATH in config.h
@@ -40,15 +166,19 @@
 	* Fix: leak of reply buffer on data pending check
 	* Fix: call xmlCleanupParser to free global libxml2 allocations
 	* Fix: missing "void" parameter of lib constructor and destructor
+	* Docs: fix comment typos in lttng-sessiond's main.c
 	* Fix: lttng-relayd allow binding of privileged ports for non-root users
 	* relayd: optimize receive throughput
+	* Clean-up: harmonize kernctl API error checking
+	* Introduce LTTNG_IOCTL_CHECK and LTTNG_IOCTL_NO_CHECK macros
 	* Fix: enforce assumption that lttng-modules ioctl() return <= 0
 	* Fix: reduce scope of kconsumer consumed_pos and produced_pos
+	* Docs: document safety of consumer_thread_is_ready access
+	* Clean-up: unused ret values in thread_manage_health
+	* Clean-up: remove dead code in sessiond's set_option()
 	* Fix: set the logger level to prevent unexpected level inheritance
 	* Typo: Stoping -> Stopping
 	* Typo: occured -> occurred
-
-2016-05-20 lttng-tools 2.8.0 (Bike-to-Work Day)
 	* Fix: only perform lttng_consumer_sync_trace_file() in local mode
 	* Make lttng_consumer_sync_trace_file static
 	* Fix: don't negate posix_fadvise return value to check error
@@ -185,8 +315,6 @@
 	* Fix: tests: skip tests on static build
 	* Fix: tests: don't build dynamic lib tests if support disabled
 	* bootstrap: Standardize on autoreconf -vi
-	* doc/man: add notes about shell escaping
-	* Fix: doc/man/Makefile.am for OOT builds
 	* Move unix.h wrapper from sessiond-comm to common
 	* Fix: update tests following renaming of UST statedump event
 	* Typo: catched -> caught
@@ -200,6 +328,10 @@
 	* doc/man: add FILES section
 	* Test: xsd validation of long path (length > 255)
 	* Fix: xsd: urls and paths are not of type name_type but string
+	* Refactor: embed mi in "add_output "to remove code duplication
+	* Refactor: embed mi in "del_record" to remove code duplication
+	* Refactor: embed mi in "record" to remove code duplication
+	* Refactor: embed mi in "list_output" to remove code duplication
 	* Fix: do not return error on LTTNG_ERR_SNAPSHOT_NODATA
 	* Fix: Set loopback adress in set_ip_addr if gethostbyname2 fails
 	* Fix: d_type validity is not guaranteed on all nfs versions
@@ -224,9 +356,10 @@
 	* Clean-up shm directory tree after freeing the channel
 	* Fix: Build man pages if --enable-build-man-pages is used
 	* Fix: convey enum value signedness into metadata
+	* doc/man: add notes about shell escaping
+	* Fix: doc/man/Makefile.am for OOT builds
 	* Generate man pages by default
-
-2016-03-18 lttng-tools 2.8.0-rc1 (Awkward Moments Day)
+	* Update version to 2.9.0-pre
 	* Bump minor kernel tracer ABI version
 	* Quote brewery names in release codename description
 	* Fix: metadata regenerate, error if too many args

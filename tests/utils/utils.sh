@@ -737,6 +737,24 @@ function enable_lttng_mmap_overwrite_kernel_channel()
 	ok $? "Enable channel $channel_name for session $sess_name"
 }
 
+function enable_lttng_mmap_discard_small_kernel_channel()
+{
+	local sess_name=$1
+	local channel_name=$2
+
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN enable-channel -s $sess_name $channel_name -k --output mmap --discard --subbuf-size=$(getconf PAGE_SIZE) --num-subbuf=2 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+	ok $? "Enable small discard channel $channel_name for session $sess_name"
+}
+
+function enable_lttng_mmap_overwrite_small_kernel_channel()
+{
+	local sess_name=$1
+	local channel_name=$2
+
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN enable-channel -s $sess_name $channel_name -k --output mmap --overwrite --subbuf-size=$(getconf PAGE_SIZE) --num-subbuf=2 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+	ok $? "Enable small discard channel $channel_name for session $sess_name"
+}
+
 function enable_lttng_mmap_overwrite_ust_channel()
 {
 	local sess_name=$1
@@ -1121,10 +1139,27 @@ function lttng_save()
 
 function lttng_load()
 {
-	local opts=$1
+	local expected_to_fail=$1
+	local opts=$2
 
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN load $opts 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
-	ok $? "Load command with opts: $opts"
+	ret=$?
+	if [[ $expected_to_fail -eq "1" ]]; then
+		test $ret -ne "0"
+		ok $? "Load command failed as expected with opts: $opts"
+	else
+		ok $ret "Load command with opts: $opts"
+	fi
+}
+
+function lttng_load_ok()
+{
+	lttng_load 0 "$@"
+}
+
+function lttng_load_fail()
+{
+	lttng_load 1 "$@"
 }
 
 function lttng_track()
@@ -1278,6 +1313,47 @@ function validate_trace
 	return $ret
 }
 
+function validate_trace_count
+{
+	local event_name=$1
+	local trace_path=$2
+	local expected_count=$3
+
+	which $BABELTRACE_BIN >/dev/null
+	if [ $? -ne 0 ]; then
+	    skip 0 "Babeltrace binary not found. Skipping trace validation"
+	fi
+
+	cnt=0
+	OLDIFS=$IFS
+	IFS=","
+	for i in $event_name; do
+		traced=$($BABELTRACE_BIN $trace_path 2>/dev/null | grep $i | wc -l)
+		if [ "$traced" -ne 0 ]; then
+			pass "Validate trace for event $i, $traced events"
+		else
+			fail "Validate trace for event $i"
+			diag "Found $traced occurences of $i"
+		fi
+		cnt=$(($cnt + $traced))
+	done
+	IFS=$OLDIFS
+	test $cnt -eq $expected_count
+	ok $? "Read a total of $cnt events, expected $expected_count"
+}
+
+function trace_first_line
+{
+	local trace_path=$1
+
+	which $BABELTRACE_BIN >/dev/null
+	if [ $? -ne 0 ]; then
+	    skip 0 "Babeltrace binary not found. Skipping trace validation"
+	fi
+
+	$BABELTRACE_BIN $trace_path 2>/dev/null | head -n 1
+}
+
 function validate_trace_exp()
 {
 	local event_exp=$1
@@ -1338,29 +1414,54 @@ function validate_trace_empty()
 	return $ret
 }
 
-function metadata_regenerate ()
+function regenerate_metadata ()
 {
 	local expected_to_fail=$1
 	local sess_name=$2
 
-	$TESTDIR/../src/bin/lttng/$LTTNG_BIN metadata regenerate -s $sess_name 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN regenerate metadata -s $sess_name 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
 	ret=$?
 	if [[ $expected_to_fail -eq "1" ]]; then
 		test "$ret" -ne "0"
-		ok $? "Expected fail on regenerate $sess_name"
+		ok $? "Expected fail on regenerate metadata $sess_name"
 	else
 		ok $ret "Metadata regenerate $sess_name"
 	fi
 }
 
-function metadata_regenerate_ok ()
+function regenerate_metadata_ok ()
 {
-	metadata_regenerate 0 "$@"
+	regenerate_metadata 0 "$@"
 }
 
-function metadata_regenerate_fail ()
+function regenerate_metadata_fail ()
 {
-	metadata_regenerate 1 "$@"
+	regenerate_metadata 1 "$@"
+}
+
+function regenerate_statedump ()
+{
+	local expected_to_fail=$1
+	local sess_name=$2
+
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN regenerate statedump -s $sess_name 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+	ret=$?
+	if [[ $expected_to_fail -eq "1" ]]; then
+		test "$ret" -ne "0"
+		ok $? "Expected fail on regenerate statedump $sess_name"
+	else
+		ok $ret "Metadata regenerate $sess_name"
+	fi
+}
+
+function regenerate_statedump_ok ()
+{
+	regenerate_statedump 0 "$@"
+}
+
+function regenerate_statedump_fail ()
+{
+	regenerate_statedump 1 "$@"
 }
 
 function destructive_tests_enabled ()

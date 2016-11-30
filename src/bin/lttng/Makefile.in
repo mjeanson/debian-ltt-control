@@ -132,11 +132,11 @@ am_lttng_OBJECTS = conf.$(OBJEXT) commands/start.$(OBJEXT) \
 	commands/enable_channels.$(OBJEXT) \
 	commands/disable_channels.$(OBJEXT) \
 	commands/add_context.$(OBJEXT) commands/set_session.$(OBJEXT) \
-	commands/version.$(OBJEXT) commands/calibrate.$(OBJEXT) \
-	commands/view.$(OBJEXT) commands/snapshot.$(OBJEXT) \
-	commands/save.$(OBJEXT) commands/load.$(OBJEXT) \
-	commands/track-untrack.$(OBJEXT) commands/status.$(OBJEXT) \
-	commands/metadata.$(OBJEXT) commands/help.$(OBJEXT) \
+	commands/version.$(OBJEXT) commands/view.$(OBJEXT) \
+	commands/snapshot.$(OBJEXT) commands/save.$(OBJEXT) \
+	commands/load.$(OBJEXT) commands/track-untrack.$(OBJEXT) \
+	commands/status.$(OBJEXT) commands/metadata.$(OBJEXT) \
+	commands/regenerate.$(OBJEXT) commands/help.$(OBJEXT) \
 	utils.$(OBJEXT) lttng.$(OBJEXT)
 lttng_OBJECTS = $(am_lttng_OBJECTS)
 lttng_DEPENDENCIES =  \
@@ -224,7 +224,6 @@ CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
 CMD_DESCR_ADD_CONTEXT = @CMD_DESCR_ADD_CONTEXT@
-CMD_DESCR_CALIBRATE = @CMD_DESCR_CALIBRATE@
 CMD_DESCR_CREATE = @CMD_DESCR_CREATE@
 CMD_DESCR_DESTROY = @CMD_DESCR_DESTROY@
 CMD_DESCR_DISABLE_CHANNEL = @CMD_DESCR_DISABLE_CHANNEL@
@@ -234,7 +233,7 @@ CMD_DESCR_ENABLE_EVENT = @CMD_DESCR_ENABLE_EVENT@
 CMD_DESCR_HELP = @CMD_DESCR_HELP@
 CMD_DESCR_LIST = @CMD_DESCR_LIST@
 CMD_DESCR_LOAD = @CMD_DESCR_LOAD@
-CMD_DESCR_METADATA = @CMD_DESCR_METADATA@
+CMD_DESCR_REGENERATE = @CMD_DESCR_REGENERATE@
 CMD_DESCR_SAVE = @CMD_DESCR_SAVE@
 CMD_DESCR_SET_SESSION = @CMD_DESCR_SET_SESSION@
 CMD_DESCR_SNAPSHOT = @CMD_DESCR_SNAPSHOT@
@@ -440,6 +439,7 @@ psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
 report_fold = @report_fold@
+runstatedir = @runstatedir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -462,13 +462,14 @@ lttng_SOURCES = command.h conf.c conf.h commands/start.c \
 				commands/disable_events.c commands/enable_channels.c \
 				commands/disable_channels.c commands/add_context.c \
 				commands/set_session.c commands/version.c \
-				commands/calibrate.c commands/view.c \
+				commands/view.c \
 				commands/snapshot.c \
 				commands/save.c \
 				commands/load.c \
 				commands/track-untrack.c \
 				commands/status.c \
 				commands/metadata.c \
+				commands/regenerate.c \
 				commands/help.c \
 				utils.c utils.h lttng.c
 
@@ -588,8 +589,6 @@ commands/set_session.$(OBJEXT): commands/$(am__dirstamp) \
 	commands/$(DEPDIR)/$(am__dirstamp)
 commands/version.$(OBJEXT): commands/$(am__dirstamp) \
 	commands/$(DEPDIR)/$(am__dirstamp)
-commands/calibrate.$(OBJEXT): commands/$(am__dirstamp) \
-	commands/$(DEPDIR)/$(am__dirstamp)
 commands/view.$(OBJEXT): commands/$(am__dirstamp) \
 	commands/$(DEPDIR)/$(am__dirstamp)
 commands/snapshot.$(OBJEXT): commands/$(am__dirstamp) \
@@ -603,6 +602,8 @@ commands/track-untrack.$(OBJEXT): commands/$(am__dirstamp) \
 commands/status.$(OBJEXT): commands/$(am__dirstamp) \
 	commands/$(DEPDIR)/$(am__dirstamp)
 commands/metadata.$(OBJEXT): commands/$(am__dirstamp) \
+	commands/$(DEPDIR)/$(am__dirstamp)
+commands/regenerate.$(OBJEXT): commands/$(am__dirstamp) \
 	commands/$(DEPDIR)/$(am__dirstamp)
 commands/help.$(OBJEXT): commands/$(am__dirstamp) \
 	commands/$(DEPDIR)/$(am__dirstamp)
@@ -622,7 +623,6 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/lttng.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/utils.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/add_context.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/calibrate.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/create.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/destroy.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/disable_channels.Po@am__quote@
@@ -633,6 +633,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/list.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/load.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/metadata.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/regenerate.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/save.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/set_session.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@commands/$(DEPDIR)/snapshot.Po@am__quote@

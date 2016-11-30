@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (C) - 2015 Julien Desfossez <jdesfossez@efficios.com>
+# Copyright (C) - 2016 Julien Desfossez <jdesfossez@efficios.com>
 #
 # This library is free software; you can redistribute it and/or modify it under
 # the terms of the GNU Lesser General Public License as published by the Free
@@ -14,17 +14,18 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this library; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
-TEST_DESC="Streaming - Kernel tracing"
+TEST_DESC="Regenerate the statedump - Kernel tracing"
 
 CURDIR=$(dirname $0)/
 TESTDIR=$CURDIR/../../..
 EVENT_NAME="lttng_test_filter_event"
 PID_RELAYD=0
 SESSION_NAME=""
+EVENT_NAME="lttng_statedump_start,lttng_statedump_end"
 
 TRACE_PATH=$(mktemp -d)
 
-NUM_TESTS=18
+NUM_TESTS=11
 
 source $TESTDIR/utils/utils.sh
 
@@ -34,44 +35,16 @@ if [ -z "$out" ]; then
 	BAIL_OUT "LTTng modules not detected."
 fi
 
-function lttng_create_session_uri
-{
-	# Create session with default path
-	$TESTDIR/../src/bin/lttng/$LTTNG_BIN create $SESSION_NAME -U net://localhost >/dev/null 2>&1
-
-	ok $? "Create session $SESSION_NAME"
-}
-
-function test_kernel_streaming ()
-{
-	diag "Test kernel streaming with metadata regeneration"
-	lttng_create_session_uri
-	lttng_enable_kernel_event $SESSION_NAME $EVENT_NAME
-	start_lttng_tracing_ok $SESSION_NAME
-	echo -n "100" > /proc/lttng-test-filter-event
-	metadata_regenerate_ok $SESSION_NAME
-	stop_lttng_tracing_ok $SESSION_NAME
-	# Validate test
-	validate_trace $EVENT_NAME $TRACE_PATH/$HOSTNAME/$SESSION_NAME*
-	if [ $? -eq 0 ]; then
-		# Only delete if successful
-		rm -rf $TRACE_PATH
-	else
-		break
-	fi
-	destroy_lttng_session_ok $SESSION_NAME
-}
-
 function test_kernel_local ()
 {
-	diag "Test kernel local with metadata regeneration"
+	diag "Test kernel local with statedump regeneration"
 	create_lttng_session_ok $SESSION_NAME $TRACE_PATH
 	lttng_enable_kernel_event $SESSION_NAME $EVENT_NAME
 	start_lttng_tracing_ok $SESSION_NAME
 	echo -n "100" > /proc/lttng-test-filter-event
-	metadata_regenerate_ok $SESSION_NAME
+	regenerate_statedump_ok $SESSION_NAME
 	stop_lttng_tracing_ok $SESSION_NAME
-	validate_trace $EVENT_NAME $TRACE_PATH
+	validate_trace_count $EVENT_NAME $TRACE_PATH 4
 	if [ $? -eq 0 ]; then
 		# Only delete if successful
 		rm -rf $TRACE_PATH
@@ -91,11 +64,10 @@ fi
 
 skip $isroot "Root access is needed. Skipping all kernel streaming tests." $NUM_TESTS ||
 {
-	start_lttng_relayd "-o $TRACE_PATH"
 	start_lttng_sessiond
 	modprobe lttng-test
 
-	tests=( test_kernel_streaming test_kernel_local )
+	tests=( test_kernel_local )
 
 	for fct_test in ${tests[@]};
 	do
@@ -105,5 +77,4 @@ skip $isroot "Root access is needed. Skipping all kernel streaming tests." $NUM_
 
 	rmmod lttng-test
 	stop_lttng_sessiond
-	stop_lttng_relayd
 }

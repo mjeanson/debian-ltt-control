@@ -2,12 +2,12 @@
 .\"     Title: lttng-create
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 10/07/2016
+.\"      Date: 11/29/2016
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.8.2
+.\"    Source: LTTng 2.9.0
 .\"  Language: English
 .\"
-.TH "LTTNG\-CREATE" "1" "10/07/2016" "LTTng 2\&.8\&.2" "LTTng Manual"
+.TH "LTTNG\-CREATE" "1" "11/29/2016" "LTTng 2\&.9\&.0" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -271,7 +271,7 @@ In
 \fIlocal mode\fR, do not output any trace data\&.
 .RE
 .PP
-\fB-o\fR, \fB--output\fR=\fIPATH\fR
+\fB-o\fR \fIPATH\fR, \fB--output\fR=\fIPATH\fR
 .RS 4
 In
 \fIlocal mode\fR, set trace output path to
@@ -287,7 +287,7 @@ Create shared memory holding buffers at
 .sp
 See the \fIURL format\fR section above for more information about the syntax of the following options\*(Aq \fIURL\fR argument\&.
 .PP
-\fB-C\fR, \fB--ctrl-url\fR=\fIURL\fR
+\fB-C\fR \fIURL\fR, \fB--ctrl-url\fR=\fIURL\fR
 .RS 4
 Set control path URL to
 \fIURL\fR
@@ -296,7 +296,7 @@ Set control path URL to
 option also)\&.
 .RE
 .PP
-\fB-D\fR, \fB--data-url\fR=\fIURL\fR
+\fB-D\fR \fIURL\fR, \fB--data-url\fR=\fIURL\fR
 .RS 4
 Set data path URL to
 \fIURL\fR
@@ -305,7 +305,7 @@ Set data path URL to
 option also)\&.
 .RE
 .PP
-\fB-U\fR, \fB--set-url\fR=\fIURL\fR
+\fB-U\fR \fIURL\fR, \fB--set-url\fR=\fIURL\fR
 .RS 4
 Set URL destination of the trace data to
 \fIURL\fR\&. It is persistent for the session lifetime\&. This option sets both data (\fB--data-url\fR

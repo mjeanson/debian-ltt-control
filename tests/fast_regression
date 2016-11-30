@@ -16,7 +16,8 @@ regression/tools/save-load/test_load
 regression/tools/mi/test_mi
 regression/tools/wildcard/test_event_wildcard
 regression/tools/crash/test_crash
-regression/tools/metadata-regen/test_ust
+regression/tools/regen-metadata/test_ust
+regression/tools/regen-statedump/test_ust
 regression/ust/before-after/test_before_after
 regression/ust/buffers-pid/test_buffers_pid
 regression/ust/multi-session/test_multi_session
@@ -30,3 +31,4 @@ regression/ust/clock-override/test_clock_override
 regression/ust/rotation-destroy-flush/test_rotation_destroy_flush
 regression/ust/test_event_basic
 regression/ust/test_event_tracef
+regression/ust/test_event_perf

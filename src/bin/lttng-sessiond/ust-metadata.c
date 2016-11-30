@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <common/common.h>
+#include <common/time.h>
 
 #include "ust-registry.h"
 #include "ust-clock.h"
@@ -37,7 +38,6 @@
 #define max_t(type, a, b)	((type) ((a) > (b) ? (a) : (b)))
 #endif
 
-#define NSEC_PER_SEC			1000000000ULL
 #define NR_CLOCK_OFFSET_SAMPLES		10
 
 struct offset_sample {
@@ -300,38 +300,53 @@ int ust_metadata_enum_statedump(struct ust_registry_session *session,
 				goto end;
 			}
 		}
-		ret = lttng_metadata_printf(session,
-				"\" = ");
+		ret = lttng_metadata_printf(session, "\"");
 		if (ret) {
 			goto end;
 		}
 
-		if (entry->start.signedness) {
-			ret = lttng_metadata_printf(session,
-				"%lld", (long long) entry->start.value);
+		if (entry->u.extra.options &
+				USTCTL_UST_ENUM_ENTRY_OPTION_IS_AUTO) {
+			ret = lttng_metadata_printf(session, ",\n");
+			if (ret) {
+				goto end;
+			}
 		} else {
 			ret = lttng_metadata_printf(session,
-				"%llu", entry->start.value);
-		}
-		if (ret) {
-			goto end;
-		}
+					" = ");
+			if (ret) {
+				goto end;
+			}
 
-		if (entry->start.signedness == entry->end.signedness &&
-				entry->start.value == entry->end.value) {
-			ret = lttng_metadata_printf(session,
-				",\n");
-		} else {
-			if (entry->end.signedness) {
+			if (entry->start.signedness) {
 				ret = lttng_metadata_printf(session,
-					" ... %lld,\n", (long long) entry->end.value);
+					"%lld", (long long) entry->start.value);
 			} else {
 				ret = lttng_metadata_printf(session,
-					" ... %llu,\n", entry->end.value);
+					"%llu", entry->start.value);
 			}
-		}
-		if (ret) {
-			goto end;
+			if (ret) {
+				goto end;
+			}
+
+			if (entry->start.signedness == entry->end.signedness &&
+					entry->start.value ==
+						entry->end.value) {
+				ret = lttng_metadata_printf(session, ",\n");
+			} else {
+				if (entry->end.signedness) {
+					ret = lttng_metadata_printf(session,
+						" ... %lld,\n",
+						(long long) entry->end.value);
+				} else {
+					ret = lttng_metadata_printf(session,
+						" ... %llu,\n",
+						entry->end.value);
+				}
+			}
+			if (ret) {
+				goto end;
+			}
 		}
 	}
 	nesting--;
@@ -804,7 +819,7 @@ int measure_single_clock_offset(struct offset_sample *sample)
 	int ret;
 
 	monotonic[0] = trace_clock_read64();
-	ret = clock_gettime(CLOCK_REALTIME, &rts);
+	ret = lttng_clock_gettime(CLOCK_REALTIME, &rts);
 	if (ret < 0) {
 		return ret;
 	}

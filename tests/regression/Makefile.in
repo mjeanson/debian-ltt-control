@@ -100,7 +100,8 @@ target_triplet = @target@
 @HAVE_LIBLTTNG_UST_CTL_TRUE@	ust/getcpu-override/test_getcpu_override \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@	ust/clock-override/test_clock_override \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@	ust/test_event_basic \
-@HAVE_LIBLTTNG_UST_CTL_TRUE@	ust/test_event_tracef
+@HAVE_LIBLTTNG_UST_CTL_TRUE@	ust/test_event_tracef \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@	ust/test_event_perf
 
 @PYTHON_BINDING_TRUE@am__append_3 = ust/linking/test_linking \
 @PYTHON_BINDING_TRUE@	ust/daemon/test_daemon \
@@ -443,7 +444,6 @@ CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
 CMD_DESCR_ADD_CONTEXT = @CMD_DESCR_ADD_CONTEXT@
-CMD_DESCR_CALIBRATE = @CMD_DESCR_CALIBRATE@
 CMD_DESCR_CREATE = @CMD_DESCR_CREATE@
 CMD_DESCR_DESTROY = @CMD_DESCR_DESTROY@
 CMD_DESCR_DISABLE_CHANNEL = @CMD_DESCR_DISABLE_CHANNEL@
@@ -453,7 +453,7 @@ CMD_DESCR_ENABLE_EVENT = @CMD_DESCR_ENABLE_EVENT@
 CMD_DESCR_HELP = @CMD_DESCR_HELP@
 CMD_DESCR_LIST = @CMD_DESCR_LIST@
 CMD_DESCR_LOAD = @CMD_DESCR_LOAD@
-CMD_DESCR_METADATA = @CMD_DESCR_METADATA@
+CMD_DESCR_REGENERATE = @CMD_DESCR_REGENERATE@
 CMD_DESCR_SAVE = @CMD_DESCR_SAVE@
 CMD_DESCR_SET_SESSION = @CMD_DESCR_SET_SESSION@
 CMD_DESCR_SNAPSHOT = @CMD_DESCR_SNAPSHOT@
@@ -659,6 +659,7 @@ psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
 report_fold = @report_fold@
+runstatedir = @runstatedir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -687,7 +688,8 @@ TESTS = tools/filtering/test_invalid_filter \
 	tools/snapshots/test_ust_streaming tools/save-load/test_save \
 	tools/save-load/test_load tools/mi/test_mi \
 	tools/wildcard/test_event_wildcard tools/crash/test_crash \
-	tools/metadata-regen/test_ust $(am__append_2) $(am__append_3)
+	tools/regen-metadata/test_ust tools/regen-statedump/test_ust \
+	$(am__append_2) $(am__append_3)
 all: all-recursive
 
 .SUFFIXES:
@@ -1094,9 +1096,16 @@ tools/crash/test_crash.log: tools/crash/test_crash
 	--log-file $$b.log --trs-file $$b.trs \
 	$(am__common_driver_flags) $(AM_LOG_DRIVER_FLAGS) $(LOG_DRIVER_FLAGS) -- $(LOG_COMPILE) \
 	"$$tst" $(AM_TESTS_FD_REDIRECT)
-tools/metadata-regen/test_ust.log: tools/metadata-regen/test_ust
-	@p='tools/metadata-regen/test_ust'; \
-	b='tools/metadata-regen/test_ust'; \
+tools/regen-metadata/test_ust.log: tools/regen-metadata/test_ust
+	@p='tools/regen-metadata/test_ust'; \
+	b='tools/regen-metadata/test_ust'; \
+	$(am__check_pre) $(LOG_DRIVER) --test-name "$$f" \
+	--log-file $$b.log --trs-file $$b.trs \
+	$(am__common_driver_flags) $(AM_LOG_DRIVER_FLAGS) $(LOG_DRIVER_FLAGS) -- $(LOG_COMPILE) \
+	"$$tst" $(AM_TESTS_FD_REDIRECT)
+tools/regen-statedump/test_ust.log: tools/regen-statedump/test_ust
+	@p='tools/regen-statedump/test_ust'; \
+	b='tools/regen-statedump/test_ust'; \
 	$(am__check_pre) $(LOG_DRIVER) --test-name "$$f" \
 	--log-file $$b.log --trs-file $$b.trs \
 	$(am__common_driver_flags) $(AM_LOG_DRIVER_FLAGS) $(LOG_DRIVER_FLAGS) -- $(LOG_COMPILE) \
@@ -1181,6 +1190,13 @@ ust/test_event_basic.log: ust/test_event_basic
 ust/test_event_tracef.log: ust/test_event_tracef
 	@p='ust/test_event_tracef'; \
 	b='ust/test_event_tracef'; \
+	$(am__check_pre) $(LOG_DRIVER) --test-name "$$f" \
+	--log-file $$b.log --trs-file $$b.trs \
+	$(am__common_driver_flags) $(AM_LOG_DRIVER_FLAGS) $(LOG_DRIVER_FLAGS) -- $(LOG_COMPILE) \
+	"$$tst" $(AM_TESTS_FD_REDIRECT)
+ust/test_event_perf.log: ust/test_event_perf
+	@p='ust/test_event_perf'; \
+	b='ust/test_event_perf'; \
 	$(am__check_pre) $(LOG_DRIVER) --test-name "$$f" \
 	--log-file $$b.log --trs-file $$b.trs \
 	$(am__common_driver_flags) $(AM_LOG_DRIVER_FLAGS) $(LOG_DRIVER_FLAGS) -- $(LOG_COMPILE) \

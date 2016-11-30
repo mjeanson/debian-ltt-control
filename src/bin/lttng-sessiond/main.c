@@ -73,6 +73,7 @@
 #include "load-session-thread.h"
 #include "syscall.h"
 #include "agent.h"
+#include "ht-cleanup.h"
 
 #define CONSUMERD_FILE	"lttng-consumerd"
 
@@ -190,7 +191,6 @@ static int kernel_poll_pipe[2] = { -1, -1 };
  * for all threads when receiving an event on the pipe.
  */
 static int thread_quit_pipe[2] = { -1, -1 };
-static int ht_cleanup_quit_pipe[2] = { -1, -1 };
 
 /*
  * This pipe is used to inform the thread managing application communication
@@ -316,6 +316,11 @@ struct lttng_ht *agent_apps_ht_by_sock = NULL;
 #define NR_LTTNG_SESSIOND_READY		3
 int lttng_sessiond_ready = NR_LTTNG_SESSIOND_READY;
 
+int sessiond_check_thread_quit_pipe(int fd, uint32_t events)
+{
+	return (fd == thread_quit_pipe[0] && (events & LPOLLIN)) ? 1 : 0;
+}
+
 /* Notify parents that we are ready for cmd and health check */
 LTTNG_HIDDEN
 void sessiond_notify_ready(void)
@@ -423,47 +428,6 @@ int sessiond_set_thread_pollset(struct lttng_poll_event *events, size_t size)
 }
 
 /*
- * Create a poll set with O_CLOEXEC and add the thread quit pipe to the set.
- */
-int sessiond_set_ht_cleanup_thread_pollset(struct lttng_poll_event *events,
-		size_t size)
-{
-	return __sessiond_set_thread_pollset(events, size,
-			ht_cleanup_quit_pipe);
-}
-
-static
-int __sessiond_check_thread_quit_pipe(int fd, uint32_t events, int a_pipe)
-{
-	if (fd == a_pipe && (events & LPOLLIN)) {
-		return 1;
-	}
-	return 0;
-}
-
-/*
- * Check if the thread quit pipe was triggered.
- *
- * Return 1 if it was triggered else 0;
- */
-int sessiond_check_thread_quit_pipe(int fd, uint32_t events)
-{
-	return __sessiond_check_thread_quit_pipe(fd, events,
-			thread_quit_pipe[0]);
-}
-
-/*
- * Check if the ht_cleanup thread quit pipe was triggered.
- *
- * Return 1 if it was triggered else 0;
- */
-int sessiond_check_ht_cleanup_quit(int fd, uint32_t events)
-{
-	return __sessiond_check_thread_quit_pipe(fd, events,
-			ht_cleanup_quit_pipe[0]);
-}
-
-/*
  * Init thread quit pipe.
  *
  * Return -1 on error or 0 if all pipes are created.
@@ -493,11 +457,6 @@ error:
 static int init_thread_quit_pipe(void)
 {
 	return __init_thread_quit_pipe(thread_quit_pipe);
-}
-
-static int init_ht_cleanup_quit_pipe(void)
-{
-	return __init_thread_quit_pipe(ht_cleanup_quit_pipe);
 }
 
 /*
@@ -801,12 +760,6 @@ static void sessiond_cleanup_options(void)
 	free(kmod_extra_probes_list);
 
 	run_as_destroy_worker();
-
-	/* <fun> */
-	DBG("%c[%d;%dm*** assert failed :-) *** ==> %c[%dm%c[%d;%dm"
-			"Matthew, BEET driven development works!%c[%dm",
-			27, 1, 31, 27, 0, 27, 1, 33, 27, 0);
-	/* </fun> */
 }
 
 /*
@@ -1398,7 +1351,6 @@ restart:
 		consumer_data->metadata_sock.lock = zmalloc(sizeof(pthread_mutex_t));
 		if (consumer_data->metadata_sock.lock == NULL) {
 			PERROR("zmalloc pthread mutex");
-			ret = -1;
 			goto error;
 		}
 		pthread_mutex_init(consumer_data->metadata_sock.lock, NULL);
@@ -2374,7 +2326,12 @@ static int spawn_consumer_thread(struct consumer_data *consumer_data)
 	int ret, clock_ret;
 	struct timespec timeout;
 
-	/* Make sure we set the readiness flag to 0 because we are NOT ready */
+	/*
+	 * Make sure we set the readiness flag to 0 because we are NOT ready.
+	 * This access to consumer_thread_is_ready does not need to be
+	 * protected by consumer_data.cond_mutex (yet) since the consumer
+	 * management thread has not been started at this point.
+	 */
 	consumer_data->consumer_thread_is_ready = 0;
 
 	/* Setup pthread condition */
@@ -2404,8 +2361,8 @@ static int spawn_consumer_thread(struct consumer_data *consumer_data)
 		goto error;
 	}
 
-	ret = pthread_create(&consumer_data->thread, NULL, thread_manage_consumer,
-			consumer_data);
+	ret = pthread_create(&consumer_data->thread, default_pthread_attr(),
+			thread_manage_consumer, consumer_data);
 	if (ret) {
 		errno = ret;
 		PERROR("pthread_create consumer");
@@ -2417,7 +2374,7 @@ static int spawn_consumer_thread(struct consumer_data *consumer_data)
 	pthread_mutex_lock(&consumer_data->cond_mutex);
 
 	/* Get time for sem_timedwait absolute timeout */
-	clock_ret = clock_gettime(CLOCK_MONOTONIC, &timeout);
+	clock_ret = lttng_clock_gettime(CLOCK_MONOTONIC, &timeout);
 	/*
 	 * Set the timeout for the condition timed wait even if the clock gettime
 	 * call fails since we might loop on that call and we want to avoid to
@@ -3042,7 +2999,8 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 	case LTTNG_SNAPSHOT_RECORD:
 	case LTTNG_SAVE_SESSION:
 	case LTTNG_SET_SESSION_SHM_PATH:
-	case LTTNG_METADATA_REGENERATE:
+	case LTTNG_REGENERATE_METADATA:
+	case LTTNG_REGENERATE_STATEDUMP:
 		need_domain = 0;
 		break;
 	default:
@@ -3100,7 +3058,6 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int sock,
 	case LTTNG_CREATE_SESSION:
 	case LTTNG_CREATE_SESSION_SNAPSHOT:
 	case LTTNG_CREATE_SESSION_LIVE:
-	case LTTNG_CALIBRATE:
 	case LTTNG_LIST_SESSIONS:
 	case LTTNG_LIST_TRACEPOINTS:
 	case LTTNG_LIST_SYSCALLS:
@@ -3942,12 +3899,6 @@ error_add_context:
 		ret = LTTNG_OK;
 		break;
 	}
-	case LTTNG_CALIBRATE:
-	{
-		ret = cmd_calibrate(cmd_ctx->lsm->domain.type,
-				&cmd_ctx->lsm->u.calibrate);
-		break;
-	}
 	case LTTNG_REGISTER_CONSUMER:
 	{
 		struct consumer_data *cdata;
@@ -4153,9 +4104,14 @@ error_add_context:
 				cmd_ctx->lsm->u.set_shm_path.shm_path);
 		break;
 	}
-	case LTTNG_METADATA_REGENERATE:
+	case LTTNG_REGENERATE_METADATA:
 	{
-		ret = cmd_metadata_regenerate(cmd_ctx->session);
+		ret = cmd_regenerate_metadata(cmd_ctx->session);
+		break;
+	}
+	case LTTNG_REGENERATE_STATEDUMP:
+	{
+		ret = cmd_regenerate_statedump(cmd_ctx->session);
 		break;
 	}
 	default:
@@ -4206,7 +4162,6 @@ static void *thread_manage_health(void *data)
 	sock = lttcomm_create_unix_sock(health_unix_sock_path);
 	if (sock < 0) {
 		ERR("Unable to create health check Unix socket");
-		ret = -1;
 		goto error;
 	}
 
@@ -4217,7 +4172,6 @@ static void *thread_manage_health(void *data)
 		if (ret < 0) {
 			ERR("Unable to set group on %s", health_unix_sock_path);
 			PERROR("chown");
-			ret = -1;
 			goto error;
 		}
 
@@ -4226,7 +4180,6 @@ static void *thread_manage_health(void *data)
 		if (ret < 0) {
 			ERR("Unable to set permissions on %s", health_unix_sock_path);
 			PERROR("chmod");
-			ret = -1;
 			goto error;
 		}
 	}
@@ -4327,7 +4280,6 @@ restart:
 			if (ret) {
 				PERROR("close");
 			}
-			new_sock = -1;
 			continue;
 		}
 
@@ -4356,7 +4308,6 @@ restart:
 		if (ret) {
 			PERROR("close");
 		}
-		new_sock = -1;
 	}
 
 exit:
@@ -4374,7 +4325,7 @@ error:
 	}
 
 	lttng_poll_clean(&events);
-
+	stop_threads();
 	rcu_unregister_thread();
 	return NULL;
 }
@@ -4928,10 +4879,6 @@ static int set_option(int opt, const char *arg, const char *optname)
 		} else {
 			unsigned long v;
 
-			if (!arg) {
-				ret = -EINVAL;
-				goto end;
-			}
 			errno = 0;
 			v = strtoul(arg, NULL, 0);
 			if (errno != 0 || !isdigit(arg[0])) {
@@ -5479,14 +5426,14 @@ static int set_signal_handler(void)
 
 /*
  * Set open files limit to unlimited. This daemon can open a large number of
- * file descriptors in order to consumer multiple kernel traces.
+ * file descriptors in order to consume multiple kernel traces.
  */
 static void set_ulimit(void)
 {
 	int ret;
 	struct rlimit lim;
 
-	/* The kernel does not allowed an infinite limit for open files */
+	/* The kernel does not allow an infinite limit for open files */
 	lim.rlim_cur = 65535;
 	lim.rlim_max = 65535;
 
@@ -5655,29 +5602,8 @@ int main(int argc, char **argv)
 		goto exit_health_sessiond_cleanup;
 	}
 
-	if (init_ht_cleanup_quit_pipe()) {
-		retval = -1;
-		goto exit_ht_cleanup_quit_pipe;
-	}
-
-	/* Setup the thread ht_cleanup communication pipe. */
-	if (utils_create_pipe_cloexec(ht_cleanup_pipe)) {
-		retval = -1;
-		goto exit_ht_cleanup_pipe;
-	}
-
-	/* Set up max poll set size */
-	if (lttng_poll_set_max_size()) {
-		retval = -1;
-		goto exit_set_max_size;
-	}
-
 	/* Create thread to clean up RCU hash tables */
-	ret = pthread_create(&ht_cleanup_thread, NULL,
-			thread_ht_cleanup, (void *) NULL);
-	if (ret) {
-		errno = ret;
-		PERROR("pthread_create ht_cleanup");
+	if (init_ht_cleanup_thread(&ht_cleanup_thread)) {
 		retval = -1;
 		goto exit_ht_cleanup;
 	}
@@ -6045,7 +5971,7 @@ int main(int argc, char **argv)
 	load_info->path = opt_load_session_path;
 
 	/* Create health-check thread */
-	ret = pthread_create(&health_thread, NULL,
+	ret = pthread_create(&health_thread, default_pthread_attr(),
 			thread_manage_health, (void *) NULL);
 	if (ret) {
 		errno = ret;
@@ -6055,7 +5981,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Create thread to manage the client socket */
-	ret = pthread_create(&client_thread, NULL,
+	ret = pthread_create(&client_thread, default_pthread_attr(),
 			thread_manage_clients, (void *) NULL);
 	if (ret) {
 		errno = ret;
@@ -6065,7 +5991,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Create thread to dispatch registration */
-	ret = pthread_create(&dispatch_thread, NULL,
+	ret = pthread_create(&dispatch_thread, default_pthread_attr(),
 			thread_dispatch_ust_registration, (void *) NULL);
 	if (ret) {
 		errno = ret;
@@ -6075,7 +6001,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Create thread to manage application registration. */
-	ret = pthread_create(&reg_apps_thread, NULL,
+	ret = pthread_create(&reg_apps_thread, default_pthread_attr(),
 			thread_registration_apps, (void *) NULL);
 	if (ret) {
 		errno = ret;
@@ -6085,7 +6011,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Create thread to manage application socket */
-	ret = pthread_create(&apps_thread, NULL,
+	ret = pthread_create(&apps_thread, default_pthread_attr(),
 			thread_manage_apps, (void *) NULL);
 	if (ret) {
 		errno = ret;
@@ -6095,7 +6021,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Create thread to manage application notify socket */
-	ret = pthread_create(&apps_notify_thread, NULL,
+	ret = pthread_create(&apps_notify_thread, default_pthread_attr(),
 			ust_thread_manage_notify, (void *) NULL);
 	if (ret) {
 		errno = ret;
@@ -6105,7 +6031,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Create agent registration thread. */
-	ret = pthread_create(&agent_reg_thread, NULL,
+	ret = pthread_create(&agent_reg_thread, default_pthread_attr(),
 			agent_thread_manage_registration, (void *) NULL);
 	if (ret) {
 		errno = ret;
@@ -6117,7 +6043,7 @@ int main(int argc, char **argv)
 	/* Don't start this thread if kernel tracing is not requested nor root */
 	if (is_root && !opt_no_kernel) {
 		/* Create kernel thread to manage kernel event */
-		ret = pthread_create(&kernel_thread, NULL,
+		ret = pthread_create(&kernel_thread, default_pthread_attr(),
 				thread_manage_kernel, (void *) NULL);
 		if (ret) {
 			errno = ret;
@@ -6128,8 +6054,8 @@ int main(int argc, char **argv)
 	}
 
 	/* Create session loading thread. */
-	ret = pthread_create(&load_session_thread, NULL, thread_load_session,
-			load_info);
+	ret = pthread_create(&load_session_thread, default_pthread_attr(),
+			thread_load_session, load_info);
 	if (ret) {
 		errno = ret;
 		PERROR("pthread_create load_session_thread");
@@ -6237,29 +6163,11 @@ exit_init_data:
 	 */
 	rcu_barrier();
 
-	ret = notify_thread_pipe(ht_cleanup_quit_pipe[1]);
-	if (ret < 0) {
-		ERR("write error on ht_cleanup quit pipe");
-		retval = -1;
-	}
-
-	ret = pthread_join(ht_cleanup_thread, &status);
+	ret = fini_ht_cleanup_thread(&ht_cleanup_thread);
 	if (ret) {
-		errno = ret;
-		PERROR("pthread_join ht cleanup thread");
 		retval = -1;
 	}
 exit_ht_cleanup:
-exit_set_max_size:
-
-	utils_close_pipe(ht_cleanup_pipe);
-exit_ht_cleanup_pipe:
-
-	/*
-	 * Close the ht_cleanup quit pipe.
-	 */
-	utils_close_pipe(ht_cleanup_quit_pipe);
-exit_ht_cleanup_quit_pipe:
 
 	health_app_destroy(health_sessiond);
 exit_health_sessiond_cleanup:

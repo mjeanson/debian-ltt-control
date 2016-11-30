@@ -66,7 +66,6 @@ DECL_COMMAND(disable_channels);
 DECL_COMMAND(add_context);
 DECL_COMMAND(set_session);
 DECL_COMMAND(version);
-DECL_COMMAND(calibrate);
 DECL_COMMAND(view);
 DECL_COMMAND(enable_consumer);
 DECL_COMMAND(disable_consumer);
@@ -76,6 +75,7 @@ DECL_COMMAND(load);
 DECL_COMMAND(track);
 DECL_COMMAND(untrack);
 DECL_COMMAND(metadata);
+DECL_COMMAND(regenerate);
 
 extern int cmd_help(int argc, const char **argv,
 		const struct cmd_struct commands[]);

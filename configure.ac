@@ -1,5 +1,5 @@
 AC_PREREQ([2.64])
-AC_INIT([lttng-tools],[2.8.2],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
+AC_INIT([lttng-tools],[2.9.0],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
 
 AC_CONFIG_HEADERS([include/config.h])
 AC_CONFIG_AUX_DIR([config])
@@ -77,8 +77,8 @@ AC_DEFINE_UNQUOTED([VERSION_MAJOR], $major_version, [LTTng-Tools major version n
 AC_DEFINE_UNQUOTED([VERSION_MINOR], $minor_version, [LTTng-Tools minor version number])
 AC_DEFINE_UNQUOTED([VERSION_PATCHLEVEL], $patchlevel_version, [LTTng-Tools patchlevel version number])
 
-version_name="Isseki Nicho"
-version_description='The result of a collaboration between "Dieu du Ciel!" and Nagano-based "Shiga Kogen", Isseki Nicho is a strong Imperial Dark Saison offering a rich roasted malt flavor combined with a complex fruity finish typical of Saison yeasts.'
+version_name="Joannès"
+version_description='Berliner Weisse style beer from the Trèfle Noir microbrewery in Rouyn-Noranda. It is a tangy beer with a distinct pink dress and intense fruit flavor, thanks to the presence of fresh blackcurrant grown in Témiscamingue.'
 version_description_c=$(echo $version_description | $SED 's/"/\\"/g')
 
 AC_DEFINE_UNQUOTED([VERSION_NAME], ["$version_name"], "")
@@ -126,6 +126,10 @@ AC_CHECK_FUNCS([ \
 	strncasecmp strndup strnlen strpbrk strrchr strstr strtol strtoul \
 	strtoull dirfd gethostbyname2 getipnodebyname epoll_create1 \
 ])
+
+# Check if clock_gettime, timer_create, timer_settime, and timer_delete are available in lib rt, and if so,
+# add -lrt to LIBS
+AC_CHECK_LIB([rt], [clock_gettime, timer_create, timer_settime, timer_delete])
 
 # Babeltrace viewer check
 AC_ARG_WITH([babeltrace-bin],
@@ -267,7 +271,6 @@ _AC_DEFINE_QUOTED_AND_SUBST([DEFAULT_NETWORK_VIEWER_BIND_ADDRESS], [localhost])
 
 # Command short descriptions
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_ADD_CONTEXT], [Add context fields to a channel])
-_AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_CALIBRATE], [Quantify LTTng overhead])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_CREATE], [Create a tracing session])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_DESTROY], [Tear down tracing sessions])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_DISABLE_CHANNEL], [Disable tracing channels])
@@ -277,7 +280,7 @@ _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_ENABLE_EVENT], [Create or enable event ru
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_HELP], [Display help information about a command])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_LIST], [List tracing sessions, domains, channels, and events])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_LOAD], [Load tracing session configurations])
-_AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_METADATA], [Manage an LTTng tracing session's metadata generation])
+_AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_REGENERATE], [Manage an LTTng tracing session's data regeneration])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_SAVE], [Save tracing session configurations])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_SET_SESSION], [Set current tracing session])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_SNAPSHOT], [Snapshot buffers of current tracing session])
@@ -322,21 +325,28 @@ PKG_CHECK_MODULES([POPT], [popt],
 
 PKG_CHECK_MODULES([libxml2], [libxml-2.0 >= 2.7.6])
 
-# Check for libuuid
+# Check for uuid in system libs
+AC_CHECK_FUNCS([uuid_generate],
+[
+	AC_DEFINE_UNQUOTED([LTTNG_HAVE_LIBUUID], 1, [Has libuuid support.])
+	link_with_libuuid=no
+],
+[
+# First, check the pkg-config module is available, otherwise explicitly check
+# for libuuid, or uuid support in the C-library.
 PKG_CHECK_MODULES([UUID], [uuid],
 [
 	LIBS="$LIBS $UUID_LIBS"
 	AC_DEFINE_UNQUOTED([LTTNG_HAVE_LIBUUID], 1, [Has libuuid support.])
-	have_libuuid=yes
+	link_with_libuuid=yes
 ],
 [
-	AC_MSG_WARN([pkg-config was unable to find a valid .pc for libuuid. Set PKG_CONFIG_PATH to specify the pkgconfig configuration file location])
-	AC_MSG_WARN([Finding libuuid without pkg-config.])
+	# Check for libuuid
 	AC_CHECK_LIB([uuid],
 		[uuid_generate],
 		[
 			AC_DEFINE_UNQUOTED([LTTNG_HAVE_LIBUUID], 1, [Has libuuid support.])
-			have_libuuid=yes
+			link_with_libuuid=yes
 		],
 		[
 			# libuuid not found, check for uuid_create in libc.
@@ -344,7 +354,7 @@ PKG_CHECK_MODULES([UUID], [uuid],
 				[uuid_create],
 				[
 					AC_DEFINE_UNQUOTED([LTTNG_HAVE_LIBC_UUID], 1, [Has libc uuid support.])
-					have_libc_uuid=yes
+					link_with_libc_uuid=yes
 				],
 				[
 					AC_MSG_ERROR([Cannot find libuuid uuid_generate nor libc uuid_create. Either set PKG_CONFIG_PATH to the configuration file location or use LDFLAGS=-Ldir to specify the library location])
@@ -353,8 +363,12 @@ PKG_CHECK_MODULES([UUID], [uuid],
 		]
 	)
 ])
-AM_CONDITIONAL([LTTNG_BUILD_WITH_LIBUUID], [test "x$have_libuuid" = "xyes"])
-AM_CONDITIONAL([LTTNG_BUILD_WITH_LIBC_UUID], [test "x$have_libc_uuid" = "xyes"])
+])
+
+AM_CONDITIONAL([LTTNG_BUILD_WITH_LIBUUID], [test "x$link_with_libuuid" = "xyes"])
+AM_CONDITIONAL([LTTNG_BUILD_WITH_LIBC_UUID], [test "x$link_with_libc_uuid" = "xyes"])
+
+AC_CHECK_FUNC([clock_gettime], [AC_DEFINE_UNQUOTED([LTTNG_HAVE_CLOCK_GETTIME], 1, [Has clock_gettime() support.])])
 
 # URCU library version needed or newer
 m4_define([WRONG_LIBURCU_MSG], [Userspace RCU (liburcu) >= 0.8.0 is needed])
@@ -466,6 +480,13 @@ AC_CHECK_LIB([c], [open_memstream],
 	AC_DEFINE_UNQUOTED([LTTNG_HAVE_OPEN_MEMSTREAM], 1, [Has open_memstream support.])
 ]
 )
+
+# check for libpfm
+AC_CHECK_LIB([pfm], [pfm_initialize],
+	     [
+	      have_libpfm=yes
+	      ])
+AM_CONDITIONAL([LTTNG_TOOLS_BUILD_WITH_LIBPFM], [test "x$have_libpfm" = "xyes"])
 
 AC_ARG_ENABLE([git-version],
               [AC_HELP_STRING([--disable-git-version],
@@ -583,6 +604,7 @@ AC_ARG_ENABLE(
 
 # check for asciidoc and xmlto if we enabled building the man pages
 have_asciidoc_xmlto=no
+warn_prebuilt_man_pages=no
 
 AS_IF([test "x$man_pages_opt" = "xyes"], [
 	AC_PATH_PROG([ASCIIDOC], [asciidoc], [no])
@@ -595,7 +617,7 @@ AS_IF([test "x$man_pages_opt" = "xyes"], [
 			# thus asciidoc/xmlto are required because we were asked
 			# to build the man pages
 			AC_MSG_ERROR([
-Both asciidoc and xmlto are needed to build the LTTng man pages. Use
+You need asciidoc and xmlto to build the LTTng-tools man pages. Use
 --disable-man-pages to disable building the man pages, in which case
 they will not be installed.
 			])
@@ -603,13 +625,7 @@ they will not be installed.
 			# only warn here: since we're in the tarball, the man
 			# pages should already be generated at this point, thus
 			# asciidoc/xmlto are not strictly required
-			AC_MSG_WARN([
-Both asciidoc and xmlto are needed to build the LTTng man pages. Note
-that the man pages are already built in this distribution tarball, so
-asciidoc and xmlto are only needed if you intend to modify their
-sources. Use --disable-man-pages to completely disable building
-and installing the man pages.
-			])
+			warn_prebuilt_man_pages=yes
 		])
 	], [
 		have_asciidoc_xmlto=yes
@@ -977,10 +993,12 @@ AC_CONFIG_FILES([
 	tests/regression/tools/live/Makefile
 	tests/regression/tools/exclusion/Makefile
 	tests/regression/tools/save-load/Makefile
+	tests/regression/tools/save-load/configuration/Makefile
 	tests/regression/tools/mi/Makefile
 	tests/regression/tools/wildcard/Makefile
 	tests/regression/tools/crash/Makefile
-	tests/regression/tools/metadata-regen/Makefile
+	tests/regression/tools/regen-metadata/Makefile
+	tests/regression/tools/regen-statedump/Makefile
 	tests/regression/ust/Makefile
 	tests/regression/ust/nprocesses/Makefile
 	tests/regression/ust/high-throughput/Makefile
@@ -1008,6 +1026,7 @@ AC_CONFIG_FILES([
 	tests/stress/Makefile
 	tests/unit/Makefile
 	tests/unit/ini_config/Makefile
+	tests/perf/Makefile
 	tests/utils/Makefile
 	tests/utils/tap/Makefile
 	tests/utils/testapp/Makefile
@@ -1018,6 +1037,8 @@ AC_CONFIG_FILES([
 
 # Inject variable into python test script.
 AC_CONFIG_FILES([tests/regression/ust/python-logging/test_python_logging],[chmod +x tests/regression/ust/python-logging/test_python_logging])
+# Inject LTTNG_TOOLS_BUILD_WITH_LIBPFM variable in test script.
+AC_CONFIG_FILES([tests/perf/test_perf_raw],[chmod +x tests/perf/test_perf_raw])
 
 AC_OUTPUT
 
@@ -1187,3 +1208,19 @@ AS_IF([test "$CONSUMERD64_LIBDIR" = ""],[
 	path="$CONSUMERD64_LIBDIR"
 ])
 PPRINT_PROP_STRING([64-bit consumer libraries], [$path])
+PPRINT_SET_INDENT(0)
+
+AS_IF([test "x$warn_prebuilt_man_pages" = "xyes" ], [
+	AS_ECHO
+	PPRINT_WARN([You need asciidoc and xmlto to build the LTTng-tools man pages.
+
+Note that the man pages are already built in this distribution tarball,
+therefore asciidoc and xmlto are only needed if you intend to modify
+their sources.
+
+Also note that the installed man pages will contain the project's
+default command-line option and environment variable values.
+
+Use --disable-man-pages to completely disable building and installing
+the man pages.])
+])

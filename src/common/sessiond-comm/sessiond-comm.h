@@ -56,7 +56,7 @@
 enum lttcomm_sessiond_command {
 	/* Tracer command */
 	LTTNG_ADD_CONTEXT                   = 0,
-	LTTNG_CALIBRATE                     = 1,
+	/* LTTNG_CALIBRATE used to be here */
 	LTTNG_DISABLE_CHANNEL               = 2,
 	LTTNG_DISABLE_EVENT                 = 3,
 	LTTNG_LIST_SYSCALLS                 = 4,
@@ -94,7 +94,8 @@ enum lttcomm_sessiond_command {
 	LTTNG_UNTRACK_PID                   = 33,
 	LTTNG_LIST_TRACKER_PIDS             = 34,
 	LTTNG_SET_SESSION_SHM_PATH          = 40,
-	LTTNG_METADATA_REGENERATE           = 41,
+	LTTNG_REGENERATE_METADATA           = 41,
+	LTTNG_REGENERATE_STATEDUMP          = 42,
 };
 
 enum lttcomm_relayd_command {
@@ -526,7 +527,7 @@ struct lttcomm_consumer_msg {
 		} LTTNG_PACKED lost_packets;
 		struct {
 			uint64_t session_id;
-		} LTTNG_PACKED metadata_regenerate;
+		} LTTNG_PACKED regenerate_metadata;
 	} u;
 } LTTNG_PACKED;
 

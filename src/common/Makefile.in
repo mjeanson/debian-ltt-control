@@ -102,6 +102,8 @@ target_triplet = @target@
 @BUILD_LIB_INDEX_TRUE@am__append_10 = index
 @BUILD_LIB_CONFIG_TRUE@am__append_11 = config
 @BUILD_LIB_CONSUMER_TRUE@am__append_12 = consumer
+@LTTNG_BUILD_WITH_LIBUUID_TRUE@am__append_13 = -luuid
+@LTTNG_BUILD_WITH_LIBC_UUID_TRUE@am__append_14 = -lc
 subdir = src/common
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/ac_define_dir.m4 \
@@ -135,8 +137,10 @@ CONFIG_HEADER = $(top_builddir)/include/config.h
 CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 LTLIBRARIES = $(noinst_LTLIBRARIES)
+am__DEPENDENCIES_1 =
 libcommon_la_DEPENDENCIES =  \
-	$(top_builddir)/src/common/config/libconfig.la
+	$(top_builddir)/src/common/config/libconfig.la \
+	$(am__DEPENDENCIES_1) $(am__DEPENDENCIES_1)
 am_libcommon_la_OBJECTS = error.lo utils.lo runas.lo futex.lo uri.lo \
 	defaults.lo pipe.lo readwrite.lo mi-lttng.lo daemonize.lo \
 	unix.lo filter.lo context.lo
@@ -264,7 +268,6 @@ CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
 CMD_DESCR_ADD_CONTEXT = @CMD_DESCR_ADD_CONTEXT@
-CMD_DESCR_CALIBRATE = @CMD_DESCR_CALIBRATE@
 CMD_DESCR_CREATE = @CMD_DESCR_CREATE@
 CMD_DESCR_DESTROY = @CMD_DESCR_DESTROY@
 CMD_DESCR_DISABLE_CHANNEL = @CMD_DESCR_DISABLE_CHANNEL@
@@ -274,7 +277,7 @@ CMD_DESCR_ENABLE_EVENT = @CMD_DESCR_ENABLE_EVENT@
 CMD_DESCR_HELP = @CMD_DESCR_HELP@
 CMD_DESCR_LIST = @CMD_DESCR_LIST@
 CMD_DESCR_LOAD = @CMD_DESCR_LOAD@
-CMD_DESCR_METADATA = @CMD_DESCR_METADATA@
+CMD_DESCR_REGENERATE = @CMD_DESCR_REGENERATE@
 CMD_DESCR_SAVE = @CMD_DESCR_SAVE@
 CMD_DESCR_SET_SESSION = @CMD_DESCR_SET_SESSION@
 CMD_DESCR_SNAPSHOT = @CMD_DESCR_SNAPSHOT@
@@ -480,6 +483,7 @@ psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
 report_fold = @report_fold@
+runstatedir = @runstatedir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -507,7 +511,7 @@ DIST_SUBDIRS = compat health hashtable kernel-ctl sessiond-comm relayd \
 AM_CFLAGS = -fno-strict-aliasing
 noinst_HEADERS = lttng-kernel.h defaults.h macros.h error.h futex.h \
 				 uri.h utils.h lttng-kernel-old.h \
-				 align.h bitfield.h bug.h
+				 align.h bitfield.h bug.h time.h
 
 
 # Common library
@@ -521,11 +525,8 @@ libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
                        unix.c unix.h \
                        filter.c filter.h context.c context.h
 
-libcommon_la_LIBADD = \
-		-luuid \
-		-lrt \
-		$(top_builddir)/src/common/config/libconfig.la
-
+libcommon_la_LIBADD = $(top_builddir)/src/common/config/libconfig.la \
+	$(am__append_13) $(am__append_14)
 all: all-recursive
 
 .SUFFIXES:

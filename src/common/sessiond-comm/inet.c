@@ -26,15 +26,14 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <time.h>
+#include <common/compat/time.h>
 #include <poll.h>
 
 #include <common/common.h>
+#include <common/time.h>
 
 #include "inet.h"
 
-#define MSEC_PER_SEC	1000
-#define NSEC_PER_MSEC	1000000
 #define RECONNECT_DELAY	200	/* ms */
 
 /*
@@ -159,7 +158,7 @@ int connect_with_timeout(struct lttcomm_sock *sock)
 		return -1;
 	}
 
-	ret = clock_gettime(CLOCK_MONOTONIC, &orig_time);
+	ret = lttng_clock_gettime(CLOCK_MONOTONIC, &orig_time);
 	if (ret == -1) {
 		PERROR("clock_gettime");
 		return -1;
@@ -213,7 +212,7 @@ int connect_with_timeout(struct lttcomm_sock *sock)
 			}
 		}
 		/* ret == 0: timeout */
-		ret = clock_gettime(CLOCK_MONOTONIC, &cur_time);
+		ret = lttng_clock_gettime(CLOCK_MONOTONIC, &cur_time);
 		if (ret == -1) {
 			PERROR("clock_gettime");
 			connect_ret = ret;

@@ -2,12 +2,12 @@
 .\"     Title: lttng-crash
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 10/07/2016
+.\"      Date: 11/29/2016
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.8.2
+.\"    Source: LTTng 2.9.0
 .\"  Language: English
 .\"
-.TH "LTTNG\-CRASH" "1" "10/07/2016" "LTTng 2\&.8\&.2" "LTTng Manual"
+.TH "LTTNG\-CRASH" "1" "11/29/2016" "LTTng 2\&.9\&.0" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -43,7 +43,7 @@ LTTng consists of Linux kernel modules (for Linux kernel tracing) and dynamicall
 The \fI\fBlttng-crash\fR\fR command\-line tool is used to recover and view LTTng trace buffers in the event of a system crash\&.
 .SH "OPTIONS"
 .PP
-\fB-x\fR, \fB--extract\fR=\fIPATH\fR
+\fB-x\fR \fIPATH\fR, \fB--extract\fR=\fIPATH\fR
 .RS 4
 Extract recovered traces to path
 \fIPATH\fR; do not execute the trace viewer\&.
@@ -61,7 +61,7 @@ and
 \fB-vvv\fR)\&.
 .RE
 .PP
-\fB-e\fR, \fB--viewer\fR=\fIVIEWER\fR
+\fB-e\fR \fIVIEWER\fR, \fB--viewer\fR=\fIVIEWER\fR
 .RS 4
 Use trace viewer
 \fIVIEWER\fR

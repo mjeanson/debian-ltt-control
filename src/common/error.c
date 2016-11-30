@@ -46,7 +46,7 @@ const char *log_add_time(void)
 	struct timespec tp;
 	time_t now;
 
-	ret = clock_gettime(CLOCK_REALTIME, &tp);
+	ret = lttng_clock_gettime(CLOCK_REALTIME, &tp);
 	if (ret < 0) {
 		goto error;
 	}
@@ -183,6 +183,9 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_LIVE_SESSION) ] = "Live sessions are not supported",
 	[ ERROR_INDEX(LTTNG_ERR_PER_PID_SESSION) ] = "Per-PID tracing sessions are not supported",
 	[ ERROR_INDEX(LTTNG_ERR_KERN_CONTEXT_UNAVAILABLE) ] = "Context unavailable on this kernel",
+	[ ERROR_INDEX(LTTNG_ERR_REGEN_STATEDUMP_FAIL) ] = "Failed to regenerate the state dump",
+	[ ERROR_INDEX(LTTNG_ERR_REGEN_STATEDUMP_NOMEM) ] = "Failed to regenerate the state dump, not enough memory",
+	[ ERROR_INDEX(LTTNG_ERR_NOT_SNAPSHOT_SESSION) ] = "Snapshot command can't be applied to a non-snapshot session",
 
 	/* Last element */
 	[ ERROR_INDEX(LTTNG_ERR_NR) ] = "Unknown error code"
