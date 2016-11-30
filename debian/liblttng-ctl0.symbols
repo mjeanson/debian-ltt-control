@@ -157,22 +157,36 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_load_session_attr_create@Base 2.5.0
  lttng_load_session_attr_destroy@Base 2.5.0
  lttng_load_session_attr_get_input_url@Base 2.5.0
+ lttng_load_session_attr_get_override_ctrl_url@Base 2.9.0
+ lttng_load_session_attr_get_override_data_url@Base 2.9.0
+ lttng_load_session_attr_get_override_session_name@Base 2.9.0
+ lttng_load_session_attr_get_override_url@Base 2.9.0
  lttng_load_session_attr_get_overwrite@Base 2.5.0
  lttng_load_session_attr_get_session_name@Base 2.5.0
  lttng_load_session_attr_set_input_url@Base 2.5.0
+ lttng_load_session_attr_set_override_ctrl_url@Base 2.9.0
+ lttng_load_session_attr_set_override_data_url@Base 2.9.0
+ lttng_load_session_attr_set_override_session_name@Base 2.9.0
+ lttng_load_session_attr_set_override_url@Base 2.9.0
  lttng_load_session_attr_set_overwrite@Base 2.5.0
  lttng_load_session_attr_set_session_name@Base 2.5.0
  lttng_metadata_regenerate@Base 2.8.0
  lttng_opt_mi@Base 2.6.0
  lttng_opt_quiet@Base 2.3.0
  lttng_opt_verbose@Base 2.3.0
+ lttng_regenerate_metadata@Base 2.9.0
+ lttng_regenerate_statedump@Base 2.9.0
  lttng_register_consumer@Base 2.3.0
  lttng_save_session@Base 2.5.0
  lttng_save_session_attr_create@Base 2.5.0
  lttng_save_session_attr_destroy@Base 2.5.0
+ lttng_save_session_attr_get_omit_name@Base 2.9.0
+ lttng_save_session_attr_get_omit_output@Base 2.9.0
  lttng_save_session_attr_get_output_url@Base 2.5.0
  lttng_save_session_attr_get_overwrite@Base 2.5.0
  lttng_save_session_attr_get_session_name@Base 2.5.0
+ lttng_save_session_attr_set_omit_name@Base 2.9.0
+ lttng_save_session_attr_set_omit_output@Base 2.9.0
  lttng_save_session_attr_set_output_url@Base 2.5.0
  lttng_save_session_attr_set_overwrite@Base 2.5.0
  lttng_save_session_attr_set_session_name@Base 2.5.0
