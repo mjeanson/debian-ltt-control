@@ -1,0 +1,31 @@
+---
+ignore:
+  pattern:
+  - /debian/
+  - /config/
+  - Makefile
+  - Makefile.in
+  - MANIFEST
+  - ChangeLog
+  - CodingStyle
+  - LICENSE
+  - TODO
+  - README
+  - /config(.guess|ure|.h.in)
+  suffixes:
+  - 1
+  - 3
+  - 8
+  - conf
+  - conf.in
+  - generic
+  - ini
+  - install
+  - jpg
+  - lttng
+  - m4
+  - md
+  - pc.in
+  - rst
+  - txt
+  - xsl
