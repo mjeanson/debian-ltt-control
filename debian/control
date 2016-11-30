@@ -5,7 +5,7 @@ Maintainer: Jon Bernard <jbernard@debian.org>
 Uploaders: Michael Jeanson <mjeanson@ubuntu.com>
 Build-Depends: debhelper (>= 9), libpopt-dev, libxml2-dev, libkmod-dev,
   bison, dh-autoreconf, bash-completion, pkg-config, uuid-dev,
-  python3-all-dev, swig (>= 2.0), asciidoc, xmlto,
+  python3-all-dev, swig (>= 2.0),
   liburcu-dev (>= 0.8.4),
   liblttng-ust-dev (>= 2.9.0~),
   liblttng-ust-dev (<< 2.10.0~)
