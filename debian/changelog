@@ -1,3 +1,13 @@
+ltt-control (2.9.0-1) unstable; urgency=medium
+
+  * [dc16595] New upstream version 2.9.0
+  * [a1e773f] Bump dependency on ust for 2.9.0
+  * [9360174] Remove asciidoc and xmlto from builddeps
+  * [594168f] Update symbols for 2.9.0
+  * [ed8cd83] Updated copyright file
+
+ -- Michael Jeanson <mjeanson@ubuntu.com>  Wed, 30 Nov 2016 15:52:15 -0500
+
 ltt-control (2.8.2-2) unstable; urgency=medium
 
   * [2c14e0e] Remove old bash_completion file on upgrade (Closes: #841088)
