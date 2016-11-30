@@ -44,7 +44,6 @@ int kernctl_syscall_list(int fd);
 int kernctl_tracer_version(int fd, struct lttng_kernel_tracer_version *v);
 int kernctl_tracer_abi_version(int fd, struct lttng_kernel_tracer_abi_version *v);
 int kernctl_wait_quiescent(int fd);
-int kernctl_calibrate(int fd, struct lttng_kernel_calibrate *calibrate);
 
 /*
  * kernctl_syscall_mask - Get syscall mask associated to a channel FD.
@@ -65,7 +64,8 @@ int kernctl_track_pid(int fd, int pid);
 int kernctl_untrack_pid(int fd, int pid);
 int kernctl_list_tracker_pids(int fd);
 
-int kernctl_session_metadata_regenerate(int fd);
+int kernctl_session_regenerate_metadata(int fd);
+int kernctl_session_regenerate_statedump(int fd);
 
 /* Buffer operations */
 

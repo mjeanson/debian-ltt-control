@@ -2,12 +2,12 @@
 .\"     Title: lttng-enable-event
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 10/07/2016
+.\"      Date: 11/29/2016
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.8.2
+.\"    Source: LTTng 2.9.0
 .\"  Language: English
 .\"
-.TH "LTTNG\-ENABLE\-EVENT" "1" "10/07/2016" "LTTng 2\&.8\&.2" "LTTng Manual"
+.TH "LTTNG\-ENABLE\-EVENT" "1" "11/29/2016" "LTTng 2\&.9\&.0" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -947,7 +947,7 @@ Create or enable event rules in the user space domain\&.
 .RE
 .SS "Target"
 .PP
-\fB-c\fR, \fB--channel\fR=\fICHANNEL\fR
+\fB-c\fR \fICHANNEL\fR, \fB--channel\fR=\fICHANNEL\fR
 .RS 4
 Create or enable event rules in the channel named
 \fICHANNEL\fR
@@ -955,7 +955,7 @@ instead of the default channel name
 \fBchannel0\fR\&.
 .RE
 .PP
-\fB-s\fR, \fB--session\fR=\fISESSION\fR
+\fB-s\fR \fISESSION\fR, \fB--session\fR=\fISESSION\fR
 .RS 4
 Create or enable event rules in the tracing session named
 \fISESSION\fR
@@ -1085,7 +1085,7 @@ section above for the available log levels\&. Only available with application do
 .RE
 .SS "Filtering and exclusion"
 .PP
-\fB-x\fR, \fB--exclude\fR=\fIEVENT\fR[,\fIEVENT\fR]\&...
+\fB-x\fR \fIEVENT\fR[,\fIEVENT\fR]\&..., \fB--exclude\fR=\fIEVENT\fR[,\fIEVENT\fR]\&...
 .RS 4
 Exclude events named
 \fIEVENT\fR
@@ -1094,7 +1094,7 @@ from the event rule\&. This option can be used when the command\(cqs
 argument contains a wildcard (\fB*\fR) to exclude specific names\&. Only available with application domains\&.
 .RE
 .PP
-\fB-f\fR, \fB--filter\fR=\fIEXPR\fR
+\fB-f\fR \fIEXPR\fR, \fB--filter\fR=\fIEXPR\fR
 .RS 4
 Add filter expression condition to the event rule\&. Expression
 \fIEXPR\fR

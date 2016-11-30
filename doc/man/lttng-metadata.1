@@ -2,12 +2,12 @@
 .\"     Title: lttng-metadata
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 10/07/2016
+.\"      Date: 11/29/2016
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.8.2
+.\"    Source: LTTng 2.9.0
 .\"  Language: English
 .\"
-.TH "LTTNG\-METADATA" "1" "10/07/2016" "LTTng 2\&.8\&.2" "LTTng Manual"
+.TH "LTTNG\-METADATA" "1" "11/29/2016" "LTTng 2\&.9\&.0" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -35,17 +35,27 @@ lttng-metadata \- Manage an LTTng tracing session\*(Aqs metadata generation
 \fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBmetadata regenerate\fR [\fB--session\fR=\fISESSION\fR]
 .fi
 .SH "DESCRIPTION"
+.if n \{\
 .sp
-The \fBlttng metadata\fR command manages a tracing session\(cqs metadata generation options\&.
+.\}
+.RS 4
+.it 1 an-trap
+.nr an-no-space-flag 1
+.nr an-break-flag 1
+.br
+.ps +1
+\fBWarning\fR
+.ps -1
+.br
 .sp
-As of this version, only the \fBregenerate\fR command\(cqs action is available\&. Regenerating a tracing session\(cqs metadata can be used to resample the offset between the system\(cqs monotonic clock and the wall\-clock time\&.
-.sp
-This command is meant to be used to resample the wall\-clock time following a major NTP <https://en.wikipedia.org/wiki/Network_Time_Protocol> correction\&. As such, a system booting with an incorrect wall time can be traced before its wall time is NTP\-corrected\&. Regenerating the tracing session\(cqs metadata ensures that trace viewers can accurately determine the events time relative to Unix Epoch\&.
+This command is \fBdeprecated\fR; it has been replaced by \fBlttng regenerate metadata\fR (see \fBlttng-regenerate\fR(1))\&.
+.sp .5v
+.RE
 .SH "OPTIONS"
 .sp
 General options are described in \fBlttng\fR(1)\&.
 .PP
-\fB-s\fR, \fB--session\fR=\fISESSION\fR
+\fB-s\fR \fISESSION\fR, \fB--session\fR=\fISESSION\fR
 .RS 4
 Manage the metadata generation of the tracing session named
 \fISESSION\fR

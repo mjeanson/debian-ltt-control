@@ -45,6 +45,19 @@ per-thread (`perf:thread:` prefix) counters. Currently, per-CPU counters
 can only be used in the Linux kernel tracing domain, while per-thread
 counters can only be used in the user space tracing domain.
 
+It is also possible to enable PMU counters by raw ID using the
+`perf:cpu:raw:rN:NAME` (Linux kernel tracing domain) or
+`perf:thread:raw:rN:NAME` (user space tracing domain), with:
+
+`N`::
+    A hexadecimal event descriptor which is the same format as used
+    by perf-record(1): a concatenation of the event number and umask
+    value provided by the processor's manufacturer. The possible values
+    for this field are processor-specific.
+
+`NAME`::
+    Custom name to easily recognize the counter.
+
 Application-specific context fields can be added to a channel using the
 following syntax:
 
@@ -89,11 +102,11 @@ option:-u, option:--userspace::
 
 Target
 ~~~~~~
-option:-c, option:--channel='CHANNEL'::
+option:-c 'CHANNEL', option:--channel='CHANNEL'::
     Add context fields to a channel named 'CHANNEL' instead of adding
     them to all the channels.
 
-option:-s, option:--session='SESSION'::
+option:-s 'SESSION', option:--session='SESSION'::
     Add context fields to a channel in the tracing session named 'SESSION'
     instead of the current tracing session.
 
@@ -103,7 +116,7 @@ Context
 option:--list::
     List the available context fields. Use this option alone.
 
-option:-t, option:--type='TYPE'::
+option:-t 'TYPE', option:--type='TYPE'::
     Add context field named 'TYPE'. This option can be repeated as
     many times as needed on the command-line.
 

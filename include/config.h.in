@@ -6,9 +6,6 @@
 /* CMD_DESCR_ADD_CONTEXT */
 #undef CONFIG_CMD_DESCR_ADD_CONTEXT
 
-/* CMD_DESCR_CALIBRATE */
-#undef CONFIG_CMD_DESCR_CALIBRATE
-
 /* CMD_DESCR_CREATE */
 #undef CONFIG_CMD_DESCR_CREATE
 
@@ -36,8 +33,8 @@
 /* CMD_DESCR_LOAD */
 #undef CONFIG_CMD_DESCR_LOAD
 
-/* CMD_DESCR_METADATA */
-#undef CONFIG_CMD_DESCR_METADATA
+/* CMD_DESCR_REGENERATE */
+#undef CONFIG_CMD_DESCR_REGENERATE
 
 /* CMD_DESCR_SAVE */
 #undef CONFIG_CMD_DESCR_SAVE
@@ -270,6 +267,9 @@
 /* Define to 1 if you have the `pthread' library (-lpthread). */
 #undef HAVE_LIBPTHREAD
 
+/* Define to 1 if you have the `rt' library (-lrt). */
+#undef HAVE_LIBRT
+
 /* Define to 1 if you have the `urcu-cds' library (-lurcu-cds). */
 #undef HAVE_LIBURCU_CDS
 
@@ -429,8 +429,14 @@
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
 
+/* Define to 1 if you have the `uuid_generate' function. */
+#undef HAVE_UUID_GENERATE
+
 /* define if your compiler has __attribute__ */
 #undef HAVE___ATTRIBUTE__
+
+/* Has clock_gettime() support. */
+#undef LTTNG_HAVE_CLOCK_GETTIME
 
 /* Has fmemopen support. */
 #undef LTTNG_HAVE_FMEMOPEN

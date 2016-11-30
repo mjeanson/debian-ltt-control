@@ -161,10 +161,11 @@ static struct option long_options[] = {
 	{ "output", 1, 0, 'o', },
 	{ "verbose", 0, 0, 'v', },
 	{ "config", 1, 0, 'f' },
+	{ "version", 0, 0, 'V' },
 	{ NULL, 0, 0, 0, },
 };
 
-static const char *config_ignore_options[] = { "help", "config" };
+static const char *config_ignore_options[] = { "help", "config", "version" };
 
 /*
  * Take an option from the getopt output and set it in the right variable to be
@@ -255,6 +256,9 @@ static int set_option(int opt, const char *arg, const char *optname)
 			perror("exec");
 		}
 		exit(EXIT_FAILURE);
+	case 'V':
+		fprintf(stdout, "%s\n", VERSION);
+		exit(EXIT_SUCCESS);
 	case 'o':
 		if (lttng_is_setuid_setgid()) {
 			WARN("Getting '%s' argument from setuid/setgid binary refused for security reasons.",
@@ -2777,7 +2781,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-
 	/* Initialize thread health monitoring */
 	health_relayd = health_app_create(NR_HEALTH_RELAYD_TYPES);
 	if (!health_relayd) {
@@ -2800,12 +2803,6 @@ int main(int argc, char **argv)
 
 	/* Init relay command queue. */
 	cds_wfcq_init(&relay_conn_queue.head, &relay_conn_queue.tail);
-
-	/* Set up max poll set size */
-	if (lttng_poll_set_max_size()) {
-		retval = -1;
-		goto exit_init_data;
-	}
 
 	/* Initialize communication library */
 	lttcomm_init();
@@ -2839,7 +2836,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Create thread to manage the client socket */
-	ret = pthread_create(&health_thread, NULL,
+	ret = pthread_create(&health_thread, default_pthread_attr(),
 			thread_manage_health, (void *) NULL);
 	if (ret) {
 		errno = ret;
@@ -2849,7 +2846,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Setup the dispatcher thread */
-	ret = pthread_create(&dispatcher_thread, NULL,
+	ret = pthread_create(&dispatcher_thread, default_pthread_attr(),
 			relay_thread_dispatcher, (void *) NULL);
 	if (ret) {
 		errno = ret;
@@ -2859,7 +2856,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Setup the worker thread */
-	ret = pthread_create(&worker_thread, NULL,
+	ret = pthread_create(&worker_thread, default_pthread_attr(),
 			relay_thread_worker, NULL);
 	if (ret) {
 		errno = ret;
@@ -2869,7 +2866,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Setup the listener thread */
-	ret = pthread_create(&listener_thread, NULL,
+	ret = pthread_create(&listener_thread, default_pthread_attr(),
 			relay_thread_listener, (void *) NULL);
 	if (ret) {
 		errno = ret;

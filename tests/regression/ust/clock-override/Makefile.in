@@ -123,10 +123,12 @@ CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 LTLIBRARIES = $(noinst_LTLIBRARIES)
 lttng_ust_clock_override_test_la_DEPENDENCIES =
-lttng_ust_clock_override_test_la_SOURCES =  \
+am__lttng_ust_clock_override_test_la_SOURCES_DIST =  \
 	lttng-ust-clock-override-test.c
+@NO_SHARED_FALSE@am_lttng_ust_clock_override_test_la_OBJECTS =  \
+@NO_SHARED_FALSE@	lttng-ust-clock-override-test.lo
 lttng_ust_clock_override_test_la_OBJECTS =  \
-	lttng-ust-clock-override-test.lo
+	$(am_lttng_ust_clock_override_test_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
@@ -170,8 +172,8 @@ AM_V_CCLD = $(am__v_CCLD_@AM_V@)
 am__v_CCLD_ = $(am__v_CCLD_@AM_DEFAULT_V@)
 am__v_CCLD_0 = @echo "  CCLD    " $@;
 am__v_CCLD_1 = 
-SOURCES = lttng-ust-clock-override-test.c
-DIST_SOURCES = lttng-ust-clock-override-test.c
+SOURCES = $(lttng_ust_clock_override_test_la_SOURCES)
+DIST_SOURCES = $(am__lttng_ust_clock_override_test_la_SOURCES_DIST)
 am__can_run_installinfo = \
   case $$AM_UPDATE_INFO_DIR in \
     n|no|NO) false;; \
@@ -214,7 +216,6 @@ CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
 CMD_DESCR_ADD_CONTEXT = @CMD_DESCR_ADD_CONTEXT@
-CMD_DESCR_CALIBRATE = @CMD_DESCR_CALIBRATE@
 CMD_DESCR_CREATE = @CMD_DESCR_CREATE@
 CMD_DESCR_DESTROY = @CMD_DESCR_DESTROY@
 CMD_DESCR_DISABLE_CHANNEL = @CMD_DESCR_DISABLE_CHANNEL@
@@ -224,7 +225,7 @@ CMD_DESCR_ENABLE_EVENT = @CMD_DESCR_ENABLE_EVENT@
 CMD_DESCR_HELP = @CMD_DESCR_HELP@
 CMD_DESCR_LIST = @CMD_DESCR_LIST@
 CMD_DESCR_LOAD = @CMD_DESCR_LOAD@
-CMD_DESCR_METADATA = @CMD_DESCR_METADATA@
+CMD_DESCR_REGENERATE = @CMD_DESCR_REGENERATE@
 CMD_DESCR_SAVE = @CMD_DESCR_SAVE@
 CMD_DESCR_SET_SESSION = @CMD_DESCR_SET_SESSION@
 CMD_DESCR_SNAPSHOT = @CMD_DESCR_SNAPSHOT@
@@ -430,6 +431,7 @@ psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
 report_fold = @report_fold@
+runstatedir = @runstatedir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -449,7 +451,7 @@ top_srcdir = @top_srcdir@
 
 @NO_SHARED_FALSE@EXTRA_DIST = test_clock_override
 @NO_SHARED_TRUE@EXTRA_DIST = test_clock_override lttng-ust-clock-override-test.c
-@NO_SHARED_FALSE@AM_CPPFLAGS = -I$(srcdir)
+@NO_SHARED_FALSE@AM_CPPFLAGS = -I$(srcdir) -I$(top_srcdir)/src
 
 # The rpath is necessary because libtool won't build a shared library
 # if it's noinst_
@@ -462,6 +464,7 @@ top_srcdir = @top_srcdir@
 
 @NO_SHARED_FALSE@noinst_LTLIBRARIES = lttng-ust-clock-override-test.la
 @NO_SHARED_FALSE@lttng_ust_clock_override_test_la_LDFLAGS = $(GETCPU_LIBTOOL_FLAGS)
+@NO_SHARED_FALSE@lttng_ust_clock_override_test_la_SOURCES = lttng-ust-clock-override-test.c
 @LTTNG_TOOLS_BUILD_WITH_LIBC_DL_TRUE@@NO_SHARED_FALSE@lttng_ust_clock_override_test_la_LIBADD = -lc
 @LTTNG_TOOLS_BUILD_WITH_LIBDL_TRUE@@NO_SHARED_FALSE@lttng_ust_clock_override_test_la_LIBADD = -ldl
 @NO_SHARED_FALSE@noinst_SCRIPTS = test_clock_override

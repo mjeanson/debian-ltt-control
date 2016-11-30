@@ -1,13 +1,13 @@
 '\" t
-.\"     Title: lttng-calibrate
+.\"     Title: lttng-regenerate
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 10/07/2016
+.\"      Date: 11/29/2016
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.8.2
+.\"    Source: LTTng 2.9.0
 .\"  Language: English
 .\"
-.TH "LTTNG\-CALIBRATE" "1" "10/07/2016" "LTTng 2\&.8\&.2" "LTTng Manual"
+.TH "LTTNG\-REGENERATE" "1" "11/29/2016" "LTTng 2\&.9\&.0" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -28,124 +28,42 @@
 .\" * MAIN CONTENT STARTS HERE *
 .\" -----------------------------------------------------------------
 .SH "NAME"
-lttng-calibrate \- Quantify LTTng overhead
+lttng-regenerate \- Manage an LTTng tracing session\*(Aqs data regeneration
 .SH "SYNOPSIS"
 .sp
+Regenerate the metadata of a session:
+.sp
 .nf
-\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcalibrate\fR
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBregenerate metadata\fR [\fB--session\fR=\fISESSION\fR]
+.fi
+.sp
+Regenerate the state dump of a session:
+.sp
+.nf
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBregenerate statedump\fR [\fB--session\fR=\fISESSION\fR]
 .fi
 .SH "DESCRIPTION"
 .sp
-The \fBlttng calibrate\fR commands quantifies the overhead of LTTng tracers\&.
+The \fBlttng regenerate\fR command regenerates specific data of a tracing session\&.
 .sp
-The \fBlttng calibrate\fR command can be used to find out the combined average overhead of the LTTng tracers and the instrumentation mechanisms used\&. This overhead can be calibrated in terms of time or using any of the PMU performance counter available on the system\&.
+As of this version, the \fBmetadata\fR and \fBstatedump\fR actions are available\&.
+.SS "Regenerating a tracing session\(cqs metadata"
 .sp
-For now, the only implemented calibration is the Linux kernel function instrumentation (\fIkretprobes\fR)\&.
-.SS "Calibrate Linux kernel function instrumentation"
+The \fBlttng regenerate metadata\fR action can be used to resample the offset between the system\(cqs monotonic clock and the wall\-clock time\&.
 .sp
-As an example, we use an i7 processor with 4 general\-purpose PMU registers\&. This information is available by issuing \fBdmesg\fR, looking for \fBgeneric registers\fR\&.
+This action is meant to be used to resample the wall\-clock time following a major NTP <https://en.wikipedia.org/wiki/Network_Time_Protocol> correction\&. As such, a system booting with an incorrect wall time can be traced before its wall time is NTP\-corrected\&. Regenerating the tracing session\(cqs metadata ensures that trace viewers can accurately determine the events time relative to Unix Epoch\&.
+.SS "Regenerating a tracing session\(cqs state dump"
 .sp
-The following sequence of commands gathers a trace executing a kretprobe hooked on an empty function, gathering PMU counters LLC (Last Level Cache) misses information (use \fBlttng add-context --list\fR to get the list of available PMU counters)\&.
-.sp
-.if n \{\
-.RS 4
-.\}
-.nf
-lttng create calibrate\-function
-lttng enable\-event calibrate \-\-kernel \e
-                             \-\-function=lttng_calibrate_kretprobe
-lttng add\-context \-\-kernel \-\-type=perf:cpu:LLC\-load\-misses \e
-                           \-\-type=perf:cpu:LLC\-store\-misses \e
-                           \-\-type=perf:cpu:LLC\-prefetch\-misses
-lttng start
-
-for a in $(seq 1 10); do
-    lttng calibrate \-\-kernel \-\-function
-done
-
-lttng destroy
-babeltrace $(ls \-1drt ~/lttng\-traces/calibrate\-function\-* | tail \-n 1)
-.fi
-.if n \{\
-.RE
-.\}
-.sp
-The output from \fBbabeltrace\fR(1) can be saved to a text file and opened in a spreadsheet (for example, in LibreOffice) to focus on the per\-PMU counter delta between consecutive \fBcalibrate_entry\fR and \fBcalibrate_return\fR events\&. Note that these counters are per\-CPU, so scheduling events would need to be present to account for migration between CPUs\&. Therefore, for calibration purposes, only events staying on the same CPU must be considered\&.
-.sp
-Here\(cqs an example of the average result, for the i7, on 10 samples:
-.TS
-allbox tab(:);
-ltB ltB ltB.
-T{
-PMU counter
-T}:T{
-Average
-T}:T{
-Standard deviation
-T}
-.T&
-lt lt lt
-lt lt lt
-lt lt lt.
-T{
-.sp
-\fBperf_LLC_load_misses\fR
-T}:T{
-.sp
-5\&.0
-T}:T{
-.sp
-0\&.577
-T}
-T{
-.sp
-\fBperf_LLC_store_misses\fR
-T}:T{
-.sp
-1\&.6
-T}:T{
-.sp
-0\&.516
-T}
-T{
-.sp
-\fBperf_LLC_prefetch_misses\fR
-T}:T{
-.sp
-9\&.0
-T}:T{
-.sp
-14\&.742
-T}
-.TE
-.sp 1
-.sp
-As we can notice, the load and store misses are relatively stable across runs (their standard deviation is relatively low) compared to the prefetch misses\&. We could conclude from this information that LLC load and store misses can be accounted for quite precisely, but prefetches within a function seems to behave too erratically (not much causality link between the code executed and the CPU prefetch activity) to be accounted for\&.
+The \fBlttng regenerate statedump\fR action can be used to collect up\-to\-date state dump information during the tracing session\&. This is particularly useful in snapshot (see \fBlttng-snapshot\fR(1)) or trace file rotation (see \fBlttng-enable-channel\fR(1)) modes where the state dump information may be lost\&.
 .SH "OPTIONS"
 .sp
 General options are described in \fBlttng\fR(1)\&.
-.SS "Domain"
-.sp
-One of:
 .PP
-\fB-k\fR, \fB--kernel\fR
+\fB-s\fR \fISESSION\fR, \fB--session\fR=\fISESSION\fR
 .RS 4
-Quantify LTTng overhead in the Linux kernel domain\&.
-.RE
-.PP
-\fB-u\fR, \fB--userspace\fR
-.RS 4
-Quantify LTTng overhead in the user space domain\&.
-.RE
-.SS "Calibration"
-.PP
-\fB--function\fR
-.RS 4
-Use dynamic function entry/return probes to calibrate (default)\&.
-.sp
-This option requires the
-\fB--kernel\fR
-option\&.
+Regenerate the data of the tracing session named
+\fISESSION\fR
+instead of the current tracing session\&.
 .RE
 .SS "Program information"
 .PP
@@ -165,6 +83,11 @@ environment variable\&.
 .RS 4
 List available command options\&.
 .RE
+.SH "LIMITATIONS"
+.sp
+The \fBlttng regenerate metadata\fR command can only be used on kernel and user space tracing sessions (using per\-user buffering), in non\-live mode\&.
+.sp
+See \fBlttng-enable-channel\fR(1) for more information about buffering schemes and \fBlttng-create\fR(1) for more information about the different tracing session modes\&.
 .SH "ENVIRONMENT VARIABLES"
 .PP
 \fBLTTNG_ABORT_ON_ERROR\fR

@@ -5204,54 +5204,6 @@ end:
 }
 
 /*
- * Calibrate registered applications.
- */
-int ust_app_calibrate_glb(struct lttng_ust_calibrate *calibrate)
-{
-	int ret = 0;
-	struct lttng_ht_iter iter;
-	struct ust_app *app;
-
-	rcu_read_lock();
-
-	cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, app, pid_n.node) {
-		if (!app->compatible) {
-			/*
-			 * TODO: In time, we should notice the caller of this error by
-			 * telling him that this is a version error.
-			 */
-			continue;
-		}
-
-		health_code_update();
-
-		pthread_mutex_lock(&app->sock_lock);
-		ret = ustctl_calibrate(app->sock, calibrate);
-		pthread_mutex_unlock(&app->sock_lock);
-		if (ret < 0) {
-			switch (ret) {
-			case -ENOSYS:
-				/* Means that it's not implemented on the tracer side. */
-				ret = 0;
-				break;
-			default:
-				DBG2("Calibrate app PID %d returned with error %d",
-						app->pid, ret);
-				break;
-			}
-		}
-	}
-
-	DBG("UST app global domain calibration finished");
-
-	rcu_read_unlock();
-
-	health_code_update();
-
-	return ret;
-}
-
-/*
  * Receive registration and populate the given msg structure.
  *
  * On success return 0 else a negative value returned by the ustctl call.
@@ -6147,4 +6099,70 @@ int ust_app_pid_get_channel_runtime_stats(struct ltt_ust_session *usess,
 end:
 	rcu_read_unlock();
 	return ret;
+}
+
+static
+int ust_app_regenerate_statedump(struct ltt_ust_session *usess,
+		struct ust_app *app)
+{
+	int ret = 0;
+	struct ust_app_session *ua_sess;
+
+	DBG("Regenerating the metadata for ust app pid %d", app->pid);
+
+	rcu_read_lock();
+
+	ua_sess = lookup_session_by_app(usess, app);
+	if (ua_sess == NULL) {
+		/* The session is in teardown process. Ignore and continue. */
+		goto end;
+	}
+
+	pthread_mutex_lock(&ua_sess->lock);
+
+	if (ua_sess->deleted) {
+		goto end_unlock;
+	}
+
+	pthread_mutex_lock(&app->sock_lock);
+	ret = ustctl_regenerate_statedump(app->sock, ua_sess->handle);
+	pthread_mutex_unlock(&app->sock_lock);
+
+end_unlock:
+	pthread_mutex_unlock(&ua_sess->lock);
+
+end:
+	rcu_read_unlock();
+	health_code_update();
+	return ret;
+}
+
+/*
+ * Regenerate the statedump for each app in the session.
+ */
+int ust_app_regenerate_statedump_all(struct ltt_ust_session *usess)
+{
+	int ret = 0;
+	struct lttng_ht_iter iter;
+	struct ust_app *app;
+
+	DBG("Regenerating the metadata for all UST apps");
+
+	rcu_read_lock();
+
+	cds_lfht_for_each_entry(ust_app_ht->ht, &iter.iter, app, pid_n.node) {
+		if (!app->compatible) {
+			continue;
+		}
+
+		ret = ust_app_regenerate_statedump(usess, app);
+		if (ret < 0) {
+			/* Continue to the next app even on error */
+			continue;
+		}
+	}
+
+	rcu_read_unlock();
+
+	return 0;
 }

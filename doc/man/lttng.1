@@ -2,12 +2,12 @@
 .\"     Title: lttng
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 10/07/2016
+.\"      Date: 11/29/2016
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.8.2
+.\"    Source: LTTng 2.9.0
 .\"  Language: English
 .\"
-.TH "LTTNG" "1" "10/07/2016" "LTTng 2\&.8\&.2" "LTTng Manual"
+.TH "LTTNG" "1" "11/29/2016" "LTTng 2\&.9\&.0" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -104,7 +104,7 @@ User applications instrumented with LTTng automatically register to the root ses
 By default, the \fBlttng-create\fR(1) command automatically spawns a user session daemon if none is currently running\&. The \fB--no-sessiond\fR general option can be set to avoid this\&.
 .SH "OPTIONS"
 .PP
-\fB-g\fR, \fB--group\fR=\fIGROUP\fR
+\fB-g\fR \fIGROUP\fR, \fB--group\fR=\fIGROUP\fR
 .RS 4
 Use
 \fIGROUP\fR
@@ -112,7 +112,7 @@ as Unix tracing group (default:
 \fBtracing\fR)\&.
 .RE
 .PP
-\fB-m\fR, \fB--mi\fR=\fITYPE\fR
+\fB-m\fR \fITYPE\fR, \fB--mi\fR=\fITYPE\fR
 .RS 4
 Print the command\(cqs result using the machine interface type
 \fITYPE\fR
@@ -206,9 +206,9 @@ Tear down tracing sessions\&.
 Load tracing session configurations\&.
 .RE
 .PP
-\fBlttng-metadata\fR(1)
+\fBlttng-regenerate\fR(1)
 .RS 4
-Manage an LTTng tracing session\(cqs metadata generation\&.
+Manage an LTTng tracing session\(cqs data regeneration\&.
 .RE
 .PP
 \fBlttng-save\fR(1)
@@ -286,11 +286,6 @@ Track specific system resources\&.
 Untrack specific system resources\&.
 .RE
 .SS "Miscellaneous"
-.PP
-\fBlttng-calibrate\fR(1)
-.RS 4
-Quantify LTTng overhead\&.
-.RE
 .PP
 \fBlttng-help\fR(1)
 .RS 4

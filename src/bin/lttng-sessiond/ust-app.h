@@ -328,7 +328,6 @@ void ust_app_global_update_all(struct ltt_ust_session *usess);
 void ust_app_clean_list(void);
 int ust_app_ht_alloc(void);
 struct ust_app *ust_app_find_by_pid(pid_t pid);
-int ust_app_calibrate_glb(struct lttng_ust_calibrate *calibrate);
 struct ust_app_stream *ust_app_alloc_stream(void);
 int ust_app_recv_registration(int sock, struct ust_register_msg *msg);
 int ust_app_recv_notify(int sock);
@@ -352,6 +351,7 @@ int ust_app_pid_get_channel_runtime_stats(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan,
 		struct consumer_output *consumer,
 		int overwrite, uint64_t *discarded, uint64_t *lost);
+int ust_app_regenerate_statedump_all(struct ltt_ust_session *usess);
 
 static inline
 int ust_app_supported(void)
@@ -496,11 +496,6 @@ int ust_app_enable_event_pid(struct ltt_ust_session *usess,
 	return 0;
 }
 static inline
-int ust_app_calibrate_glb(struct lttng_ust_calibrate *calibrate)
-{
-	return 0;
-}
-static inline
 int ust_app_recv_registration(int sock, struct ust_register_msg *msg)
 {
 	return 0;
@@ -580,6 +575,12 @@ int ust_app_pid_get_channel_runtime_stats(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan,
 		struct consumer_output *consumer,
 		int overwrite, uint64_t *discarded, uint64_t *lost)
+{
+	return 0;
+}
+
+static inline
+int ust_app_regenerate_statedump_all(struct ltt_ust_session *usess)
 {
 	return 0;
 }

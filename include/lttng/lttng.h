@@ -111,11 +111,8 @@ extern int lttng_stop_tracing(const char *session_name);
 extern int lttng_stop_tracing_no_wait(const char *session_name);
 
 /*
- * Calibrate LTTng overhead.
- *
- * The chan and handle params can not be NULL.
- *
- * Return 0 on success else a negative LTTng error code.
+ * Deprecated: As of LTTng 2.9, this function always returns
+ * -LTTNG_ERR_UND.
  */
 extern int lttng_calibrate(struct lttng_handle *handle,
 		struct lttng_calibrate *calibrate);
@@ -160,12 +157,27 @@ extern int lttng_set_consumer_url(struct lttng_handle *handle,
 extern int lttng_data_pending(const char *session_name);
 
 /*
+ * Deprecated, replaced by lttng_regenerate_metadata.
+ */
+LTTNG_DEPRECATED()
+extern int lttng_metadata_regenerate(const char *session_name);
+
+/*
  * Trigger the regeneration of the metadata for a session.
  * The new metadata overwrite the previous one locally or remotely (through
  * the lttng-relayd). Only kernel, per-uid and non-live sessions are supported.
  * Return 0 on success, a negative LTTng error code on error.
  */
-extern int lttng_metadata_regenerate(const char *session_name);
+extern int lttng_regenerate_metadata(const char *session_name);
+
+/*
+ * Trigger the regeneration of the statedump for a session. The new statedump
+ * information is appended to the currently active trace, the session needs to
+ * be active.
+ *
+ * Return 0 on success, a negative LTTng error code on error.
+ */
+extern int lttng_regenerate_statedump(const char *session_name);
 
 #ifdef __cplusplus
 }

@@ -79,7 +79,7 @@ static int metadata_regenerate(int argc, const char **argv)
 		ret = -LTTNG_ERR_INVALID;
 		goto end;
 	}
-	ret = lttng_metadata_regenerate(session_name);
+	ret = lttng_regenerate_metadata(session_name);
 	if (ret == 0) {
 		MSG("Metadata successfully regenerated for session %s", session_name);
 	}

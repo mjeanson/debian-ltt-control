@@ -20,7 +20,7 @@
 #define _LTT_KERNEL_IOCTL_H
 
 #define LTTNG_MODULES_ABI_MAJOR_VERSION		2
-#define LTTNG_MODULES_ABI_MINOR_VERSION		1
+#define LTTNG_MODULES_ABI_MINOR_VERSION		2
 
 /* Get a snapshot of the current ring buffer producer and consumer positions */
 #define RING_BUFFER_SNAPSHOT                _IO(0xF6, 0x00)
@@ -78,8 +78,6 @@
 		_IOR(0xF6, 0x41, struct lttng_kernel_old_tracer_version)
 #define LTTNG_KERNEL_OLD_TRACEPOINT_LIST        _IO(0xF6, 0x42)
 #define LTTNG_KERNEL_OLD_WAIT_QUIESCENT         _IO(0xF6, 0x43)
-#define LTTNG_KERNEL_OLD_CALIBRATE		\
-	_IOWR(0xF6, 0x44, struct lttng_kernel_old_calibrate)
 
 /* Session FD ioctl */
 #define LTTNG_KERNEL_OLD_METADATA               \
@@ -110,8 +108,6 @@
 	_IOR(0xF6, 0x46, struct lttng_kernel_tracer_version)
 #define LTTNG_KERNEL_TRACEPOINT_LIST	_IO(0xF6, 0x47)
 #define LTTNG_KERNEL_WAIT_QUIESCENT		_IO(0xF6, 0x48)
-#define LTTNG_KERNEL_CALIBRATE			\
-	_IOWR(0xF6, 0x49, struct lttng_kernel_calibrate)
 #define LTTNG_KERNEL_SYSCALL_LIST		_IO(0xF6, 0x4A)
 #define LTTNG_KERNEL_TRACER_ABI_VERSION		\
 	_IOR(0xF6, 0x4B, struct lttng_kernel_tracer_abi_version)
@@ -134,6 +130,8 @@
  */
 #define LTTNG_KERNEL_SESSION_LIST_TRACKER_PIDS	_IO(0xF6, 0x58)
 #define LTTNG_KERNEL_SESSION_METADATA_REGEN	_IO(0xF6, 0x59)
+/* 0x5A and 0x5B are reserved for a future ABI-breaking cleanup. */
+#define LTTNG_KERNEL_SESSION_STATEDUMP		_IO(0xF6, 0x5C)
 
 /* Channel FD ioctl */
 #define LTTNG_KERNEL_STREAM			_IO(0xF6, 0x62)

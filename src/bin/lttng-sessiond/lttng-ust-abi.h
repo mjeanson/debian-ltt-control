@@ -44,8 +44,10 @@
 #define LTTNG_UST_COMM_MAGIC			0xC57C57C5
 
 /* Version for ABI between liblttng-ust, sessiond, consumerd */
-#define LTTNG_UST_ABI_MAJOR_VERSION		6
+#define LTTNG_UST_ABI_MAJOR_VERSION		7
 #define LTTNG_UST_ABI_MINOR_VERSION		1
+
+struct lttng_ust_calibrate;
 
 enum lttng_ust_instrumentation {
 	LTTNG_UST_TRACEPOINT		= 0,
@@ -220,21 +222,6 @@ struct lttng_ust_object_data {
 	} u;
 } LTTNG_PACKED;
 
-enum lttng_ust_calibrate_type {
-	LTTNG_UST_CALIBRATE_TRACEPOINT,
-};
-
-#define LTTNG_UST_CALIBRATE_PADDING1	16
-#define LTTNG_UST_CALIBRATE_PADDING2	(LTTNG_UST_SYM_NAME_LEN + 32)
-struct lttng_ust_calibrate {
-	enum lttng_ust_calibrate_type type;	/* type (input) */
-	char padding[LTTNG_UST_CALIBRATE_PADDING1];
-
-	union {
-		char padding[LTTNG_UST_CALIBRATE_PADDING2];
-	} u;
-} LTTNG_PACKED;
-
 #define FILTER_BYTECODE_MAX_LEN		65536
 #define LTTNG_UST_FILTER_PADDING	32
 struct lttng_ust_filter_bytecode {
@@ -275,6 +262,7 @@ struct lttng_ust_event_exclusion {
 	_UST_CMDW(0x51, struct lttng_ust_channel)
 #define LTTNG_UST_SESSION_START			_UST_CMD(0x52)
 #define LTTNG_UST_SESSION_STOP			_UST_CMD(0x53)
+#define LTTNG_UST_SESSION_STATEDUMP		_UST_CMD(0x54)
 
 /* Channel FD commands */
 #define LTTNG_UST_STREAM			_UST_CMD(0x60)

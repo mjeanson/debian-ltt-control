@@ -30,6 +30,13 @@ struct config_entry {
 	const char *value;
 };
 
+struct config_load_session_override_attr {
+	char *path_url;
+	char *ctrl_url;
+	char *data_url;
+	char *session_name;
+};
+
 /* Instance of a configuration writer. */
 struct config_writer;
 
@@ -78,8 +85,8 @@ int config_parse_value(const char *value);
 /*
  * Create an instance of a configuration writer.
  *
- * fd_output File to which the XML content must be written. The file will be
- * closed once the config_writer has been destroyed.
+ * fd_output File to which the XML content must be written. fd_output is
+ * owned by the caller.
  *
  * indent If other than 0 the XML will be pretty printed
  * with indentation and newline.
@@ -215,14 +222,16 @@ int config_writer_write_element_string(struct config_writer *writer,
  * session_name Name of the session to load. Will load all
  * sessions from path if NULL.
  *
- * override Override current session configuration if it exists.
+ * overwrite Overwrite current session configuration if it exists.
  * autoload Tell to load the auto session(s).
+ * overrides The override attribute structure specifying override parameters.
  *
  * Returns zero if the session could be loaded successfully. Returns
  * a negative LTTNG_ERR code on error.
  */
 LTTNG_HIDDEN
 int config_load_session(const char *path, const char *session_name,
-		int override, unsigned int autoload);
+		int overwrite, unsigned int autoload,
+		const struct config_load_session_override_attr *overrides);
 
 #endif /* _CONFIG_H */

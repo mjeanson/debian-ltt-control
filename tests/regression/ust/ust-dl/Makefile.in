@@ -124,18 +124,44 @@ CONFIG_HEADER = $(top_builddir)/include/config.h
 CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 LTLIBRARIES = $(noinst_LTLIBRARIES)
-libfoo_la_LIBADD =
-am__libfoo_la_SOURCES_DIST = libfoo.c libfoo.h
-@NO_SHARED_FALSE@am_libfoo_la_OBJECTS = libfoo.lo
-libfoo_la_OBJECTS = $(am_libfoo_la_OBJECTS)
+@NO_SHARED_FALSE@libbar_la_DEPENDENCIES = libzzz.la
+am__libbar_la_SOURCES_DIST = libbar.c libbar.h
+@NO_SHARED_FALSE@am_libbar_la_OBJECTS = libbar.lo
+libbar_la_OBJECTS = $(am_libbar_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
 am__v_lt_1 = 
+libbar_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
+	$(libbar_la_LDFLAGS) $(LDFLAGS) -o $@
+@NO_SHARED_FALSE@am_libbar_la_rpath =
+@NO_SHARED_FALSE@libfoo_la_DEPENDENCIES = libbar.la
+am__libfoo_la_SOURCES_DIST = libfoo.c libfoo.h
+@NO_SHARED_FALSE@am_libfoo_la_OBJECTS = libfoo.lo
+libfoo_la_OBJECTS = $(am_libfoo_la_OBJECTS)
 libfoo_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
 	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
 	$(libfoo_la_LDFLAGS) $(LDFLAGS) -o $@
 @NO_SHARED_FALSE@am_libfoo_la_rpath =
+libtp_la_LIBADD =
+am__libtp_la_SOURCES_DIST = libbar-tp.h libbar-tp.c libfoo-tp.h \
+	libfoo-tp.c libzzz-tp.h libzzz-tp.c
+@NO_SHARED_FALSE@am_libtp_la_OBJECTS = libbar-tp.lo libfoo-tp.lo \
+@NO_SHARED_FALSE@	libzzz-tp.lo
+libtp_la_OBJECTS = $(am_libtp_la_OBJECTS)
+libtp_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
+	$(libtp_la_LDFLAGS) $(LDFLAGS) -o $@
+@NO_SHARED_FALSE@am_libtp_la_rpath =
+libzzz_la_LIBADD =
+am__libzzz_la_SOURCES_DIST = libzzz.c libzzz.h
+@NO_SHARED_FALSE@am_libzzz_la_OBJECTS = libzzz.lo
+libzzz_la_OBJECTS = $(am_libzzz_la_OBJECTS)
+libzzz_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
+	$(libzzz_la_LDFLAGS) $(LDFLAGS) -o $@
+@NO_SHARED_FALSE@am_libzzz_la_rpath =
 PROGRAMS = $(noinst_PROGRAMS)
 am__prog_SOURCES_DIST = prog.c
 @NO_SHARED_FALSE@am_prog_OBJECTS = prog.$(OBJEXT)
@@ -175,8 +201,11 @@ AM_V_CCLD = $(am__v_CCLD_@AM_V@)
 am__v_CCLD_ = $(am__v_CCLD_@AM_DEFAULT_V@)
 am__v_CCLD_0 = @echo "  CCLD    " $@;
 am__v_CCLD_1 = 
-SOURCES = $(libfoo_la_SOURCES) $(prog_SOURCES)
-DIST_SOURCES = $(am__libfoo_la_SOURCES_DIST) $(am__prog_SOURCES_DIST)
+SOURCES = $(libbar_la_SOURCES) $(libfoo_la_SOURCES) \
+	$(libtp_la_SOURCES) $(libzzz_la_SOURCES) $(prog_SOURCES)
+DIST_SOURCES = $(am__libbar_la_SOURCES_DIST) \
+	$(am__libfoo_la_SOURCES_DIST) $(am__libtp_la_SOURCES_DIST) \
+	$(am__libzzz_la_SOURCES_DIST) $(am__prog_SOURCES_DIST)
 am__can_run_installinfo = \
   case $$AM_UPDATE_INFO_DIR in \
     n|no|NO) false;; \
@@ -220,7 +249,6 @@ CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
 CMD_DESCR_ADD_CONTEXT = @CMD_DESCR_ADD_CONTEXT@
-CMD_DESCR_CALIBRATE = @CMD_DESCR_CALIBRATE@
 CMD_DESCR_CREATE = @CMD_DESCR_CREATE@
 CMD_DESCR_DESTROY = @CMD_DESCR_DESTROY@
 CMD_DESCR_DISABLE_CHANNEL = @CMD_DESCR_DISABLE_CHANNEL@
@@ -230,7 +258,7 @@ CMD_DESCR_ENABLE_EVENT = @CMD_DESCR_ENABLE_EVENT@
 CMD_DESCR_HELP = @CMD_DESCR_HELP@
 CMD_DESCR_LIST = @CMD_DESCR_LIST@
 CMD_DESCR_LOAD = @CMD_DESCR_LOAD@
-CMD_DESCR_METADATA = @CMD_DESCR_METADATA@
+CMD_DESCR_REGENERATE = @CMD_DESCR_REGENERATE@
 CMD_DESCR_SAVE = @CMD_DESCR_SAVE@
 CMD_DESCR_SET_SESSION = @CMD_DESCR_SET_SESSION@
 CMD_DESCR_SNAPSHOT = @CMD_DESCR_SNAPSHOT@
@@ -436,6 +464,7 @@ psdir = @psdir@
 pyexecdir = @pyexecdir@
 pythondir = @pythondir@
 report_fold = @report_fold@
+runstatedir = @runstatedir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -448,13 +477,18 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-@NO_SHARED_FALSE@CLEANFILES = libfoo.so libfoo.so.debug
+@NO_SHARED_FALSE@CLEANFILES = libfoo.so libfoo.so.debug libbar.so libbar.so.debug \
+@NO_SHARED_FALSE@	libzzz.so libzzz.so.debug libtp.so
+
 # Do not build this test if shared libraries support was
 # explicitly disabled.
-@NO_SHARED_TRUE@CLEANFILES = libfoo.so libfoo.so.debug prog
+@NO_SHARED_TRUE@CLEANFILES = libbar.so libbar.so.debug libfoo.so libfoo.so.debug \
+@NO_SHARED_TRUE@	libzzz.so libzzz.so.debug prog libtp.so
+
 @NO_SHARED_FALSE@EXTRA_DIST = test_ust-dl test_ust-dl.py
-@NO_SHARED_TRUE@EXTRA_DIST = test_ust-dl test_ust-dl.py libfoo.c libfoo.h \
-@NO_SHARED_TRUE@	prog.c
+@NO_SHARED_TRUE@EXTRA_DIST = test_ust-dl test_ust-dl.py libbar.c libbar.h libbar-tp.h \
+@NO_SHARED_TRUE@	libbar-tp.c libfoo.c libfoo.h libfoo-tp.h libfoo-tp.c \
+@NO_SHARED_TRUE@	libzzz.c libzzz.h libzzz-tp.h libzzz-tp.c prog.c libtp.c
 
 @NO_SHARED_FALSE@objcopy_verbose = $(objcopy_verbose_@AM_V@)
 @NO_SHARED_FALSE@objcopy_verbose_ = $(objcopy_verbose_@AM_DEFAULT_V@)
@@ -462,11 +496,25 @@ top_srcdir = @top_srcdir@
 @NO_SHARED_FALSE@AM_CPPFLAGS = -I$(srcdir) -g
 @NO_SHARED_FALSE@prog_SOURCES = prog.c
 @NO_SHARED_FALSE@prog_LDADD = -ldl
-@NO_SHARED_FALSE@noinst_LTLIBRARIES = libfoo.la
+@NO_SHARED_FALSE@noinst_LTLIBRARIES = libzzz.la libbar.la libfoo.la libtp.la
+@NO_SHARED_FALSE@libzzz_la_SOURCES = libzzz.c libzzz.h
+@NO_SHARED_FALSE@libzzz_la_LDFLAGS = -module -shared -avoid-version \
+@NO_SHARED_FALSE@		-rpath $(abs_builddir)
+
+@NO_SHARED_FALSE@libbar_la_SOURCES = libbar.c libbar.h
+@NO_SHARED_FALSE@libbar_la_LDFLAGS = -module -shared -avoid-version \
+@NO_SHARED_FALSE@		-rpath $(abs_builddir)
+
+@NO_SHARED_FALSE@libbar_la_LIBADD = libzzz.la
 @NO_SHARED_FALSE@libfoo_la_SOURCES = libfoo.c libfoo.h
 @NO_SHARED_FALSE@libfoo_la_LDFLAGS = -module -shared -avoid-version \
 @NO_SHARED_FALSE@		-rpath $(abs_builddir)
 
+@NO_SHARED_FALSE@libfoo_la_LIBADD = libbar.la
+@NO_SHARED_FALSE@libtp_la_SOURCES = libbar-tp.h libbar-tp.c libfoo-tp.h libfoo-tp.c \
+@NO_SHARED_FALSE@	libzzz-tp.h libzzz-tp.c
+
+@NO_SHARED_FALSE@libtp_la_LDFLAGS = -module -shared -rpath $(abs_builddir)
 @NO_SHARED_FALSE@noinst_SCRIPTS = test_ust-dl test_ust-dl.py
 all: all-am
 
@@ -513,8 +561,17 @@ clean-noinstLTLIBRARIES:
 	  rm -f $${locs}; \
 	}
 
+libbar.la: $(libbar_la_OBJECTS) $(libbar_la_DEPENDENCIES) $(EXTRA_libbar_la_DEPENDENCIES) 
+	$(AM_V_CCLD)$(libbar_la_LINK) $(am_libbar_la_rpath) $(libbar_la_OBJECTS) $(libbar_la_LIBADD) $(LIBS)
+
 libfoo.la: $(libfoo_la_OBJECTS) $(libfoo_la_DEPENDENCIES) $(EXTRA_libfoo_la_DEPENDENCIES) 
 	$(AM_V_CCLD)$(libfoo_la_LINK) $(am_libfoo_la_rpath) $(libfoo_la_OBJECTS) $(libfoo_la_LIBADD) $(LIBS)
+
+libtp.la: $(libtp_la_OBJECTS) $(libtp_la_DEPENDENCIES) $(EXTRA_libtp_la_DEPENDENCIES) 
+	$(AM_V_CCLD)$(libtp_la_LINK) $(am_libtp_la_rpath) $(libtp_la_OBJECTS) $(libtp_la_LIBADD) $(LIBS)
+
+libzzz.la: $(libzzz_la_OBJECTS) $(libzzz_la_DEPENDENCIES) $(EXTRA_libzzz_la_DEPENDENCIES) 
+	$(AM_V_CCLD)$(libzzz_la_LINK) $(am_libzzz_la_rpath) $(libzzz_la_OBJECTS) $(libzzz_la_LIBADD) $(LIBS)
 
 clean-noinstPROGRAMS:
 	@list='$(noinst_PROGRAMS)'; test -n "$$list" || exit 0; \
@@ -535,7 +592,12 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libbar-tp.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libbar.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfoo-tp.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfoo.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libzzz-tp.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libzzz.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/prog.Po@am__quote@
 
 .c.o:
@@ -778,13 +840,26 @@ uninstall-am:
 # Extract debug symbols
 @NO_SHARED_FALSE@libfoo.so.debug: libfoo.la
 @NO_SHARED_FALSE@	$(objcopy_verbose)$(OBJCOPY) --only-keep-debug .libs/libfoo.so libfoo.so.debug
+@NO_SHARED_FALSE@libbar.so.debug: libbar.la
+@NO_SHARED_FALSE@	$(objcopy_verbose)$(OBJCOPY) --only-keep-debug .libs/libbar.so libbar.so.debug
+@NO_SHARED_FALSE@libzzz.so.debug: libzzz.la
+@NO_SHARED_FALSE@	$(objcopy_verbose)$(OBJCOPY) --only-keep-debug .libs/libzzz.so libzzz.so.debug
 
 # Strip and add debuglink
 @NO_SHARED_FALSE@libfoo.so: libfoo.so.debug
 @NO_SHARED_FALSE@	@cp -f .libs/libfoo.so libfoo.so
 @NO_SHARED_FALSE@	$(objcopy_verbose)$(OBJCOPY) --strip-debug --add-gnu-debuglink=libfoo.so.debug libfoo.so
+@NO_SHARED_FALSE@libbar.so: libbar.so.debug
+@NO_SHARED_FALSE@	@cp -f .libs/libbar.so libbar.so
+@NO_SHARED_FALSE@	$(objcopy_verbose)$(OBJCOPY) --strip-debug --add-gnu-debuglink=libbar.so.debug libbar.so
+@NO_SHARED_FALSE@libzzz.so: libzzz.so.debug
+@NO_SHARED_FALSE@	@cp -f .libs/libzzz.so libzzz.so
+@NO_SHARED_FALSE@	$(objcopy_verbose)$(OBJCOPY) --strip-debug --add-gnu-debuglink=libzzz.so.debug libzzz.so
 
-@NO_SHARED_FALSE@all-local: libfoo.so
+@NO_SHARED_FALSE@libtp.so: libtp.la
+@NO_SHARED_FALSE@	@cp -f .libs/libtp.so libtp.so
+
+@NO_SHARED_FALSE@all-local: libfoo.so libbar.so libzzz.so libtp.so
 @NO_SHARED_FALSE@	@if [ x"$(srcdir)" != x"$(builddir)" ]; then \
 @NO_SHARED_FALSE@		for script in $(EXTRA_DIST); do \
 @NO_SHARED_FALSE@			cp -f $(srcdir)/$$script $(builddir); \

@@ -1927,26 +1927,13 @@ int lttng_set_tracing_group(const char *name)
 	return 0;
 }
 
-/*
- * Returns size of returned session payload data or a negative error code.
- */
 int lttng_calibrate(struct lttng_handle *handle,
 		struct lttng_calibrate *calibrate)
 {
-	struct lttcomm_session_msg lsm;
-
-	/* Safety check. NULL pointer are forbidden */
-	if (handle == NULL || calibrate == NULL) {
-		return -LTTNG_ERR_INVALID;
-	}
-
-	memset(&lsm, 0, sizeof(lsm));
-	lsm.cmd_type = LTTNG_CALIBRATE;
-	lttng_ctl_copy_lttng_domain(&lsm.domain, &handle->domain);
-
-	memcpy(&lsm.u.calibrate, calibrate, sizeof(lsm.u.calibrate));
-
-	return lttng_ctl_ask_sessiond(&lsm, NULL);
+	/*
+	 * This command was removed in LTTng 2.9.
+	 */
+	return -LTTNG_ERR_UND;
 }
 
 /*
@@ -2384,7 +2371,7 @@ int lttng_list_tracker_pids(struct lttng_handle *handle,
  * Regenerate the metadata for a session.
  * Return 0 on success, a negative error code on error.
  */
-int lttng_metadata_regenerate(const char *session_name)
+int lttng_regenerate_metadata(const char *session_name)
 {
 	int ret;
 	struct lttcomm_session_msg lsm;
@@ -2395,7 +2382,45 @@ int lttng_metadata_regenerate(const char *session_name)
 	}
 
 	memset(&lsm, 0, sizeof(lsm));
-	lsm.cmd_type = LTTNG_METADATA_REGENERATE;
+	lsm.cmd_type = LTTNG_REGENERATE_METADATA;
+
+	lttng_ctl_copy_string(lsm.session.name, session_name,
+			sizeof(lsm.session.name));
+
+	ret = lttng_ctl_ask_sessiond(&lsm, NULL);
+	if (ret < 0) {
+		goto end;
+	}
+
+	ret = 0;
+end:
+	return ret;
+}
+
+/*
+ * Deprecated, replaced by lttng_regenerate_metadata.
+ */
+int lttng_metadata_regenerate(const char *session_name)
+{
+	return lttng_regenerate_metadata(session_name);
+}
+
+/*
+ * Regenerate the statedump of a session.
+ * Return 0 on success, a negative error code on error.
+ */
+int lttng_regenerate_statedump(const char *session_name)
+{
+	int ret;
+	struct lttcomm_session_msg lsm;
+
+	if (!session_name) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	memset(&lsm, 0, sizeof(lsm));
+	lsm.cmd_type = LTTNG_REGENERATE_STATEDUMP;
 
 	lttng_ctl_copy_string(lsm.session.name, session_name,
 			sizeof(lsm.session.name));

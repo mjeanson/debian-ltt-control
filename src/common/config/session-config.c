@@ -1188,7 +1188,8 @@ end:
 }
 
 static
-int create_snapshot_session(const char *session_name, xmlNodePtr output_node)
+int create_snapshot_session(const char *session_name, xmlNodePtr output_node,
+		const struct config_load_session_override_attr *overrides)
 {
 	int ret;
 	xmlNodePtr node = NULL;
@@ -1218,6 +1219,9 @@ int create_snapshot_session(const char *session_name, xmlNodePtr output_node)
 		uint64_t max_size = UINT64_MAX;
 		struct consumer_output output = { 0 };
 		struct lttng_snapshot_output *snapshot_output = NULL;
+		const char *control_uri = NULL;
+		const char *data_uri = NULL;
+		const char *path = NULL;
 
 		for (node = xmlFirstElementChild(snapshot_output_node); node;
 				node = xmlNextElementSibling(node)) {
@@ -1253,6 +1257,30 @@ int create_snapshot_session(const char *session_name, xmlNodePtr output_node)
 			}
 		}
 
+		control_uri = output.control_uri;
+		data_uri = output.data_uri;
+		path = output.path;
+
+		if (overrides) {
+			if (overrides->path_url) {
+				path = overrides->path_url;
+				/* Control/data_uri are null */
+				control_uri = NULL;
+				data_uri = NULL;
+			} else {
+				if (overrides->ctrl_url) {
+					control_uri = overrides->ctrl_url;
+					/* path is null */
+					path = NULL;
+				}
+				if (overrides->data_url) {
+					data_uri = overrides->data_url;
+					/* path is null */
+					path = NULL;
+				}
+			}
+		}
+
 		snapshot_output = lttng_snapshot_output_create();
 		if (!snapshot_output) {
 			ret = -LTTNG_ERR_NOMEM;
@@ -1269,23 +1297,23 @@ int create_snapshot_session(const char *session_name, xmlNodePtr output_node)
 			goto error_snapshot_output;
 		}
 
-		if (output.path) {
-			ret = lttng_snapshot_output_set_ctrl_url(output.path,
+		if (path) {
+			ret = lttng_snapshot_output_set_ctrl_url(path,
 					snapshot_output);
 			if (ret) {
 				goto error_snapshot_output;
 			}
 		} else {
-			if (output.control_uri) {
-				ret = lttng_snapshot_output_set_ctrl_url(output.control_uri,
+			if (control_uri) {
+				ret = lttng_snapshot_output_set_ctrl_url(control_uri,
 						snapshot_output);
 				if (ret) {
 					goto error_snapshot_output;
 				}
 			}
 
-			if (output.data_uri) {
-				ret = lttng_snapshot_output_set_data_url(output.data_uri,
+			if (data_uri) {
+				ret = lttng_snapshot_output_set_data_url(data_uri,
 						snapshot_output);
 				if (ret) {
 					goto error_snapshot_output;
@@ -1315,11 +1343,15 @@ int create_session(const char *name,
 	struct lttng_domain *jul_domain,
 	struct lttng_domain *log4j_domain,
 	xmlNodePtr output_node,
-	uint64_t live_timer_interval)
+	uint64_t live_timer_interval,
+	const struct config_load_session_override_attr *overrides)
 {
 	int ret;
 	struct consumer_output output = { 0 };
 	xmlNodePtr consumer_output_node;
+	const char *control_uri = NULL;
+	const char *data_uri = NULL;
+	const char *path = NULL;
 
 	assert(name);
 
@@ -1344,13 +1376,38 @@ int create_session(const char *name,
 		}
 	}
 
-	if (live_timer_interval != UINT64_MAX &&
-		!output.control_uri && !output.data_uri) {
+	control_uri = output.control_uri;
+	data_uri = output.data_uri;
+	path = output.path;
+
+	/* Check for override and apply them */
+	if (overrides) {
+		if (overrides->path_url) {
+			path = overrides->path_url;
+			/* control/data_uri are null */;
+			control_uri = NULL;
+			data_uri = NULL;
+		} else {
+			if (overrides->ctrl_url) {
+				control_uri = overrides->ctrl_url;
+				/* path is null */
+				path = NULL;
+			}
+			if (overrides->data_url) {
+				data_uri = overrides->data_url;
+				/* path is null */
+				path = NULL;
+			}
+		}
+	}
+
+
+	if (live_timer_interval != UINT64_MAX && !control_uri && !data_uri) {
 		ret = -LTTNG_ERR_LOAD_INVALID_CONFIG;
 		goto end;
 	}
 
-	if (output.control_uri || output.data_uri) {
+	if (control_uri || data_uri) {
 		/* network destination */
 		if (live_timer_interval && live_timer_interval != UINT64_MAX) {
 			/*
@@ -1366,15 +1423,14 @@ int create_session(const char *name,
 			goto end;
 		}
 
-		ret = create_session_net_output(name, output.control_uri,
-				output.data_uri);
+		ret = create_session_net_output(name, control_uri, data_uri);
 		if (ret) {
 			goto end;
 		}
 
 	} else {
 		/* either local output or no output */
-		ret = lttng_create_session(name, output.path);
+		ret = lttng_create_session(name, path);
 		if (ret) {
 			goto end;
 		}
@@ -2395,7 +2451,8 @@ end:
 
 static
 int process_session_node(xmlNodePtr session_node, const char *session_name,
-		int override)
+		int overwrite,
+		const struct config_load_session_override_attr *overrides)
 {
 	int ret, started = -1, snapshot_mode = -1;
 	uint64_t live_timer_interval = UINT64_MAX;
@@ -2570,7 +2627,22 @@ domain_init_error:
 		goto error;
 	}
 
-	if (override) {
+	/* Apply overrides */
+	if (overrides) {
+		if (overrides->session_name) {
+			xmlChar *name_override = xmlStrdup(BAD_CAST(overrides->session_name));
+			if (!name_override) {
+				ret = -LTTNG_ERR_NOMEM;
+				goto error;
+			}
+
+			/* Overrides the session name to the provided name */
+			xmlFree(name);
+			name = name_override;
+		}
+	}
+
+	if (overwrite) {
 		/* Destroy session if it exists */
 		ret = lttng_destroy_session((const char *) name);
 		if (ret && ret != -LTTNG_ERR_SESS_NOT_FOUND) {
@@ -2581,17 +2653,18 @@ domain_init_error:
 
 	/* Create session type depending on output type */
 	if (snapshot_mode && snapshot_mode != -1) {
-		ret = create_snapshot_session((const char *) name, output_node);
+		ret = create_snapshot_session((const char *) name, output_node,
+				overrides);
 	} else if (live_timer_interval &&
 		live_timer_interval != UINT64_MAX) {
 		ret = create_session((const char *) name, kernel_domain,
 				ust_domain, jul_domain, log4j_domain,
-				output_node, live_timer_interval);
+				output_node, live_timer_interval, overrides);
 	} else {
 		/* regular session */
 		ret = create_session((const char *) name, kernel_domain,
 				ust_domain, jul_domain, log4j_domain,
-				output_node, UINT64_MAX);
+				output_node, UINT64_MAX, overrides);
 	}
 	if (ret) {
 		goto error;
@@ -2665,7 +2738,8 @@ valid:
 
 static
 int load_session_from_file(const char *path, const char *session_name,
-	struct session_config_validation_ctx *validation_ctx, int override)
+	struct session_config_validation_ctx *validation_ctx, int overwrite,
+	const struct config_load_session_override_attr *overrides)
 {
 	int ret, session_found = !session_name;
 	xmlDocPtr doc = NULL;
@@ -2707,7 +2781,7 @@ int load_session_from_file(const char *path, const char *session_name,
 		session_node; session_node =
 			xmlNextElementSibling(session_node)) {
 		ret = process_session_node(session_node,
-			session_name, override);
+			session_name, overwrite, overrides);
 		if (session_name && ret == 0) {
 			/* Target session found and loaded */
 			session_found = 1;
@@ -2741,7 +2815,8 @@ struct dirent *alloc_dirent(const char *path)
 
 static
 int load_session_from_path(const char *path, const char *session_name,
-	struct session_config_validation_ctx *validation_ctx, int override)
+	struct session_config_validation_ctx *validation_ctx, int overwrite,
+	const struct config_load_session_override_attr *overrides)
 {
 	int ret, session_found = !session_name;
 	DIR *directory = NULL;
@@ -2816,7 +2891,7 @@ int load_session_from_path(const char *path, const char *session_name,
 			file_path[path_len + file_name_len] = '\0';
 
 			ret = load_session_from_file(file_path, session_name,
-				validation_ctx, override);
+				validation_ctx, overwrite, overrides);
 			if (session_name && !ret) {
 				session_found = 1;
 				break;
@@ -2827,7 +2902,7 @@ int load_session_from_path(const char *path, const char *session_name,
 		free(file_path);
 	} else {
 		ret = load_session_from_file(path, session_name,
-			validation_ctx, override);
+			validation_ctx, overwrite, overrides);
 		if (ret) {
 			goto end;
 		} else {
@@ -2885,7 +2960,8 @@ invalid:
 
 LTTNG_HIDDEN
 int config_load_session(const char *path, const char *session_name,
-		int override, unsigned int autoload)
+		int overwrite, unsigned int autoload,
+		const struct config_load_session_override_attr *overrides)
 {
 	int ret;
 	bool session_loaded = false;
@@ -2939,7 +3015,7 @@ int config_load_session(const char *path, const char *session_name,
 			}
 			if (path_ptr) {
 				ret = load_session_from_path(path_ptr, session_name,
-						&validation_ctx, override);
+						&validation_ctx, overwrite, overrides);
 				if (ret && ret != -LTTNG_ERR_LOAD_SESSION_NOENT) {
 					goto end;
 				}
@@ -2969,7 +3045,7 @@ int config_load_session(const char *path, const char *session_name,
 
 		if (path_ptr) {
 			ret = load_session_from_path(path_ptr, session_name,
-					&validation_ctx, override);
+					&validation_ctx, overwrite, overrides);
 			if (!ret) {
 				session_loaded = true;
 			}
@@ -2994,7 +3070,7 @@ int config_load_session(const char *path, const char *session_name,
 		}
 
 		ret = load_session_from_path(path, session_name,
-			&validation_ctx, override);
+			&validation_ctx, overwrite, overrides);
 	}
 end:
 	fini_session_config_validation_ctx(&validation_ctx);

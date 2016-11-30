@@ -10,7 +10,8 @@ lttng-load - Load LTTng tracing session configurations
 SYNOPSIS
 --------
 [verse]
-*lttng* ['linkgenoptions:(GENERAL OPTIONS)'] *load* [option:--force] [option:--input-path='PATH'] ['SESSION']
+*lttng* ['linkgenoptions:(GENERAL OPTIONS)'] *load* [option:--force] [option:--input-path='PATH']
+      [option:--override-url='URL'] ['SESSION' [option:--override-name='NAME']]
 
 
 DESCRIPTION
@@ -54,6 +55,9 @@ If the input path is a *file*, then:
 * If 'SESSION' is not specified, the option:--all option is implicit:
   all the tracing session configurations found in this file are loaded.
 
+Aspects of the loaded configurations can be overridden at load time
+using the option:--override-url and option:--override-name options.
+
 By default, existing tracing sessions are not overwritten when loading:
 the command fails. The option:--force option can be used to allow this.
 
@@ -67,10 +71,26 @@ option:-a, option:--all::
 option:-f, option:--force::
     Overwrite existing tracing sessions when loading.
 
-option:-i, option:--input-path='PATH'::
+option:-i 'PATH', option:--input-path='PATH'::
     Load tracing session configurations from 'PATH', either a directory
     or a file, instead of loading them from the default search
     directories.
+
+option:--override-name='NAME'::
+    Override the name of the loaded tracing session configuration,
+    'SESSION', with 'NAME'.
++
+You must specify a tracing session name to load ('SESSION') and :not:
+use the option:--all option when using this option.
+
+option:--override-url='URL'::
+    Override the URL of the loaded tracing session configurations
+    with 'URL'.
++
+This is the equivalent of the nloption:--set-url option of
+man:lttng-create(1). The validity of the URL override depends on the
+type of tracing session configurations to load. This option applies to
+_all_ the loaded tracing session configurations.
 
 
 include::common-cmd-help-options.txt[]

@@ -2,12 +2,12 @@
 .\"     Title: lttng-enable-channel
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 10/07/2016
+.\"      Date: 11/29/2016
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.8.2
+.\"    Source: LTTng 2.9.0
 .\"  Language: English
 .\"
-.TH "LTTNG\-ENABLE\-CHANN" "1" "10/07/2016" "LTTng 2\&.8\&.2" "LTTng Manual"
+.TH "LTTNG\-ENABLE\-CHANN" "1" "11/29/2016" "LTTng 2\&.9\&.0" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -35,7 +35,7 @@ Create a Linux kernel channel:
 .sp
 .nf
 \fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBenable\-channel\fR \fB--kernel\fR
-      [\fB--discard\fR | \fB--overwrite\fR] [\fB--output\fR=(\fBmmap\fR | \fBsplice\fR)]
+      [\fB--overwrite\fR] [\fB--output\fR=(\fBmmap\fR | \fBsplice\fR)]
       [\fB--subbuf-size\fR=\fISIZE\fR] [\fB--num-subbuf\fR=\fICOUNT\fR]
       [\fB--switch-timer\fR=\fIPERIODUS\fR] [\fB--read-timer\fR=\fIPERIODUS\fR]
       [\fB--tracefile-size\fR=\fISIZE\fR] [\fB--tracefile-count\fR=\fICOUNT\fR]
@@ -46,7 +46,7 @@ Create a user space channel:
 .sp
 .nf
 \fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBenable\-channel\fR \fB--userspace\fR
-      [\fB--discard\fR | \fB--overwrite\fR] [\fB--buffers-pid\fR]
+      [\fB--overwrite\fR] [\fB--buffers-pid\fR]
       [\fB--subbuf-size\fR=\fISIZE\fR] [\fB--num-subbuf\fR=\fICOUNT\fR]
       [\fB--switch-timer\fR=\fIPERIODUS\fR] [\fB--read-timer\fR=\fIPERIODUS\fR]
       [\fB--tracefile-size\fR=\fISIZE\fR] [\fB--tracefile-count\fR=\fICOUNT\fR]
@@ -185,7 +185,7 @@ Enable channel in the user space domain\&.
 .RE
 .SS "Target"
 .PP
-\fB-s\fR, \fB--session\fR=\fISESSION\fR
+\fB-s\fR \fISESSION\fR, \fB--session\fR=\fISESSION\fR
 .RS 4
 Create or enable channel in the tracing session named
 \fISESSION\fR

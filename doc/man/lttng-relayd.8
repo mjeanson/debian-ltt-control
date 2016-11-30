@@ -2,12 +2,12 @@
 .\"     Title: lttng-relayd
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 10/07/2016
+.\"      Date: 11/29/2016
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.8.2
+.\"    Source: LTTng 2.9.0
 .\"  Language: English
 .\"
-.TH "LTTNG\-RELAYD" "8" "10/07/2016" "LTTng 2\&.8\&.2" "LTTng Manual"
+.TH "LTTNG\-RELAYD" "8" "11/29/2016" "LTTng 2\&.9\&.0" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -130,7 +130,7 @@ Start as Unix daemon, and close file descriptors (console)\&. Use the
 option instead to keep the file descriptors open\&.
 .RE
 .PP
-\fB-g\fR, \fB--group\fR=\fIGROUP\fR
+\fB-g\fR \fIGROUP\fR, \fB--group\fR=\fIGROUP\fR
 .RS 4
 Use
 \fIGROUP\fR
@@ -138,7 +138,7 @@ as Unix tracing group (default:
 \fBtracing\fR)\&.
 .RE
 .PP
-\fB-o\fR, \fB--output\fR=\fIPATH\fR
+\fB-o\fR \fIPATH\fR, \fB--output\fR=\fIPATH\fR
 .RS 4
 Set base directory of written trace data to
 \fIPATH\fR\&.
@@ -163,7 +163,7 @@ and
 .sp
 See the \fIURL format\fR section above for more information about the syntax of the following options\*(Aq \fIURL\fR argument\&.
 .PP
-\fB-C\fR, \fB--control-port\fR=\fIURL\fR
+\fB-C\fR \fIURL\fR, \fB--control-port\fR=\fIURL\fR
 .RS 4
 Listen to control data on URL
 \fIURL\fR
@@ -171,7 +171,7 @@ Listen to control data on URL
 \fBtcp://0.0.0.0:5342\fR)\&.
 .RE
 .PP
-\fB-D\fR, \fB--data-port\fR=\fIURL\fR
+\fB-D\fR \fIURL\fR, \fB--data-port\fR=\fIURL\fR
 .RS 4
 Listen to trace data on URL
 \fIURL\fR
@@ -179,7 +179,7 @@ Listen to trace data on URL
 \fBtcp://0.0.0.0:5343\fR)\&.
 .RE
 .PP
-\fB-L\fR, \fB--live-port\fR=\fIURL\fR
+\fB-L\fR \fIURL\fR, \fB--live-port\fR=\fIURL\fR
 .RS 4
 Listen to LTTng live connections on URL
 \fIURL\fR

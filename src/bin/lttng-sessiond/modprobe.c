@@ -57,6 +57,7 @@ struct kern_modules_param kern_modules_probes_default[] = {
 	{ "lttng-probe-ext3" },
 	{ "lttng-probe-ext4" },
 	{ "lttng-probe-gpio" },
+	{ "lttng-probe-i2c" },
 	{ "lttng-probe-irq" },
 	{ "lttng-probe-jbd" },
 	{ "lttng-probe-jbd2" },
@@ -197,6 +198,7 @@ static int modprobe_lttng(struct kern_modules_param *modules,
 			}
 		} else {
 			DBG("Modprobe successfully %s", modules[i].name);
+			modules[i].loaded = true;
 		}
 
 		kmod_module_unref(mod);
@@ -271,6 +273,10 @@ static void modprobe_remove_lttng(const struct kern_modules_param *modules,
 	for (i = entries - 1; i >= 0; i--) {
 		struct kmod_module *mod = NULL;
 
+		if (!modules[i].loaded) {
+			continue;
+		}
+
 		ret = kmod_module_new_from_name(ctx, modules[i].name, &mod);
 		if (ret < 0) {
 			PERROR("Failed to create kmod module for %s", modules[i].name);
@@ -337,6 +343,7 @@ static int modprobe_lttng(struct kern_modules_param *modules,
 			}
 		} else {
 			DBG("Modprobe successfully %s", modules[i].name);
+			modules[i].loaded = true;
 		}
 	}
 
@@ -351,6 +358,9 @@ static void modprobe_remove_lttng(const struct kern_modules_param *modules,
 	char modprobe[256];
 
 	for (i = entries - 1; i >= 0; i--) {
+		if (!modules[i].loaded) {
+			continue;
+		}
 		ret = snprintf(modprobe, sizeof(modprobe),
 				"/sbin/modprobe -r -q %s",
 				modules[i].name);

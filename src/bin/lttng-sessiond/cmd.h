@@ -96,8 +96,6 @@ ssize_t cmd_list_syscalls(struct lttng_event **events);
 ssize_t cmd_list_tracker_pids(struct ltt_session *session,
 		enum lttng_domain_type domain, int32_t **pids);
 
-int cmd_calibrate(enum lttng_domain_type domain,
-		struct lttng_calibrate *calibrate);
 int cmd_data_pending(struct ltt_session *session);
 
 /* Snapshot */
@@ -110,6 +108,7 @@ int cmd_snapshot_record(struct ltt_session *session,
 
 int cmd_set_session_shm_path(struct ltt_session *session,
 		const char *shm_path);
-int cmd_metadata_regenerate(struct ltt_session *session);
+int cmd_regenerate_metadata(struct ltt_session *session);
+int cmd_regenerate_statedump(struct ltt_session *session);
 
 #endif /* CMD_H */

@@ -47,7 +47,6 @@ LTTNG_HIDDEN const char * const mi_lttng_schema_version_value = XSTR(MI_SCHEMA_M
 const char * const mi_lttng_element_command = "command";
 const char * const mi_lttng_element_command_action = "snapshot_action";
 const char * const mi_lttng_element_command_add_context = "add-context";
-const char * const mi_lttng_element_command_calibrate = "calibrate";
 const char * const mi_lttng_element_command_create = "create";
 const char * const mi_lttng_element_command_destroy = "destroy";
 const char * const mi_lttng_element_command_disable_channel = "disable-channel";
@@ -58,6 +57,8 @@ const char * const mi_lttng_element_command_list = "list";
 const char * const mi_lttng_element_command_load = "load";
 LTTNG_HIDDEN const char * const mi_lttng_element_command_metadata = "metadata";
 LTTNG_HIDDEN const char * const mi_lttng_element_command_metadata_action = "metadata_action";
+LTTNG_HIDDEN const char * const mi_lttng_element_command_regenerate = "regenerate";
+LTTNG_HIDDEN const char * const mi_lttng_element_command_regenerate_action = "regenerate_action";
 const char * const mi_lttng_element_command_name = "name";
 const char * const mi_lttng_element_command_output = "output";
 const char * const mi_lttng_element_command_save = "save";
@@ -100,6 +101,8 @@ const char * const mi_lttng_element_save = "save";
 
 /* Strings related to load command */
 const char * const mi_lttng_element_load = "load";
+LTTNG_HIDDEN const char * const mi_lttng_element_load_overrides = "overrides";
+LTTNG_HIDDEN const char * const mi_lttng_element_load_override_url = "url";
 
 /* General elements of mi_lttng */
 const char * const mi_lttng_element_empty = "";
@@ -165,10 +168,6 @@ const char * const mi_lttng_loglevel_type_range = "RANGE";
 const char * const mi_lttng_loglevel_type_single = "SINGLE";
 const char * const mi_lttng_loglevel_type_unknown = "UNKNOWN";
 
-/* String related to lttng_calibrate */
-const char * const mi_lttng_element_calibrate = "calibrate";
-const char * const mi_lttng_element_calibrate_function = "FUNCTION";
-
 /* String related to a lttng_snapshot_output */
 const char * const mi_lttng_element_snapshot_ctrl_url = "ctrl_url";
 const char * const mi_lttng_element_snapshot_data_url = "data_url";
@@ -186,6 +185,9 @@ const char * const mi_lttng_context_type_perf_cpu_counter;
 const char * const mi_lttng_context_type_perf_thread_counter;
 const char * const mi_lttng_element_track_untrack_pid_target;
 const char * const mi_lttng_element_track_untrack_targets;
+const char * const mi_lttng_element_calibrate;
+const char * const mi_lttng_element_calibrate_function;
+const char * const mi_lttng_element_command_calibrate;
 
 /* This is a merge of jul loglevel and regular loglevel
  * Those should never overlap by definition
@@ -432,22 +434,6 @@ const char *mi_lttng_buffertype_string(enum lttng_buffer_type value)
 		assert(0);
 		return NULL;
 	}
-}
-
-LTTNG_HIDDEN
-const char *mi_lttng_calibratetype_string(enum lttng_calibrate_type val)
-{
-	const char *ret;
-
-	switch (val) {
-	case LTTNG_CALIBRATE_FUNCTION:
-		ret = mi_lttng_element_calibrate_function;
-		break;
-	default:
-		ret = mi_lttng_element_empty;
-		break;
-	}
-	return ret;
 }
 
 LTTNG_HIDDEN
@@ -1419,31 +1405,6 @@ close:
 	/* Close field element */
 	ret = mi_lttng_writer_close_element(writer);
 
-end:
-	return ret;
-}
-
-LTTNG_HIDDEN
-int mi_lttng_calibrate(struct mi_writer *writer,
-		struct lttng_calibrate *calibrate)
-{
-	int ret;
-
-	/* Open calibrate element */
-	ret = mi_lttng_writer_open_element(writer, mi_lttng_element_calibrate);
-	if (ret) {
-		goto end;
-	}
-
-	/* Calibration type */
-	ret = mi_lttng_writer_write_element_string(writer, config_element_type,
-			mi_lttng_calibratetype_string(calibrate->type));
-	if (ret) {
-		goto end;
-	}
-
-	/* Closing calibrate element */
-	ret = mi_lttng_writer_close_element(writer);
 end:
 	return ret;
 }
