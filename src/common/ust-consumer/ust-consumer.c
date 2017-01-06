@@ -2273,10 +2273,10 @@ int lttng_ustconsumer_sync_metadata(struct lttng_consumer_local_data *ctx,
 	 * because we locked the metadata thread.
 	 */
 	ret = lttng_ustconsumer_request_metadata(ctx, metadata->chan, 0, 0);
+	pthread_mutex_lock(&metadata->lock);
 	if (ret < 0) {
 		goto end;
 	}
-	pthread_mutex_lock(&metadata->lock);
 
 	ret = commit_one_metadata_packet(metadata);
 	if (ret <= 0) {
@@ -2620,14 +2620,17 @@ int lttng_ustconsumer_on_recv_stream(struct lttng_consumer_stream *stream)
 		stream->tracefile_size_current = 0;
 
 		if (!stream->metadata_flag) {
-			ret = index_create_file(stream->chan->pathname,
+			struct lttng_index_file *index_file;
+
+			index_file = lttng_index_file_create(stream->chan->pathname,
 					stream->name, stream->uid, stream->gid,
 					stream->chan->tracefile_size,
-					stream->tracefile_count_current);
-			if (ret < 0) {
+					stream->tracefile_count_current,
+					CTF_INDEX_MAJOR, CTF_INDEX_MINOR);
+			if (!index_file) {
 				goto error;
 			}
-			stream->index_fd = ret;
+			stream->index_file = index_file;
 		}
 	}
 	ret = 0;
