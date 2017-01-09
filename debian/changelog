@@ -1,3 +1,9 @@
+ltt-control (2.9.3-1) unstable; urgency=medium
+
+  * [f261ca8] New upstream version 2.9.3
+
+ -- Michael Jeanson <mjeanson@ubuntu.com>  Mon, 09 Jan 2017 17:06:03 -0500
+
 ltt-control (2.9.1-1) unstable; urgency=medium
 
   * [65fa69b] New upstream version 2.9.1
