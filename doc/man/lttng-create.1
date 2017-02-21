@@ -2,12 +2,12 @@
 .\"     Title: lttng-create
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 01/09/2017
+.\"      Date: 02/21/2017
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.9.3
+.\"    Source: LTTng 2.9.4
 .\"  Language: English
 .\"
-.TH "LTTNG\-CREATE" "1" "01/09/2017" "LTTng 2\&.9\&.3" "LTTng Manual"
+.TH "LTTNG\-CREATE" "1" "02/21/2017" "LTTng 2\&.9\&.4" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -34,29 +34,28 @@ lttng-create \- Create an LTTng tracing session
 Local mode:
 .sp
 .nf
-\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR [\fB--shm-path\fR=\fIPATH\fR]
-      [\fB--no-output\fR | \fB--output\fR=\fIPATH\fR | \fB--set-url\fR=file://\fIPATH\fR] [\fISESSION\fR]
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR [\fISESSION\fR] [\fB--shm-path\fR=\fIPATH\fR]
+      [\fB--no-output\fR | \fB--output\fR=\fIPATH\fR | \fB--set-url\fR=file://\fIPATH\fR]
 .fi
 .sp
 Network streaming mode:
 .sp
 .nf
-\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR [\fB--shm-path\fR=\fIPATH\fR]
-      (\fB--set-url\fR=\fIURL\fR | \fB--ctrl-url\fR=\fIURL\fR \fB--data-url\fR=\fIURL\fR) [\fISESSION\fR]
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR [\fISESSION\fR] [\fB--shm-path\fR=\fIPATH\fR]
+      (\fB--set-url\fR=\fIURL\fR | \fB--ctrl-url\fR=\fIURL\fR \fB--data-url\fR=\fIURL\fR)
+Snapshot mode:
 .fi
 .sp
-Snapshot mode:
-.sp
 .nf
-\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR \fB--snapshot\fR [\fB--shm-path\fR=\fIPATH\fR]
-      [\fB--set-url\fR=\fIURL\fR | \fB--ctrl-url\fR=\fIURL\fR \fB--data-url\fR=\fIURL\fR] [\fISESSION\fR]
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR [\fISESSION\fR] \fB--snapshot\fR
+      [\fB--shm-path\fR=\fIPATH\fR] [\fB--set-url\fR=\fIURL\fR | \fB--ctrl-url\fR=\fIURL\fR \fB--data-url\fR=\fIURL\fR]
 .fi
 .sp
 Live mode:
 .sp
 .nf
-\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR \fB--live\fR[=\fIDELAYUS\fR] [\fB--shm-path\fR=\fIPATH\fR]
-      [\fB--set-url\fR=\fIURL\fR | \fB--ctrl-url\fR=\fIURL\fR \fB--data-url\fR=\fIURL\fR] [\fISESSION\fR]
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBcreate\fR [\fISESSION\fR] \fB--live\fR[=\fIDELAYUS\fR]
+      [\fB--shm-path\fR=\fIPATH\fR] [\fB--set-url\fR=\fIURL\fR | \fB--ctrl-url\fR=\fIURL\fR \fB--data-url\fR=\fIURL\fR]
 .fi
 .SH "DESCRIPTION"
 .sp
