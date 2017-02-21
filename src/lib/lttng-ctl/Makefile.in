@@ -162,6 +162,10 @@ AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
 am__v_lt_1 = 
+liblttng_ctl_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
+	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(CCLD) \
+	$(AM_CFLAGS) $(CFLAGS) $(liblttng_ctl_la_LDFLAGS) $(LDFLAGS) \
+	-o $@
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
 am__v_P_0 = false
@@ -384,6 +388,7 @@ LN_S = @LN_S@
 LTLIBOBJS = @LTLIBOBJS@
 LTTNG_SYSTEM_RUNDIR = @LTTNG_SYSTEM_RUNDIR@
 LTTV_GUI_BIN = @LTTV_GUI_BIN@
+LT_NO_UNDEFINED = @LT_NO_UNDEFINED@
 LT_SYS_LIBRARY_PATH = @LT_SYS_LIBRARY_PATH@
 MAINT = @MAINT@
 MAJOR_VERSION = @MAJOR_VERSION@
@@ -517,6 +522,9 @@ lib_LTLIBRARIES = liblttng-ctl.la
 liblttng_ctl_la_SOURCES = lttng-ctl.c snapshot.c lttng-ctl-helper.h \
 		lttng-ctl-health.c save.c load.c deprecated-symbols.c
 
+liblttng_ctl_la_LDFLAGS = \
+		$(LT_NO_UNDEFINED)
+
 liblttng_ctl_la_LIBADD = \
 		$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \
 		$(top_builddir)/src/common/libcommon.la \
@@ -597,7 +605,7 @@ clean-libLTLIBRARIES:
 	}
 
 liblttng-ctl.la: $(liblttng_ctl_la_OBJECTS) $(liblttng_ctl_la_DEPENDENCIES) $(EXTRA_liblttng_ctl_la_DEPENDENCIES) 
-	$(AM_V_CCLD)$(LINK) -rpath $(libdir) $(liblttng_ctl_la_OBJECTS) $(liblttng_ctl_la_LIBADD) $(LIBS)
+	$(AM_V_CCLD)$(liblttng_ctl_la_LINK) -rpath $(libdir) $(liblttng_ctl_la_OBJECTS) $(liblttng_ctl_la_LIBADD) $(LIBS)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)

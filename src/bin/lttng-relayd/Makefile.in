@@ -132,7 +132,6 @@ am_lttng_relayd_OBJECTS = main.$(OBJEXT) utils.$(OBJEXT) \
 	viewer-session.$(OBJEXT) tracefile-array.$(OBJEXT)
 lttng_relayd_OBJECTS = $(am_lttng_relayd_OBJECTS)
 lttng_relayd_DEPENDENCIES =  \
-	$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
 	$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \
 	$(top_builddir)/src/common/hashtable/libhashtable.la \
 	$(top_builddir)/src/common/libcommon.la \
@@ -140,7 +139,8 @@ lttng_relayd_DEPENDENCIES =  \
 	$(top_builddir)/src/common/index/libindex.la \
 	$(top_builddir)/src/common/health/libhealth.la \
 	$(top_builddir)/src/common/config/libconfig.la \
-	$(top_builddir)/src/common/testpoint/libtestpoint.la
+	$(top_builddir)/src/common/testpoint/libtestpoint.la \
+	$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
@@ -323,6 +323,7 @@ LN_S = @LN_S@
 LTLIBOBJS = @LTLIBOBJS@
 LTTNG_SYSTEM_RUNDIR = @LTTNG_SYSTEM_RUNDIR@
 LTTV_GUI_BIN = @LTTV_GUI_BIN@
+LT_NO_UNDEFINED = @LT_NO_UNDEFINED@
 LT_SYS_LIBRARY_PATH = @LT_SYS_LIBRARY_PATH@
 MAINT = @MAINT@
 MAJOR_VERSION = @MAJOR_VERSION@
@@ -474,7 +475,6 @@ lttng_relayd_SOURCES = main.c lttng-relayd.h utils.h utils.c cmd.h \
 
 # link on liblttngctl for check if relayd is already alive.
 lttng_relayd_LDADD = -lurcu-common -lurcu \
-		$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
 		$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \
 		$(top_builddir)/src/common/hashtable/libhashtable.la \
 		$(top_builddir)/src/common/libcommon.la \
@@ -482,7 +482,8 @@ lttng_relayd_LDADD = -lurcu-common -lurcu \
 		$(top_builddir)/src/common/index/libindex.la \
 		$(top_builddir)/src/common/health/libhealth.la \
 		$(top_builddir)/src/common/config/libconfig.la \
-		$(top_builddir)/src/common/testpoint/libtestpoint.la
+		$(top_builddir)/src/common/testpoint/libtestpoint.la \
+		$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la
 
 all: all-am
 

@@ -1,5 +1,5 @@
 AC_PREREQ([2.64])
-AC_INIT([lttng-tools],[2.9.3],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
+AC_INIT([lttng-tools],[2.9.4],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
 
 AC_CONFIG_HEADERS([include/config.h])
 AC_CONFIG_AUX_DIR([config])
@@ -64,6 +64,16 @@ CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 CC="$PTHREAD_CC"
 
 AX_LIB_SOCKET_NSL
+
+LT_NO_UNDEFINED=""
+AS_CASE([$host_os],
+  [cygwin*],
+    [
+      LT_NO_UNDEFINED="-no-undefined"
+    ]
+)
+
+AC_SUBST(LT_NO_UNDEFINED)
 
 # Compute minor/major/patchlevel version numbers
 major_version=$(echo AC_PACKAGE_VERSION | $SED 's/^\([[0-9]]\)*\.[[0-9]]*\.[[0-9]]*.*$/\1/')

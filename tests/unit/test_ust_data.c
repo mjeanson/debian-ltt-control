@@ -23,6 +23,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <urcu.h>
 
 #include <lttng/lttng.h>
 #include <bin/lttng-sessiond/lttng-ust-abi.h>
@@ -84,6 +85,11 @@ static void test_create_one_ust_session(void)
 	usess = trace_ust_create_session(42);
 	ok(usess != NULL, "Create UST session");
 
+	if (!usess) {
+		skip(1, "UST session is null");
+		return;
+	}
+
 	ok(usess->id == 42 &&
 	   usess->active == 0 &&
 	   usess->domain_global.channels != NULL &&
@@ -105,6 +111,11 @@ static void test_create_ust_channel(void)
 		"Validate channel name length");
 	uchan = trace_ust_create_channel(&attr, LTTNG_DOMAIN_UST);
 	ok(uchan != NULL, "Create UST channel");
+
+	if (!usess) {
+		skip(1, "UST session is null");
+		return;
+	}
 
 	ok(uchan->enabled == 0 &&
 	   strncmp(uchan->name, "channel0", 8) == 0 &&
@@ -132,6 +143,11 @@ static void test_create_ust_event(void)
 	event = trace_ust_create_event(&ev, NULL, NULL, NULL, false);
 
 	ok(event != NULL, "Create UST event");
+
+	if (!event) {
+		skip(1, "UST event is null");
+		return;
+	}
 
 	ok(event->enabled == 0 &&
 	   event->attr.instrumentation == LTTNG_UST_TRACEPOINT &&
@@ -167,8 +183,8 @@ static void test_create_ust_event_exclusion(void)
 		LTTNG_SYMBOL_NAME_LEN * exclusion_count);
 	ok(exclusion != NULL, "Create UST exclusion");
 	if (!exclusion) {
-		PERROR("zmalloc");
-		abort();
+		skip(4, "zmalloc failed");
+		goto end;
 	}
 
 	exclusion->count = exclusion_count;
@@ -187,8 +203,8 @@ static void test_create_ust_event_exclusion(void)
 		LTTNG_SYMBOL_NAME_LEN * exclusion_count);
 	ok(exclusion != NULL, "Create UST exclusion");
 	if (!exclusion) {
-		PERROR("zmalloc");
-		abort();
+		skip(2, "zmalloc failed");
+		goto end;
 	}
 
 	exclusion->count = exclusion_count;
@@ -198,9 +214,12 @@ static void test_create_ust_event_exclusion(void)
 		get_random_string(), LTTNG_SYMBOL_NAME_LEN);
 
 	event = trace_ust_create_event(&ev, NULL, NULL, exclusion, false);
-	assert(event != NULL);
-
 	ok(event != NULL, "Create UST event with different exclusion names");
+
+	if (!event) {
+		skip(1, "UST event with exclusion is null");
+		goto end;
+	}
 
 	ok(event->enabled == 0 &&
 	   event->attr.instrumentation == LTTNG_UST_TRACEPOINT &&
@@ -213,6 +232,8 @@ static void test_create_ust_event_exclusion(void)
 	   "Validate UST event and exclusion");
 
 	trace_ust_destroy_event(event);
+end:
+	return;
 }
 
 
@@ -237,11 +258,15 @@ int main(int argc, char **argv)
 
 	diag("UST data structures unit test");
 
+	rcu_register_thread();
+
 	test_create_one_ust_session();
 	test_create_ust_channel();
 	test_create_ust_event();
 	test_create_ust_context();
 	test_create_ust_event_exclusion();
+
+	rcu_unregister_thread();
 
 	return exit_status();
 }
