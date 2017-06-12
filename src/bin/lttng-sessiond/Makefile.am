@@ -2,6 +2,10 @@ AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src \
 			  -DINSTALL_BIN_PATH=\""$(lttnglibexecdir)"\" \
 			  -DINSTALL_LIB_PATH=\""$(libdir)"\"
 
+if EMBED_HELP
+AM_CPPFLAGS += -I$(top_builddir)/doc/man
+endif
+
 AM_CFLAGS = -fno-strict-aliasing
 
 bin_PROGRAMS = lttng-sessiond
@@ -30,7 +34,10 @@ lttng_sessiond_SOURCES = utils.c utils.h \
                        agent.c agent.h \
                        save.h save.c \
                        load-session-thread.h load-session-thread.c \
-                       syscall.h syscall.c
+                       syscall.h syscall.c \
+                       notification-thread.h notification-thread.c \
+                       notification-thread-commands.h notification-thread-commands.c \
+                       notification-thread-events.h notification-thread-events.c
 
 if HAVE_LIBLTTNG_UST_CTL
 lttng_sessiond_SOURCES += trace-ust.c ust-registry.c ust-app.c \
@@ -52,7 +59,8 @@ lttng_sessiond_LDADD = -lurcu-common -lurcu \
 		$(top_builddir)/src/common/relayd/librelayd.la \
 		$(top_builddir)/src/common/testpoint/libtestpoint.la \
 		$(top_builddir)/src/common/health/libhealth.la \
-		$(top_builddir)/src/common/config/libconfig.la
+		$(top_builddir)/src/common/config/libconfig.la \
+		$(top_builddir)/src/common/string-utils/libstring-utils.la
 
 
 if HAVE_LIBLTTNG_UST_CTL

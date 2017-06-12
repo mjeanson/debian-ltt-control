@@ -115,8 +115,11 @@ am__aclocal_m4_deps = $(top_srcdir)/m4/ac_define_dir.m4 \
 	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
-DIST_COMMON = $(srcdir)/Makefile.am $(lttnginclude_HEADERS) \
-	$(noinst_HEADERS) $(am__DIST_COMMON)
+DIST_COMMON = $(srcdir)/Makefile.am $(lttngactioninclude_HEADERS) \
+	$(lttngconditioninclude_HEADERS) $(lttnginclude_HEADERS) \
+	$(lttngnotificationinclude_HEADERS) \
+	$(lttngtriggerinclude_HEADERS) $(noinst_HEADERS) \
+	$(am__DIST_COMMON)
 mkinstalldirs = $(install_sh) -d
 CONFIG_HEADER = config.h
 CONFIG_CLEAN_FILES =
@@ -167,8 +170,15 @@ am__uninstall_files_from_dir = { \
     || { echo " ( cd '$$dir' && rm -f" $$files ")"; \
          $(am__cd) "$$dir" && rm -f $$files; }; \
   }
-am__installdirs = "$(DESTDIR)$(lttngincludedir)"
-HEADERS = $(lttnginclude_HEADERS) $(nodist_noinst_HEADERS) \
+am__installdirs = "$(DESTDIR)$(lttngactionincludedir)" \
+	"$(DESTDIR)$(lttngconditionincludedir)" \
+	"$(DESTDIR)$(lttngincludedir)" \
+	"$(DESTDIR)$(lttngnotificationincludedir)" \
+	"$(DESTDIR)$(lttngtriggerincludedir)"
+HEADERS = $(lttngactioninclude_HEADERS) \
+	$(lttngconditioninclude_HEADERS) $(lttnginclude_HEADERS) \
+	$(lttngnotificationinclude_HEADERS) \
+	$(lttngtriggerinclude_HEADERS) $(nodist_noinst_HEADERS) \
 	$(noinst_HEADERS)
 am__tagged_files = $(HEADERS) $(SOURCES) $(TAGS_FILES) \
 	$(LISP)config.h.in
@@ -245,6 +255,7 @@ DEFAULT_CHANNEL_TRACEFILE_COUNT = @DEFAULT_CHANNEL_TRACEFILE_COUNT@
 DEFAULT_CHANNEL_TRACEFILE_SIZE = @DEFAULT_CHANNEL_TRACEFILE_SIZE@
 DEFAULT_INCLUDES = @DEFAULT_INCLUDES@
 DEFAULT_KERNEL_CHANNEL_LIVE_TIMER = @DEFAULT_KERNEL_CHANNEL_LIVE_TIMER@
+DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER = @DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER@
 DEFAULT_KERNEL_CHANNEL_READ_TIMER = @DEFAULT_KERNEL_CHANNEL_READ_TIMER@
 DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM = @DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM@
 DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE = @DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE@
@@ -262,11 +273,13 @@ DEFAULT_NETWORK_DATA_PORT = @DEFAULT_NETWORK_DATA_PORT@
 DEFAULT_NETWORK_VIEWER_BIND_ADDRESS = @DEFAULT_NETWORK_VIEWER_BIND_ADDRESS@
 DEFAULT_NETWORK_VIEWER_PORT = @DEFAULT_NETWORK_VIEWER_PORT@
 DEFAULT_UST_PID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_PID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER = @DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER@
 DEFAULT_UST_PID_CHANNEL_READ_TIMER = @DEFAULT_UST_PID_CHANNEL_READ_TIMER@
 DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM@
 DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE@
 DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER = @DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER@
 DEFAULT_UST_UID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_UID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER = @DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER@
 DEFAULT_UST_UID_CHANNEL_READ_TIMER = @DEFAULT_UST_UID_CHANNEL_READ_TIMER@
 DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM@
 DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE@
@@ -315,6 +328,7 @@ MAINT = @MAINT@
 MAJOR_VERSION = @MAJOR_VERSION@
 MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
+MANPROG = @MANPROG@
 MINOR_VERSION = @MINOR_VERSION@
 MKDIR_P = @MKDIR_P@
 NM = @NM@
@@ -409,8 +423,13 @@ libxml2_CFLAGS = @libxml2_CFLAGS@
 libxml2_LIBS = @libxml2_LIBS@
 localedir = @localedir@
 localstatedir = @localstatedir@
+lttngactionincludedir = @lttngactionincludedir@
+lttngconditionincludedir = @lttngconditionincludedir@
 lttngincludedir = @lttngincludedir@
 lttnglibexecdir = @lttnglibexecdir@
+lttngnotificationincludedir = @lttngnotificationincludedir@
+lttngtriggerincludedir = @lttngtriggerincludedir@
+man_prog_path = @man_prog_path@
 mandir = @mandir@
 mkdir_p = @mkdir_p@
 oldincludedir = @oldincludedir@
@@ -456,13 +475,40 @@ lttnginclude_HEADERS = \
 	lttng/snapshot.h \
 	lttng/save.h \
 	lttng/load.h \
+	lttng/endpoint.h \
 	version.h.tmpl
+
+lttngactioninclude_HEADERS = \
+	lttng/action/action.h \
+	lttng/action/notify.h
+
+lttngconditioninclude_HEADERS = \
+	lttng/condition/condition.h \
+	lttng/condition/buffer-usage.h \
+	lttng/condition/evaluation.h
+
+lttngnotificationinclude_HEADERS = \
+	lttng/notification/channel.h \
+	lttng/notification/notification.h
+
+lttngtriggerinclude_HEADERS = \
+	lttng/trigger/trigger.h
 
 noinst_HEADERS = \
 	lttng/snapshot-internal.h \
 	lttng/health-internal.h \
 	lttng/save-internal.h \
-	lttng/load-internal.h
+	lttng/load-internal.h \
+	lttng/action/action-internal.h \
+	lttng/action/notify-internal.h \
+	lttng/condition/condition-internal.h \
+	lttng/condition/buffer-usage-internal.h \
+	lttng/condition/evaluation-internal.h \
+	lttng/notification/notification-internal.h \
+	lttng/trigger/trigger-internal.h \
+	lttng/endpoint-internal.h \
+	lttng/notification/channel-internal.h \
+	lttng/channel-internal.h
 
 all: config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-am
@@ -518,6 +564,48 @@ mostlyclean-libtool:
 
 clean-libtool:
 	-rm -rf .libs _libs
+install-lttngactionincludeHEADERS: $(lttngactioninclude_HEADERS)
+	@$(NORMAL_INSTALL)
+	@list='$(lttngactioninclude_HEADERS)'; test -n "$(lttngactionincludedir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(lttngactionincludedir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(lttngactionincludedir)" || exit 1; \
+	fi; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  echo "$$d$$p"; \
+	done | $(am__base_list) | \
+	while read files; do \
+	  echo " $(INSTALL_HEADER) $$files '$(DESTDIR)$(lttngactionincludedir)'"; \
+	  $(INSTALL_HEADER) $$files "$(DESTDIR)$(lttngactionincludedir)" || exit $$?; \
+	done
+
+uninstall-lttngactionincludeHEADERS:
+	@$(NORMAL_UNINSTALL)
+	@list='$(lttngactioninclude_HEADERS)'; test -n "$(lttngactionincludedir)" || list=; \
+	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
+	dir='$(DESTDIR)$(lttngactionincludedir)'; $(am__uninstall_files_from_dir)
+install-lttngconditionincludeHEADERS: $(lttngconditioninclude_HEADERS)
+	@$(NORMAL_INSTALL)
+	@list='$(lttngconditioninclude_HEADERS)'; test -n "$(lttngconditionincludedir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(lttngconditionincludedir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(lttngconditionincludedir)" || exit 1; \
+	fi; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  echo "$$d$$p"; \
+	done | $(am__base_list) | \
+	while read files; do \
+	  echo " $(INSTALL_HEADER) $$files '$(DESTDIR)$(lttngconditionincludedir)'"; \
+	  $(INSTALL_HEADER) $$files "$(DESTDIR)$(lttngconditionincludedir)" || exit $$?; \
+	done
+
+uninstall-lttngconditionincludeHEADERS:
+	@$(NORMAL_UNINSTALL)
+	@list='$(lttngconditioninclude_HEADERS)'; test -n "$(lttngconditionincludedir)" || list=; \
+	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
+	dir='$(DESTDIR)$(lttngconditionincludedir)'; $(am__uninstall_files_from_dir)
 install-lttngincludeHEADERS: $(lttnginclude_HEADERS)
 	@$(NORMAL_INSTALL)
 	@list='$(lttnginclude_HEADERS)'; test -n "$(lttngincludedir)" || list=; \
@@ -539,6 +627,48 @@ uninstall-lttngincludeHEADERS:
 	@list='$(lttnginclude_HEADERS)'; test -n "$(lttngincludedir)" || list=; \
 	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
 	dir='$(DESTDIR)$(lttngincludedir)'; $(am__uninstall_files_from_dir)
+install-lttngnotificationincludeHEADERS: $(lttngnotificationinclude_HEADERS)
+	@$(NORMAL_INSTALL)
+	@list='$(lttngnotificationinclude_HEADERS)'; test -n "$(lttngnotificationincludedir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(lttngnotificationincludedir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(lttngnotificationincludedir)" || exit 1; \
+	fi; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  echo "$$d$$p"; \
+	done | $(am__base_list) | \
+	while read files; do \
+	  echo " $(INSTALL_HEADER) $$files '$(DESTDIR)$(lttngnotificationincludedir)'"; \
+	  $(INSTALL_HEADER) $$files "$(DESTDIR)$(lttngnotificationincludedir)" || exit $$?; \
+	done
+
+uninstall-lttngnotificationincludeHEADERS:
+	@$(NORMAL_UNINSTALL)
+	@list='$(lttngnotificationinclude_HEADERS)'; test -n "$(lttngnotificationincludedir)" || list=; \
+	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
+	dir='$(DESTDIR)$(lttngnotificationincludedir)'; $(am__uninstall_files_from_dir)
+install-lttngtriggerincludeHEADERS: $(lttngtriggerinclude_HEADERS)
+	@$(NORMAL_INSTALL)
+	@list='$(lttngtriggerinclude_HEADERS)'; test -n "$(lttngtriggerincludedir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(lttngtriggerincludedir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(lttngtriggerincludedir)" || exit 1; \
+	fi; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  echo "$$d$$p"; \
+	done | $(am__base_list) | \
+	while read files; do \
+	  echo " $(INSTALL_HEADER) $$files '$(DESTDIR)$(lttngtriggerincludedir)'"; \
+	  $(INSTALL_HEADER) $$files "$(DESTDIR)$(lttngtriggerincludedir)" || exit $$?; \
+	done
+
+uninstall-lttngtriggerincludeHEADERS:
+	@$(NORMAL_UNINSTALL)
+	@list='$(lttngtriggerinclude_HEADERS)'; test -n "$(lttngtriggerincludedir)" || list=; \
+	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
+	dir='$(DESTDIR)$(lttngtriggerincludedir)'; $(am__uninstall_files_from_dir)
 
 ID: $(am__tagged_files)
 	$(am__define_uniq_tagged_files); mkid -fID $$unique
@@ -626,7 +756,7 @@ check-am: all-am
 check: check-am
 all-am: Makefile $(HEADERS) config.h
 installdirs:
-	for dir in "$(DESTDIR)$(lttngincludedir)"; do \
+	for dir in "$(DESTDIR)$(lttngactionincludedir)" "$(DESTDIR)$(lttngconditionincludedir)" "$(DESTDIR)$(lttngincludedir)" "$(DESTDIR)$(lttngnotificationincludedir)" "$(DESTDIR)$(lttngtriggerincludedir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
 	done
 install: install-am
@@ -680,7 +810,11 @@ info: info-am
 
 info-am:
 
-install-data-am: install-lttngincludeHEADERS
+install-data-am: install-lttngactionincludeHEADERS \
+	install-lttngconditionincludeHEADERS \
+	install-lttngincludeHEADERS \
+	install-lttngnotificationincludeHEADERS \
+	install-lttngtriggerincludeHEADERS
 
 install-dvi: install-dvi-am
 
@@ -724,7 +858,11 @@ ps: ps-am
 
 ps-am:
 
-uninstall-am: uninstall-lttngincludeHEADERS
+uninstall-am: uninstall-lttngactionincludeHEADERS \
+	uninstall-lttngconditionincludeHEADERS \
+	uninstall-lttngincludeHEADERS \
+	uninstall-lttngnotificationincludeHEADERS \
+	uninstall-lttngtriggerincludeHEADERS
 
 .MAKE: all install-am install-strip
 
@@ -735,12 +873,20 @@ uninstall-am: uninstall-lttngincludeHEADERS
 	install install-am install-data install-data-am install-dvi \
 	install-dvi-am install-exec install-exec-am install-html \
 	install-html-am install-info install-info-am \
-	install-lttngincludeHEADERS install-man install-pdf \
+	install-lttngactionincludeHEADERS \
+	install-lttngconditionincludeHEADERS \
+	install-lttngincludeHEADERS \
+	install-lttngnotificationincludeHEADERS \
+	install-lttngtriggerincludeHEADERS install-man install-pdf \
 	install-pdf-am install-ps install-ps-am install-strip \
 	installcheck installcheck-am installdirs maintainer-clean \
 	maintainer-clean-generic mostlyclean mostlyclean-generic \
 	mostlyclean-libtool pdf pdf-am ps ps-am tags tags-am uninstall \
-	uninstall-am uninstall-lttngincludeHEADERS
+	uninstall-am uninstall-lttngactionincludeHEADERS \
+	uninstall-lttngconditionincludeHEADERS \
+	uninstall-lttngincludeHEADERS \
+	uninstall-lttngnotificationincludeHEADERS \
+	uninstall-lttngtriggerincludeHEADERS
 
 .PRECIOUS: Makefile
 

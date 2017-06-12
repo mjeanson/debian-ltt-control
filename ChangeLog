@@ -1,4 +1,58 @@
-2017-02-20 lttng-tools 2.9.4 (Love Your Pet Day)
+2017-05-05 lttng-tools 2.10.0-rc1
+	* Add 2.10 release beer name and description
+	* Build: missing includes for ssize_t definition on Cygwin
+	* Fix: consumer-timer.c includes ust-ctl.h even --without-lttng-ust
+	* Fix: missing header in Makefile breaks the dist build
+	* Tests fix: tracefile-size tests assume PAGE_SIZE subbuffers
+	* Fix: use of uninitialized channel attributes in client
+	* Clean-up: only declare help_msg in embedded help case
+	* Fix: use of session_name instead of channel_name in condition hash
+	* Fix: lttng-live: send HUP reply when per-PID streams are gone
+	* Test: use output_path instead of argument position
+	* Bump default kernel, and UST per-uid/per-pid buffer size
+	* Fix: syscall_table_nb_entry invalid value when no syscalls TPs are defined
+	* Add string-utils to dist subdirs in libcommon
+	* Tests fix: initialize kernel extended channel attributes
+	* Tests fix: initialize UST extended channel attributes
+	* lttng-enable-event(1): document globbing patterns in event names and filters
+	* Tests: add globbing pattern tests to test_java_log4j
+	* Tests: add globbing pattern tests to test_java_jul
+	* Tests: add globbing pattern tests to test_python_logging
+	* Tests: add globbing pattern tests to test_valid_filter
+	* Tests: add globbing pattern tests to test_invalid_filter
+	* Tests: add globbing pattern tests to test_event_wildcard
+	* Tests: add globbing pattern tests to test_exclusion
+	* Tests: utils: add gen-ust-nevents-str util
+	* Tests: add string-utils library unit tests
+	* Add support for "full" star globbing patterns in event names and filters
+	* Add string-utils convenience library
+	* doc: lttng-destroy(1): document --no-wait option
+	* doc: lttng-stop(1): replace tabs with spaces
+	* doc/man: add typical `$` and `#` prompts to command lines
+	* bin/lttng: remove double "help" command and sort list
+	* lttng help: use command's --help directly
+	* Add --enable-embedded-help option to embed --help messages in binaries
+	* Expose monitor timer interval to lttngctl and client
+	* Tests: add placeholder symbol to allow unit tests to link
+	* Implement consumer ring buffer position sampling
+	* Add new snapshot ustctl API
+	* Add kernctl RING_BUFFER_SNAPSHOT_SAMPLE_POSITIONS command
+	* Handle trigger registration and unregistration in sessiond
+	* Start notification subsystem thread in sessiond initialization
+	* Clean-up: fix comment type in lttng-consumerd.c
+	* Add the sessiond notification-handling subsystem
+	* Clean-up: comment fix in agent_thread_manage_registration
+	* Add client notification API
+	* Add utils_get_count_order_u64 to utils
+	* Implement poll mask modification support in poll wrappers
+	* Add the container_of() macro to macro.h
+	* Add pipe_release utils to the pipe wrapper
+	* Add named pipe support to the pipe wrapper
+	* Add non_block version of functions to UNIX socket wrapper
+	* Add lttng_buffer_view util
+	* Add lttng_dynamic_buffer util
+	* Clean-up: fix typo in sessiond main.c comment
+	* Docs: fix comment describing ust_cmd_queue
 	* Port: Link with no-undefined on Windows
 	* Port: win32 DLLs don't support hidden symbols
 	* Port: add cygwin support to endian compat
@@ -7,6 +61,7 @@
 	* Fix: Lazily initialize max poll set size in poll compat
 	* Fix: null dereference on error path for create_ctx_type
 	* Fix: test_ust_data dereference of null pointer
+	* x is never reused, no need to shift it
 	* Fix: test_kernel_data dereference of null pointer
 	* Man: move [SESSION] before options
 	* Fix: consumerd: add missing put_subbuf for ust and kernel errors
@@ -15,29 +70,22 @@
 	* Fix: thread_dispatch_ust_registration needs to be a RCU thread
 	* Fix: don't abort metadata push on closed metadata
 	* lttng-tools: remove bogus interpreter line from utils shell library
-
-2017-01-09 lttng-tools 2.9.3 (National Cassoulet Day)
 	* Fix: consumerd: order of metadata cache vs stream lock
 	* Fix: add missing rcu_barrier before daemon teardown
 	* Fix: Add missing pthread.h include
 	* Fix: support for older versions of Babeltrace in test script
 	* Fix: reverse channel and metadata cache lock nesting order
-
-2017-01-07 lttng-tools 2.9.2 (National Bobblehead Day)
 	* Fix: only lock the metadata_cache in userspace consumers
 	* Fix: lock nesting order reversed
-
-2017-01-06 lttng-tools 2.9.1 ("Wheel Of Fortune" debuts on NBC)
 	* Fix: lttng-relayd: forcefully close stream on relayd shutdown
 	* Fix: protect the channel's metadata stream using the metadata cache lock
 	* Fix: double unlock of metadata mutex on error
-	* Fix: add element length check in lttng_index_file_open
 	* Fix: free previous instance of url (alloc_url) on default live url assignation
+	* Fix: add element length check in lttng_index_file_open
+	* Assert that index_file does not exist before setting a new one
 	* Fix: relayd vs consumerd compatibility
+	* tests: Implement tests for lttng-ust LTTNG_UST_BLOCKING_RETRY_TIMEOUT
 	* lttng-add-context(1): add missing man: prefix
-
-2016-11-29 lttng-tools 2.9.0 (National Square Dance Day)
-	* Add 2.9.0 release beer description
 	* lttng-add-context(1): fix style
 	* lttng-snapshot(1): fix style
 	* lttng-metadata(1): fix style
@@ -64,10 +112,11 @@
 	* Fix: stop sessiond threads on health thread error
 	* Fix: stop lttng-relayd threads on health thread error
 	* Fix: report an error if unix socket address is too long
+	* Remove unmaintained TODO file
+	* Remove outdated comment about run_as open being broken
+	* Remove run-as compat wrapper from internal code
 	* Fix: save: leak of configuration file fd
-
-2016-10-07 lttng-tools 2.9.0-rc1 (National Frappé Day)
-	* Set 2.9 codename and description
+	* Update master version to 2.10.0-pre
 	* Fix: warn when a loaded session can't be set as the default
 	* Warning fix: forward declare struct lttng_ust_calibrate
 	* lttng-enable-channel(1): remove redundant --discard from synopsis

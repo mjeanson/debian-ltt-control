@@ -143,7 +143,9 @@ libcommon_la_DEPENDENCIES =  \
 	$(am__DEPENDENCIES_1) $(am__DEPENDENCIES_1)
 am_libcommon_la_OBJECTS = error.lo utils.lo runas.lo futex.lo uri.lo \
 	defaults.lo pipe.lo readwrite.lo mi-lttng.lo daemonize.lo \
-	unix.lo filter.lo context.lo
+	unix.lo filter.lo context.lo action.lo notify.lo condition.lo \
+	buffer-usage.lo evaluation.lo notification.lo trigger.lo \
+	endpoint.lo dynamic-buffer.lo buffer-view.lo
 libcommon_la_OBJECTS = $(am_libcommon_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
@@ -305,6 +307,7 @@ DEFAULT_CHANNEL_TRACEFILE_COUNT = @DEFAULT_CHANNEL_TRACEFILE_COUNT@
 DEFAULT_CHANNEL_TRACEFILE_SIZE = @DEFAULT_CHANNEL_TRACEFILE_SIZE@
 DEFAULT_INCLUDES = @DEFAULT_INCLUDES@
 DEFAULT_KERNEL_CHANNEL_LIVE_TIMER = @DEFAULT_KERNEL_CHANNEL_LIVE_TIMER@
+DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER = @DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER@
 DEFAULT_KERNEL_CHANNEL_READ_TIMER = @DEFAULT_KERNEL_CHANNEL_READ_TIMER@
 DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM = @DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM@
 DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE = @DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE@
@@ -322,11 +325,13 @@ DEFAULT_NETWORK_DATA_PORT = @DEFAULT_NETWORK_DATA_PORT@
 DEFAULT_NETWORK_VIEWER_BIND_ADDRESS = @DEFAULT_NETWORK_VIEWER_BIND_ADDRESS@
 DEFAULT_NETWORK_VIEWER_PORT = @DEFAULT_NETWORK_VIEWER_PORT@
 DEFAULT_UST_PID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_PID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER = @DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER@
 DEFAULT_UST_PID_CHANNEL_READ_TIMER = @DEFAULT_UST_PID_CHANNEL_READ_TIMER@
 DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM@
 DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE@
 DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER = @DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER@
 DEFAULT_UST_UID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_UID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER = @DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER@
 DEFAULT_UST_UID_CHANNEL_READ_TIMER = @DEFAULT_UST_UID_CHANNEL_READ_TIMER@
 DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM@
 DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE@
@@ -375,6 +380,7 @@ MAINT = @MAINT@
 MAJOR_VERSION = @MAJOR_VERSION@
 MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
+MANPROG = @MANPROG@
 MINOR_VERSION = @MINOR_VERSION@
 MKDIR_P = @MKDIR_P@
 NM = @NM@
@@ -469,8 +475,13 @@ libxml2_CFLAGS = @libxml2_CFLAGS@
 libxml2_LIBS = @libxml2_LIBS@
 localedir = @localedir@
 localstatedir = @localstatedir@
+lttngactionincludedir = @lttngactionincludedir@
+lttngconditionincludedir = @lttngconditionincludedir@
 lttngincludedir = @lttngincludedir@
 lttnglibexecdir = @lttnglibexecdir@
+lttngnotificationincludedir = @lttngnotificationincludedir@
+lttngtriggerincludedir = @lttngtriggerincludedir@
+man_prog_path = @man_prog_path@
 mandir = @mandir@
 mkdir_p = @mkdir_p@
 oldincludedir = @oldincludedir@
@@ -499,7 +510,7 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
 AUTOMAKE_OPTIONS = subdir-objects
-SUBDIRS = $(am__append_1) $(am__append_2) $(am__append_3) \
+SUBDIRS = string-utils $(am__append_1) $(am__append_2) $(am__append_3) \
 	$(am__append_4) $(am__append_5) $(am__append_6) \
 	$(am__append_7) $(am__append_8) $(am__append_9) \
 	$(am__append_10) $(am__append_11) $(am__append_12)
@@ -507,7 +518,8 @@ SUBDIRS = $(am__append_1) $(am__append_2) $(am__append_3) \
 # Make sure to always distribute all folders
 # since SUBDIRS is decided at configure time.
 DIST_SUBDIRS = compat health hashtable kernel-ctl sessiond-comm relayd \
-	  kernel-consumer ust-consumer testpoint index config consumer
+	  kernel-consumer ust-consumer testpoint index config consumer \
+	  string-utils
 
 AM_CFLAGS = -fno-strict-aliasing
 noinst_HEADERS = lttng-kernel.h defaults.h macros.h error.h futex.h \
@@ -524,7 +536,11 @@ libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
                        mi-lttng.h mi-lttng.c \
                        daemonize.c daemonize.h \
                        unix.c unix.h \
-                       filter.c filter.h context.c context.h
+                       filter.c filter.h context.c context.h \
+                       action.c notify.c condition.c buffer-usage.c \
+                       evaluation.c notification.c trigger.c endpoint.c \
+                       dynamic-buffer.h dynamic-buffer.c \
+                       buffer-view.h buffer-view.c
 
 libcommon_la_LIBADD = $(top_builddir)/src/common/config/libconfig.la \
 	$(am__append_13) $(am__append_14)
@@ -582,16 +598,26 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/action.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/buffer-usage.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/buffer-view.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/condition.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/context.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/daemonize.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/defaults.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dynamic-buffer.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/endpoint.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/error.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/evaluation.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/filter.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/futex.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/mi-lttng.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/notification.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/notify.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pipe.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/readwrite.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/runas.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/trigger.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/unix.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/uri.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/utils.Plo@am__quote@

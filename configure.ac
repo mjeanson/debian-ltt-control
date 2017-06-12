@@ -1,5 +1,5 @@
 AC_PREREQ([2.64])
-AC_INIT([lttng-tools],[2.9.4],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
+AC_INIT([lttng-tools],[2.10.0-rc1],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
 
 AC_CONFIG_HEADERS([include/config.h])
 AC_CONFIG_AUX_DIR([config])
@@ -87,8 +87,8 @@ AC_DEFINE_UNQUOTED([VERSION_MAJOR], $major_version, [LTTng-Tools major version n
 AC_DEFINE_UNQUOTED([VERSION_MINOR], $minor_version, [LTTng-Tools minor version number])
 AC_DEFINE_UNQUOTED([VERSION_PATCHLEVEL], $patchlevel_version, [LTTng-Tools patchlevel version number])
 
-version_name="Joannès"
-version_description='Berliner Weisse style beer from the Trèfle Noir microbrewery in Rouyn-Noranda. It is a tangy beer with a distinct pink dress and intense fruit flavor, thanks to the presence of fresh blackcurrant grown in Témiscamingue.'
+version_name="KeKriek"
+version_description='From Brasserie Dunham, a sour mashed golden wheat ale fermented with local sour cherries from Tougas orchards. Fresh sweet cherry notes with some tartness, lively carbonation with a dry finish.'
 version_description_c=$(echo $version_description | $SED 's/"/\\"/g')
 
 AC_DEFINE_UNQUOTED([VERSION_NAME], ["$version_name"], "")
@@ -240,11 +240,12 @@ AC_DEFUN([_AC_DEFINE_QUOTED_AND_SUBST], [
 ])
 
 # Default values
-m4_define([_DEFAULT_CHANNEL_SUBBUF_SIZE], [4096])
+m4_define([_DEFAULT_CHANNEL_SUBBUF_SIZE], [16384])
 m4_define([_DEFAULT_CHANNEL_SUBBUF_NUM], [4])
 m4_define([_DEFAULT_CHANNEL_SWITCH_TIMER], [0])
 m4_define([_DEFAULT_CHANNEL_LIVE_TIMER], [0])
 m4_define([_DEFAULT_CHANNEL_READ_TIMER], [200000])
+m4_define([_DEFAULT_CHANNEL_MONITOR_TIMER], [1000000])
 _AC_DEFINE_AND_SUBST([DEFAULT_AGENT_TCP_PORT], [5345])
 _AC_DEFINE_AND_SUBST([DEFAULT_APP_SOCKET_RW_TIMEOUT], [5])
 _AC_DEFINE_AND_SUBST([DEFAULT_CHANNEL_SUBBUF_SIZE], [_DEFAULT_CHANNEL_SUBBUF_SIZE])
@@ -253,8 +254,9 @@ _AC_DEFINE_AND_SUBST([DEFAULT_CHANNEL_TRACEFILE_SIZE], [0])
 _AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_LIVE_TIMER], [_DEFAULT_CHANNEL_LIVE_TIMER])
 _AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_READ_TIMER], [_DEFAULT_CHANNEL_READ_TIMER])
 _AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM], [_DEFAULT_CHANNEL_SUBBUF_NUM])
-_AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE], [262144])
+_AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE], [1048576])
 _AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_SWITCH_TIMER], [_DEFAULT_CHANNEL_SWITCH_TIMER])
+_AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER], [_DEFAULT_CHANNEL_MONITOR_TIMER])
 _AC_DEFINE_AND_SUBST([DEFAULT_LTTNG_LIVE_TIMER], [1000000])
 _AC_DEFINE_AND_SUBST([DEFAULT_METADATA_CACHE_SIZE], [4096])
 _AC_DEFINE_AND_SUBST([DEFAULT_METADATA_READ_TIMER], [0])
@@ -269,11 +271,13 @@ _AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_READ_TIMER], [0])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM], [_DEFAULT_CHANNEL_SUBBUF_NUM])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE], [_DEFAULT_CHANNEL_SUBBUF_SIZE])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER], [_DEFAULT_CHANNEL_SWITCH_TIMER])
+_AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER], [_DEFAULT_CHANNEL_MONITOR_TIMER])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_LIVE_TIMER], [_DEFAULT_CHANNEL_LIVE_TIMER])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_READ_TIMER], [0])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM], [_DEFAULT_CHANNEL_SUBBUF_NUM])
-_AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE], [131072])
+_AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE], [524288])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_SWITCH_TIMER], [_DEFAULT_CHANNEL_SWITCH_TIMER])
+_AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER], [_DEFAULT_CHANNEL_MONITOR_TIMER])
 _AC_DEFINE_QUOTED_AND_SUBST([DEFAULT_AGENT_BIND_ADDRESS], [localhost])
 _AC_DEFINE_QUOTED_AND_SUBST([DEFAULT_NETWORK_CONTROL_BIND_ADDRESS], [0.0.0.0])
 _AC_DEFINE_QUOTED_AND_SUBST([DEFAULT_NETWORK_DATA_BIND_ADDRESS], [0.0.0.0])
@@ -649,6 +653,29 @@ AM_CONDITIONAL([HAVE_ASCIIDOC_XMLTO], [test "x$have_asciidoc_xmlto" = "xyes"])
 
 AC_DEFINE_UNQUOTED([MANPATH], ["`eval eval echo $mandir`"], [Path to man pages.])
 
+# embedded --help message
+AC_ARG_ENABLE(
+	[embedded-help],
+	AS_HELP_STRING(
+		[--enable-embedded-help],
+		[Embed the --help messages in the executable files]
+	),
+	[embedded_help=$enableval],
+	[embedded_help=no]
+)
+AS_IF([test "x$embedded_help" = "xyes"], [
+	AS_IF([test "x$man_pages_opt" = "xno"], [
+		AC_MSG_ERROR([You need the --enable-man-pages option with the --enable-embedded-help option.])
+	])
+	AC_PATH_PROG([man_prog_path], [man], [no])
+	AS_IF([test "x$man_prog_path" = "xno"], [
+		AC_MSG_ERROR([You need man with the --enable-embedded-help option.])
+	])
+	AC_DEFINE_UNQUOTED([LTTNG_EMBED_HELP], 1, [Embed --help messages.])
+	AC_SUBST([MANPROG], [$man_prog_path])
+])
+AM_CONDITIONAL([EMBED_HELP], [test "x$embedded_help" != "xno"])
+
 # Python agent test
 UST_PYTHON_AGENT="lttngust"
 
@@ -948,8 +975,20 @@ CFLAGS="-Wall $CFLAGS -g -fno-strict-aliasing"
 DEFAULT_INCLUDES="-I\$(top_srcdir) -I\$(top_builddir) -I\$(top_builddir)/src -I\$(top_builddir)/include -include config.h"
 
 lttngincludedir="${includedir}/lttng"
-
 AC_SUBST(lttngincludedir)
+
+lttngactionincludedir="${includedir}/lttng/action"
+AC_SUBST(lttngactionincludedir)
+
+lttngconditionincludedir="${includedir}/lttng/condition"
+AC_SUBST(lttngconditionincludedir)
+
+lttngnotificationincludedir="${includedir}/lttng/notification"
+AC_SUBST(lttngnotificationincludedir)
+
+lttngtriggerincludedir="${includedir}/lttng/trigger"
+AC_SUBST(lttngtriggerincludedir)
+
 AC_SUBST(DEFAULT_INCLUDES)
 
 lttnglibexecdir="${libdir}/lttng/libexec"
@@ -980,6 +1019,7 @@ AC_CONFIG_FILES([
 	src/common/index/Makefile
 	src/common/health/Makefile
 	src/common/config/Makefile
+	src/common/string-utils/Makefile
 	src/lib/Makefile
 	src/lib/lttng-ctl/Makefile
 	src/lib/lttng-ctl/filter/Makefile
@@ -1033,6 +1073,7 @@ AC_CONFIG_FILES([
 	tests/regression/ust/clock-override/Makefile
 	tests/regression/ust/type-declarations/Makefile
 	tests/regression/ust/rotation-destroy-flush/Makefile
+	tests/regression/ust/blocking/Makefile
 	tests/stress/Makefile
 	tests/unit/Makefile
 	tests/unit/ini_config/Makefile
@@ -1042,6 +1083,7 @@ AC_CONFIG_FILES([
 	tests/utils/testapp/Makefile
 	tests/utils/testapp/gen-ust-events/Makefile
 	tests/utils/testapp/gen-ust-nevents/Makefile
+	tests/utils/testapp/gen-ust-nevents-str/Makefile
 	tests/utils/testapp/gen-ust-tracef/Makefile
 ])
 
@@ -1168,6 +1210,9 @@ AS_IF([test "x$man_pages_opt" != "xno"], [
 ])
 
 m4_popdef([build_man_pages_msg])
+
+test "x$embedded_help" = xyes && value=1 || value=0
+PPRINT_PROP_BOOL([Embed --help messages], $value, $PPRINT_COLOR_SUBTITLE)
 
 PPRINT_SET_INDENT(1)
 

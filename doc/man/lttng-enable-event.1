@@ -2,12 +2,12 @@
 .\"     Title: lttng-enable-event
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 02/21/2017
+.\"      Date: 05/06/2017
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.9.4
+.\"    Source: LTTng 2.10.0-rc1
 .\"  Language: English
 .\"
-.TH "LTTNG\-ENABLE\-EVENT" "1" "02/21/2017" "LTTng 2\&.9\&.4" "LTTng Manual"
+.TH "LTTNG\-ENABLE\-EVENT" "1" "05/06/2017" "LTTng 2\&.10\&.0\-rc1" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -106,8 +106,8 @@ For example, consider the following commands:
 .RS 4
 .\}
 .nf
-lttng enable\-event \-\-userspace hello:world
-lttng enable\-event \-\-userspace hello:world \-\-loglevel=TRACE_INFO
+$ lttng enable\-event \-\-userspace hello:world
+$ lttng enable\-event \-\-userspace hello:world \-\-loglevel=TRACE_INFO
 .fi
 .if n \{\
 .RE
@@ -163,11 +163,12 @@ or
 \fB--function\fR
 option\(cqs argument) which must match event source\(cqs equivalent\&.
 .sp
-Wildcard using the
+You can use
 \fB*\fR
-character are supported
-\fIat the end\fR
-of tracepoint and system call names\&.
+characters at any place in the tracepoint or system call name as wildcards to match zero or more characters\&. To use a literal
+\fB*\fR
+character, use
+\fB\e*\fR\&.
 .RE
 .sp
 .RS 4
@@ -199,11 +200,12 @@ with
 \fB--tracepoint\fR
 option) which must match event source\(cqs equivalent\&.
 .sp
-Wildcard using the
+You can use
 \fB*\fR
-character are supported
-\fIat the end\fR
-of tracepoint names\&. When creating an event rule with a tracepoint name containing a wildcard, specific tracepoint names can be excluded from the match using the
+characters at any place in the tracepoint name as wildcards to match zero or more characters\&. To use a literal
+\fB*\fR
+character, use
+\fB\e*\fR\&. When you create an event rule with a tracepoint name containing a wildcard, you can exclude specific tracepoint names from the match with the
 \fB--exclude\fR
 option\&.
 .RE
@@ -370,7 +372,7 @@ The dynamic value of an application\-specific context field is read by prefixing
 .sp
 When a comparison includes a non existent event field, the whole filter expression evaluates to false (the event is discarded)\&.
 .sp
-C integer and floating point number constants are supported, as well as literal strings between double quotes (\fB"\fR)\&. Literal strings can contain a wildcard character (\fB*\fR) at the end to match more than one string\&. This wildcard can be escaped using \fB\e*\fR\&.
+C integer and floating point number constants are supported, as well as literal strings between double quotes (\fB"\fR)\&. You can use \fB*\fR characters at any place in a literal string as wildcards to match zero or more characters\&. To use a literal \fB*\fR character, use \fB\e*\fR\&.
 .sp
 LTTng\-UST enumeration fields can be compared to integer values (fields or constants)\&.
 .if n \{\
@@ -417,6 +419,16 @@ $ctx\&.procname == "lttng*" && (!flag || poel < 34)
 .\}
 .nf
 $app\&.my_provider:my_context == 17\&.34e9 || some_enum >= 14
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+filename != "*\&.log"
 .fi
 .if n \{\
 .RE
@@ -1091,7 +1103,14 @@ Exclude events named
 \fIEVENT\fR
 from the event rule\&. This option can be used when the command\(cqs
 \fIEVENT\fR
-argument contains a wildcard (\fB*\fR) to exclude specific names\&. Only available with application domains\&.
+argument contains at least one wildcard star (\fB*\fR) to exclude specific names\&.
+\fIEVENT\fR
+can also contain wildcard stars\&. To use a literal
+\fB,\fR
+character, use
+\fB\e,\fR\&. Only available with the
+\fB--userspace\fR
+domain\&.
 .RE
 .PP
 \fB-f\fR \fIEXPR\fR, \fB--filter\fR=\fIEXPR\fR

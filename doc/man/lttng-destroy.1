@@ -2,12 +2,12 @@
 .\"     Title: lttng-destroy
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 02/21/2017
+.\"      Date: 05/06/2017
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.9.4
+.\"    Source: LTTng 2.10.0-rc1
 .\"  Language: English
 .\"
-.TH "LTTNG\-DESTROY" "1" "02/21/2017" "LTTng 2\&.9\&.4" "LTTng Manual"
+.TH "LTTNG\-DESTROY" "1" "05/06/2017" "LTTng 2\&.10\&.0\-rc1" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,7 +32,7 @@ lttng-destroy \- Destroy an LTTng tracing session
 .SH "SYNOPSIS"
 .sp
 .nf
-\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBdestroy\fR [\fB--all\fR | \fISESSION\fR]
+\fBlttng\fR [\fIGENERAL OPTIONS\fR] \fBdestroy\fR [\fB--no-wait\fR] [\fB--all\fR | \fISESSION\fR]
 .fi
 .SH "DESCRIPTION"
 .sp
@@ -44,7 +44,7 @@ If \fISESSION\fR is specified, the existing tracing session named \fISESSION\fR 
 .sp
 If the \fB--all\fR option is used, \fBall\fR the tracing sessions, as listed in the output of \fBlttng list\fR, are destroyed\&.
 .sp
-Destroying a tracing session stops any tracing running within the latter\&.
+Destroying a tracing session stops any tracing running within the latter\&. By default, the implicit \fBlttng-stop\fR(1) command invoked by the \fBlttng destroy\fR command ensures that the tracing session\(cqs trace data is valid before returning\&. With the \fB--no-wait\fR option, the \fBlttng-stop\fR(1) command finishes immediately, hence a local trace might not be valid when the command is done\&. In this case, there is no way to know when the trace becomes valid\&.
 .sp
 Destroying a tracing session does not destroy the recorded trace data, if any; it frees resources acquired by the session daemon and tracer side, making sure to flush all trace data\&.
 .SH "OPTIONS"
@@ -54,6 +54,11 @@ General options are described in \fBlttng\fR(1)\&.
 \fB-a\fR, \fB--all\fR
 .RS 4
 Destroy all tracing sessions\&.
+.RE
+.PP
+\fB-n\fR, \fB--no-wait\fR
+.RS 4
+Do not ensure that the chosen tracing session\(cqs trace data is valid before returning to the prompt\&.
 .RE
 .SS "Program information"
 .PP

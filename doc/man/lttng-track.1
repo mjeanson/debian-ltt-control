@@ -2,12 +2,12 @@
 .\"     Title: lttng-track
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 02/21/2017
+.\"      Date: 05/06/2017
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.9.4
+.\"    Source: LTTng 2.10.0-rc1
 .\"  Language: English
 .\"
-.TH "LTTNG\-TRACK" "1" "02/21/2017" "LTTng 2\&.9\&.4" "LTTng Manual"
+.TH "LTTNG\-TRACK" "1" "05/06/2017" "LTTng 2\&.10\&.0\-rc1" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -51,9 +51,9 @@ With the PID tracker, it is possible, for example, to record all system calls ca
 .RS 4
 .\}
 .nf
-lttng enable\-event \-\-kernel \-\-all \-\-syscall
-lttng track \-\-kernel \-\-pid=2345
-lttng start
+# lttng enable\-event \-\-kernel \-\-all \-\-syscall
+# lttng track \-\-kernel \-\-pid=2345
+# lttng start
 .fi
 .if n \{\
 .RE
@@ -82,7 +82,7 @@ Command:
 .RS 4
 .\}
 .nf
-lttng track \-\-userspace \-\-pid=3,6,7
+$ lttng track \-\-userspace \-\-pid=3,6,7
 .fi
 .if n \{\
 .RE
@@ -106,7 +106,7 @@ Command:
 .RS 4
 .\}
 .nf
-lttng untrack \-\-userspace \-\-pid=7
+$ lttng untrack \-\-userspace \-\-pid=7
 .fi
 .if n \{\
 .RE
@@ -130,7 +130,7 @@ Command:
 .RS 4
 .\}
 .nf
-lttng track \-\-userspace \-\-pid=1,5
+$ lttng track \-\-userspace \-\-pid=1,5
 .fi
 .if n \{\
 .RE

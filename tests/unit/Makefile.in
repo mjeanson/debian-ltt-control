@@ -91,14 +91,15 @@ host_triplet = @host@
 target_triplet = @target@
 TESTS = test_kernel_data$(EXEEXT) test_session$(EXEEXT) \
 	test_uri$(EXEEXT) test_utils_parse_size_suffix$(EXEEXT) \
-	test_utils_expand_path$(EXEEXT) ini_config/test_ini_config \
-	$(am__EXEEXT_1)
+	test_utils_expand_path$(EXEEXT) test_string_utils$(EXEEXT) \
+	ini_config/test_ini_config $(am__EXEEXT_1)
 @LTTNG_TOOLS_BUILD_WITH_LIBDL_TRUE@am__append_1 = -ldl
 @LTTNG_TOOLS_BUILD_WITH_LIBC_DL_TRUE@am__append_2 = -lc
 noinst_PROGRAMS = test_uri$(EXEEXT) test_session$(EXEEXT) \
 	test_kernel_data$(EXEEXT) \
 	test_utils_parse_size_suffix$(EXEEXT) \
-	test_utils_expand_path$(EXEEXT) $(am__EXEEXT_1)
+	test_utils_expand_path$(EXEEXT) test_string_utils$(EXEEXT) \
+	$(am__EXEEXT_1)
 @HAVE_LIBLTTNG_UST_CTL_TRUE@am__append_3 = test_ust_data
 @HAVE_LIBLTTNG_UST_CTL_TRUE@am__append_4 = test_ust_data
 subdir = tests/unit
@@ -146,6 +147,10 @@ am_test_session_OBJECTS = test_session.$(OBJEXT)
 test_session_OBJECTS = $(am_test_session_OBJECTS)
 test_session_DEPENDENCIES = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) \
 	$(LIBSESSIOND_COMM) $(LIBHASHTABLE) $(SESSIONS)
+am_test_string_utils_OBJECTS = test_string_utils.$(OBJEXT)
+test_string_utils_OBJECTS = $(am_test_string_utils_OBJECTS)
+test_string_utils_DEPENDENCIES = $(LIBTAP) $(LIBCOMMON) \
+	$(LIBSTRINGUTILS)
 am_test_uri_OBJECTS = test_uri.$(OBJEXT)
 test_uri_OBJECTS = $(am_test_uri_OBJECTS)
 test_uri_DEPENDENCIES = $(LIBTAP) $(LIBCOMMON) $(LIBHASHTABLE)
@@ -201,11 +206,12 @@ am__v_CCLD_ = $(am__v_CCLD_@AM_DEFAULT_V@)
 am__v_CCLD_0 = @echo "  CCLD    " $@;
 am__v_CCLD_1 = 
 SOURCES = $(test_kernel_data_SOURCES) $(test_session_SOURCES) \
-	$(test_uri_SOURCES) $(test_ust_data_SOURCES) \
-	$(test_utils_expand_path_SOURCES) \
+	$(test_string_utils_SOURCES) $(test_uri_SOURCES) \
+	$(test_ust_data_SOURCES) $(test_utils_expand_path_SOURCES) \
 	$(test_utils_parse_size_suffix_SOURCES)
 DIST_SOURCES = $(test_kernel_data_SOURCES) $(test_session_SOURCES) \
-	$(test_uri_SOURCES) $(am__test_ust_data_SOURCES_DIST) \
+	$(test_string_utils_SOURCES) $(test_uri_SOURCES) \
+	$(am__test_ust_data_SOURCES_DIST) \
 	$(test_utils_expand_path_SOURCES) \
 	$(test_utils_parse_size_suffix_SOURCES)
 RECURSIVE_TARGETS = all-recursive check-recursive cscopelist-recursive \
@@ -532,6 +538,7 @@ DEFAULT_CHANNEL_TRACEFILE_COUNT = @DEFAULT_CHANNEL_TRACEFILE_COUNT@
 DEFAULT_CHANNEL_TRACEFILE_SIZE = @DEFAULT_CHANNEL_TRACEFILE_SIZE@
 DEFAULT_INCLUDES = @DEFAULT_INCLUDES@
 DEFAULT_KERNEL_CHANNEL_LIVE_TIMER = @DEFAULT_KERNEL_CHANNEL_LIVE_TIMER@
+DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER = @DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER@
 DEFAULT_KERNEL_CHANNEL_READ_TIMER = @DEFAULT_KERNEL_CHANNEL_READ_TIMER@
 DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM = @DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM@
 DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE = @DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE@
@@ -549,11 +556,13 @@ DEFAULT_NETWORK_DATA_PORT = @DEFAULT_NETWORK_DATA_PORT@
 DEFAULT_NETWORK_VIEWER_BIND_ADDRESS = @DEFAULT_NETWORK_VIEWER_BIND_ADDRESS@
 DEFAULT_NETWORK_VIEWER_PORT = @DEFAULT_NETWORK_VIEWER_PORT@
 DEFAULT_UST_PID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_PID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER = @DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER@
 DEFAULT_UST_PID_CHANNEL_READ_TIMER = @DEFAULT_UST_PID_CHANNEL_READ_TIMER@
 DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM@
 DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE@
 DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER = @DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER@
 DEFAULT_UST_UID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_UID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER = @DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER@
 DEFAULT_UST_UID_CHANNEL_READ_TIMER = @DEFAULT_UST_UID_CHANNEL_READ_TIMER@
 DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM@
 DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE@
@@ -602,6 +611,7 @@ MAINT = @MAINT@
 MAJOR_VERSION = @MAJOR_VERSION@
 MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
+MANPROG = @MANPROG@
 MINOR_VERSION = @MINOR_VERSION@
 MKDIR_P = @MKDIR_P@
 NM = @NM@
@@ -696,8 +706,13 @@ libxml2_CFLAGS = @libxml2_CFLAGS@
 libxml2_LIBS = @libxml2_LIBS@
 localedir = @localedir@
 localstatedir = @localstatedir@
+lttngactionincludedir = @lttngactionincludedir@
+lttngconditionincludedir = @lttngconditionincludedir@
 lttngincludedir = @lttngincludedir@
 lttnglibexecdir = @lttnglibexecdir@
+lttngnotificationincludedir = @lttngnotificationincludedir@
+lttngtriggerincludedir = @lttngtriggerincludedir@
+man_prog_path = @man_prog_path@
 mandir = @mandir@
 mkdir_p = @mkdir_p@
 oldincludedir = @oldincludedir@
@@ -733,6 +748,7 @@ LOG_DRIVER = env AM_TAP_AWK='$(AWK)' $(SHELL) \
 
 LIBTAP = $(top_builddir)/tests/utils/tap/libtap.la
 LIBCOMMON = $(top_builddir)/src/common/libcommon.la
+LIBSTRINGUTILS = $(top_builddir)/src/common/string-utils/libstring-utils.la
 LIBSESSIOND_COMM = $(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
 LIBHASHTABLE = $(top_builddir)/src/common/hashtable/libhashtable.la
 LIBRELAYD = $(top_builddir)/src/common/relayd/librelayd.la
@@ -770,6 +786,7 @@ test_session_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/session.$(OBJEXT) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/snapshot.$(OBJEXT) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/agent.$(OBJEXT) \
+@HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/bin/lttng-sessiond/notification-thread-commands.$(OBJEXT) \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/libcommon.la \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/health/libhealth.la \
 @HAVE_LIBLTTNG_UST_CTL_TRUE@		   $(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
@@ -787,6 +804,7 @@ KERN_DATA_TRACE = $(top_builddir)/src/bin/lttng-sessiond/trace-kernel.$(OBJEXT) 
 		$(top_builddir)/src/bin/lttng-sessiond/utils.$(OBJEXT) \
 		$(top_builddir)/src/common/libcommon.la \
 		$(top_builddir)/src/common/health/libhealth.la \
+		$(top_builddir)/src/bin/lttng-sessiond/notification-thread-commands.$(OBJEXT) \
 		$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
 
 test_kernel_data_SOURCES = test_kernel_data.c
@@ -805,6 +823,10 @@ test_utils_parse_size_suffix_LDADD = $(LIBTAP) $(LIBHASHTABLE) \
 test_utils_expand_path_SOURCES = test_utils_expand_path.c
 test_utils_expand_path_LDADD = $(LIBTAP) $(LIBHASHTABLE) $(LIBCOMMON) \
 	$(UTILS_SUFFIX)
+
+# string utilities unit test
+test_string_utils_SOURCES = test_string_utils.c
+test_string_utils_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBSTRINGUTILS)
 all: all-recursive
 
 .SUFFIXES:
@@ -856,6 +878,10 @@ test_session$(EXEEXT): $(test_session_OBJECTS) $(test_session_DEPENDENCIES) $(EX
 	@rm -f test_session$(EXEEXT)
 	$(AM_V_CCLD)$(LINK) $(test_session_OBJECTS) $(test_session_LDADD) $(LIBS)
 
+test_string_utils$(EXEEXT): $(test_string_utils_OBJECTS) $(test_string_utils_DEPENDENCIES) $(EXTRA_test_string_utils_DEPENDENCIES) 
+	@rm -f test_string_utils$(EXEEXT)
+	$(AM_V_CCLD)$(LINK) $(test_string_utils_OBJECTS) $(test_string_utils_LDADD) $(LIBS)
+
 test_uri$(EXEEXT): $(test_uri_OBJECTS) $(test_uri_DEPENDENCIES) $(EXTRA_test_uri_DEPENDENCIES) 
 	@rm -f test_uri$(EXEEXT)
 	$(AM_V_CCLD)$(LINK) $(test_uri_OBJECTS) $(test_uri_LDADD) $(LIBS)
@@ -880,6 +906,7 @@ distclean-compile:
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/test_kernel_data.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/test_session.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/test_string_utils.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/test_uri.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/test_ust_data.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/test_utils_expand_path.Po@am__quote@
@@ -1183,6 +1210,13 @@ test_utils_parse_size_suffix.log: test_utils_parse_size_suffix$(EXEEXT)
 test_utils_expand_path.log: test_utils_expand_path$(EXEEXT)
 	@p='test_utils_expand_path$(EXEEXT)'; \
 	b='test_utils_expand_path'; \
+	$(am__check_pre) $(LOG_DRIVER) --test-name "$$f" \
+	--log-file $$b.log --trs-file $$b.trs \
+	$(am__common_driver_flags) $(AM_LOG_DRIVER_FLAGS) $(LOG_DRIVER_FLAGS) -- $(LOG_COMPILE) \
+	"$$tst" $(AM_TESTS_FD_REDIRECT)
+test_string_utils.log: test_string_utils$(EXEEXT)
+	@p='test_string_utils$(EXEEXT)'; \
+	b='test_string_utils'; \
 	$(am__check_pre) $(LOG_DRIVER) --test-name "$$f" \
 	--log-file $$b.log --trs-file $$b.trs \
 	$(am__common_driver_flags) $(AM_LOG_DRIVER_FLAGS) $(LOG_DRIVER_FLAGS) -- $(LOG_COMPILE) \

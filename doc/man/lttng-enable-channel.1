@@ -2,12 +2,12 @@
 .\"     Title: lttng-enable-channel
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 02/21/2017
+.\"      Date: 05/06/2017
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.9.4
+.\"    Source: LTTng 2.10.0-rc1
 .\"  Language: English
 .\"
-.TH "LTTNG\-ENABLE\-CHANN" "1" "02/21/2017" "LTTng 2\&.9\&.4" "LTTng Manual"
+.TH "LTTNG\-ENABLE\-CHANN" "1" "05/06/2017" "LTTng 2\&.10\&.0\-rc1" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -159,7 +159,7 @@ For example, consider this command:
 .RS 4
 .\}
 .nf
-lttng enable\-channel \-\-kernel \-\-tracefile\-size=4096 \e
+$ lttng enable\-channel \-\-kernel \-\-tracefile\-size=4096 \e
                      \-\-tracefile\-count=32 my\-channel
 .fi
 .if n \{\
@@ -295,7 +295,7 @@ Default values:
 \fB--userspace\fR
 and
 \fB--buffers-uid\fR
-options: 131072
+options: 524288
 .RE
 .sp
 .RS 4
@@ -309,7 +309,7 @@ options: 131072
 \fB--userspace\fR
 and
 \fB--buffers-pid\fR
-options: 4096
+options: 16384
 .RE
 .sp
 .RS 4
@@ -321,7 +321,7 @@ options: 4096
 .IP \(bu 2.3
 .\}
 \fB--kernel\fR
-option: 262144
+option: 1048576
 .RE
 .sp
 .RS 4

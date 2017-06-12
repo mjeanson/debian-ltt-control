@@ -131,7 +131,8 @@ CONFIG_HEADER = $(top_builddir)/include/config.h
 CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 LTLIBRARIES = $(noinst_LTLIBRARIES)
-libfilter_la_LIBADD =
+libfilter_la_DEPENDENCIES =  \
+	$(top_builddir)/src/common/string-utils/libstring-utils.la
 am_libfilter_la_OBJECTS = libfilter_la-filter-parser.lo \
 	libfilter_la-filter-lexer.lo \
 	libfilter_la-filter-visitor-set-parent.lo \
@@ -139,6 +140,8 @@ am_libfilter_la_OBJECTS = libfilter_la-filter-parser.lo \
 	libfilter_la-filter-visitor-generate-ir.lo \
 	libfilter_la-filter-visitor-ir-check-binary-op-nesting.lo \
 	libfilter_la-filter-visitor-ir-validate-string.lo \
+	libfilter_la-filter-visitor-ir-validate-globbing.lo \
+	libfilter_la-filter-visitor-ir-normalize-glob-patterns.lo \
 	libfilter_la-filter-visitor-generate-bytecode.lo
 libfilter_la_OBJECTS = $(am_libfilter_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
@@ -288,6 +291,7 @@ DEFAULT_CHANNEL_TRACEFILE_COUNT = @DEFAULT_CHANNEL_TRACEFILE_COUNT@
 DEFAULT_CHANNEL_TRACEFILE_SIZE = @DEFAULT_CHANNEL_TRACEFILE_SIZE@
 DEFAULT_INCLUDES = @DEFAULT_INCLUDES@
 DEFAULT_KERNEL_CHANNEL_LIVE_TIMER = @DEFAULT_KERNEL_CHANNEL_LIVE_TIMER@
+DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER = @DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER@
 DEFAULT_KERNEL_CHANNEL_READ_TIMER = @DEFAULT_KERNEL_CHANNEL_READ_TIMER@
 DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM = @DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM@
 DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE = @DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE@
@@ -305,11 +309,13 @@ DEFAULT_NETWORK_DATA_PORT = @DEFAULT_NETWORK_DATA_PORT@
 DEFAULT_NETWORK_VIEWER_BIND_ADDRESS = @DEFAULT_NETWORK_VIEWER_BIND_ADDRESS@
 DEFAULT_NETWORK_VIEWER_PORT = @DEFAULT_NETWORK_VIEWER_PORT@
 DEFAULT_UST_PID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_PID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER = @DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER@
 DEFAULT_UST_PID_CHANNEL_READ_TIMER = @DEFAULT_UST_PID_CHANNEL_READ_TIMER@
 DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM@
 DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE@
 DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER = @DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER@
 DEFAULT_UST_UID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_UID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER = @DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER@
 DEFAULT_UST_UID_CHANNEL_READ_TIMER = @DEFAULT_UST_UID_CHANNEL_READ_TIMER@
 DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM@
 DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE@
@@ -358,6 +364,7 @@ MAINT = @MAINT@
 MAJOR_VERSION = @MAJOR_VERSION@
 MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
+MANPROG = @MANPROG@
 MINOR_VERSION = @MINOR_VERSION@
 MKDIR_P = @MKDIR_P@
 NM = @NM@
@@ -452,8 +459,13 @@ libxml2_CFLAGS = @libxml2_CFLAGS@
 libxml2_LIBS = @libxml2_LIBS@
 localedir = @localedir@
 localstatedir = @localstatedir@
+lttngactionincludedir = @lttngactionincludedir@
+lttngconditionincludedir = @lttngconditionincludedir@
 lttngincludedir = @lttngincludedir@
 lttnglibexecdir = @lttnglibexecdir@
+lttngnotificationincludedir = @lttngnotificationincludedir@
+lttngtriggerincludedir = @lttngtriggerincludedir@
+man_prog_path = @man_prog_path@
 mandir = @mandir@
 mkdir_p = @mkdir_p@
 oldincludedir = @oldincludedir@
@@ -495,6 +507,8 @@ libfilter_la_SOURCES = \
 	filter-visitor-generate-ir.c \
 	filter-visitor-ir-check-binary-op-nesting.c \
 	filter-visitor-ir-validate-string.c \
+	filter-visitor-ir-validate-globbing.c \
+	filter-visitor-ir-normalize-glob-patterns.c \
 	filter-visitor-generate-bytecode.c \
 	filter-ast.h \
 	filter-bytecode.h \
@@ -502,6 +516,7 @@ libfilter_la_SOURCES = \
 	memstream.h
 
 libfilter_la_CFLAGS = -include filter-symbols.h
+libfilter_la_LIBADD = $(top_builddir)/src/common/string-utils/libstring-utils.la
 AM_YFLAGS = -t -d -v
 
 # start with empty files to clean
@@ -595,6 +610,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-generate-bytecode.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-generate-ir.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-ir-check-binary-op-nesting.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-ir-normalize-glob-patterns.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-ir-validate-globbing.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-ir-validate-string.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-set-parent.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libfilter_la-filter-visitor-xml.Plo@am__quote@
@@ -668,6 +685,20 @@ libfilter_la-filter-visitor-ir-validate-string.lo: filter-visitor-ir-validate-st
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='filter-visitor-ir-validate-string.c' object='libfilter_la-filter-visitor-ir-validate-string.lo' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -c -o libfilter_la-filter-visitor-ir-validate-string.lo `test -f 'filter-visitor-ir-validate-string.c' || echo '$(srcdir)/'`filter-visitor-ir-validate-string.c
+
+libfilter_la-filter-visitor-ir-validate-globbing.lo: filter-visitor-ir-validate-globbing.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -MT libfilter_la-filter-visitor-ir-validate-globbing.lo -MD -MP -MF $(DEPDIR)/libfilter_la-filter-visitor-ir-validate-globbing.Tpo -c -o libfilter_la-filter-visitor-ir-validate-globbing.lo `test -f 'filter-visitor-ir-validate-globbing.c' || echo '$(srcdir)/'`filter-visitor-ir-validate-globbing.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libfilter_la-filter-visitor-ir-validate-globbing.Tpo $(DEPDIR)/libfilter_la-filter-visitor-ir-validate-globbing.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='filter-visitor-ir-validate-globbing.c' object='libfilter_la-filter-visitor-ir-validate-globbing.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -c -o libfilter_la-filter-visitor-ir-validate-globbing.lo `test -f 'filter-visitor-ir-validate-globbing.c' || echo '$(srcdir)/'`filter-visitor-ir-validate-globbing.c
+
+libfilter_la-filter-visitor-ir-normalize-glob-patterns.lo: filter-visitor-ir-normalize-glob-patterns.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -MT libfilter_la-filter-visitor-ir-normalize-glob-patterns.lo -MD -MP -MF $(DEPDIR)/libfilter_la-filter-visitor-ir-normalize-glob-patterns.Tpo -c -o libfilter_la-filter-visitor-ir-normalize-glob-patterns.lo `test -f 'filter-visitor-ir-normalize-glob-patterns.c' || echo '$(srcdir)/'`filter-visitor-ir-normalize-glob-patterns.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libfilter_la-filter-visitor-ir-normalize-glob-patterns.Tpo $(DEPDIR)/libfilter_la-filter-visitor-ir-normalize-glob-patterns.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='filter-visitor-ir-normalize-glob-patterns.c' object='libfilter_la-filter-visitor-ir-normalize-glob-patterns.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -c -o libfilter_la-filter-visitor-ir-normalize-glob-patterns.lo `test -f 'filter-visitor-ir-normalize-glob-patterns.c' || echo '$(srcdir)/'`filter-visitor-ir-normalize-glob-patterns.c
 
 libfilter_la-filter-visitor-generate-bytecode.lo: filter-visitor-generate-bytecode.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libfilter_la_CFLAGS) $(CFLAGS) -MT libfilter_la-filter-visitor-generate-bytecode.lo -MD -MP -MF $(DEPDIR)/libfilter_la-filter-visitor-generate-bytecode.Tpo -c -o libfilter_la-filter-visitor-generate-bytecode.lo `test -f 'filter-visitor-generate-bytecode.c' || echo '$(srcdir)/'`filter-visitor-generate-bytecode.c

@@ -76,6 +76,9 @@ static inline int lttng_pipe_get_writefd(struct lttng_pipe *pipe)
 LTTNG_HIDDEN
 struct lttng_pipe *lttng_pipe_open(int flags);
 LTTNG_HIDDEN
+struct lttng_pipe *lttng_pipe_named_open(const char *path, mode_t mode,
+		int flags);
+LTTNG_HIDDEN
 int lttng_pipe_write_close(struct lttng_pipe *pipe);
 LTTNG_HIDDEN
 int lttng_pipe_read_close(struct lttng_pipe *pipe);
@@ -90,5 +93,11 @@ ssize_t lttng_pipe_read(struct lttng_pipe *pipe, void *buf, size_t count);
 LTTNG_HIDDEN
 ssize_t lttng_pipe_write(struct lttng_pipe *pipe, const void *buf,
 		size_t count);
+/* Returns and releases the read end of the pipe. */
+LTTNG_HIDDEN
+int lttng_pipe_release_readfd(struct lttng_pipe *pipe);
+/* Returns and releases the write end of the pipe. */
+LTTNG_HIDDEN
+int lttng_pipe_release_writefd(struct lttng_pipe *pipe);
 
 #endif /* LTTNG_PIPE_H */

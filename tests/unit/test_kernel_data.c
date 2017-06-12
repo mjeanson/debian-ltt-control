@@ -38,6 +38,7 @@
 int lttng_opt_quiet = 1;
 int lttng_opt_verbose;
 int lttng_opt_mi;
+struct notification_thread_handle *notification_thread_handle;
 
 int ust_consumerd32_fd;
 int ust_consumerd64_fd;
@@ -115,8 +116,11 @@ static void test_create_kernel_channel(void)
 {
 	struct ltt_kernel_channel *chan;
 	struct lttng_channel attr;
+	struct lttng_channel_extended extended;
 
 	memset(&attr, 0, sizeof(attr));
+	memset(&extended, 0, sizeof(extended));
+	attr.attr.extended.ptr = &extended;
 
 	chan = trace_kernel_create_channel(&attr);
 	ok(chan != NULL, "Create kernel channel");

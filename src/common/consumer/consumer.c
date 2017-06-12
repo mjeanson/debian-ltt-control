@@ -67,6 +67,8 @@ struct consumer_channel_msg {
 	uint64_t key;				/* del */
 };
 
+int data_consumption_paused;
+
 /*
  * Flag to inform the polling thread to quit when all fd hung up. Updated by
  * the consumer_thread_receive_fds when it notices that all fds has hung up.
@@ -367,6 +369,9 @@ void consumer_del_channel(struct lttng_consumer_channel *channel)
 
 	if (channel->live_timer_enabled == 1) {
 		consumer_timer_live_stop(channel);
+	}
+	if (channel->monitor_timer_enabled == 1) {
+		consumer_timer_monitor_stop(channel);
 	}
 
 	switch (consumer_data.type) {
@@ -1347,6 +1352,8 @@ struct lttng_consumer_local_data *lttng_consumer_create(
 	if (!ctx->consumer_metadata_pipe) {
 		goto error_metadata_pipe;
 	}
+
+	ctx->channel_monitor_pipe = -1;
 
 	return ctx;
 
@@ -2525,6 +2532,9 @@ void *consumer_thread_data_poll(void *data)
 		/* poll on the array of fds */
 	restart:
 		DBG("polling on %d fd", nb_fd + 2);
+		if (testpoint(consumerd_thread_data_poll)) {
+			goto end;
+		}
 		health_poll_entry();
 		num_rdy = poll(pollfd, nb_fd + 2, -1);
 		health_poll_exit();

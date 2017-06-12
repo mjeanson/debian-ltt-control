@@ -30,6 +30,7 @@
 #include <common/defaults.h>
 #include <bin/lttng-sessiond/trace-ust.h>
 #include <bin/lttng-sessiond/ust-app.h>
+#include <bin/lttng-sessiond/notification-thread.h>
 
 #include <tap/tap.h>
 
@@ -49,8 +50,9 @@ int lttng_opt_mi;
 int ust_consumerd32_fd;
 int ust_consumerd64_fd;
 
-/* Global variable required by sessiond objects being linked-in */
+/* Global variables required by sessiond objects being linked-in */
 struct lttng_ht *agent_apps_ht_by_sock;
+struct notification_thread_handle *notification_thread_handle;
 
 static const char alphanum[] =
 	"0123456789"
@@ -104,8 +106,11 @@ static void test_create_ust_channel(void)
 {
 	struct ltt_ust_channel *uchan;
 	struct lttng_channel attr;
+	struct lttng_channel_extended extended;
 
 	memset(&attr, 0, sizeof(attr));
+	memset(&extended, 0, sizeof(extended));
+	attr.attr.extended.ptr = &extended;
 
 	ok(lttng_strncpy(attr.name, "channel0", sizeof(attr.name)) == 0,
 		"Validate channel name length");

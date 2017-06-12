@@ -12,6 +12,7 @@ TESTS = test_kernel_data \
 	test_uri \
 	test_utils_parse_size_suffix \
 	test_utils_expand_path \
+	test_string_utils \
 	ini_config/test_ini_config
 
 if LTTNG_TOOLS_BUILD_WITH_LIBDL
@@ -24,6 +25,7 @@ endif
 LIBTAP=$(top_builddir)/tests/utils/tap/libtap.la
 
 LIBCOMMON=$(top_builddir)/src/common/libcommon.la
+LIBSTRINGUTILS=$(top_builddir)/src/common/string-utils/libstring-utils.la
 LIBSESSIOND_COMM=$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
 LIBHASHTABLE=$(top_builddir)/src/common/hashtable/libhashtable.la
 LIBRELAYD=$(top_builddir)/src/common/relayd/librelayd.la
@@ -31,6 +33,7 @@ LIBRELAYD=$(top_builddir)/src/common/relayd/librelayd.la
 # Define test programs
 noinst_PROGRAMS = test_uri test_session test_kernel_data
 noinst_PROGRAMS += test_utils_parse_size_suffix test_utils_expand_path
+noinst_PROGRAMS += test_string_utils
 
 if HAVE_LIBLTTNG_UST_CTL
 noinst_PROGRAMS += test_ust_data
@@ -73,6 +76,7 @@ UST_DATA_TRACE=$(top_builddir)/src/bin/lttng-sessiond/trace-ust.$(OBJEXT) \
 		   $(top_builddir)/src/bin/lttng-sessiond/session.$(OBJEXT) \
 		   $(top_builddir)/src/bin/lttng-sessiond/snapshot.$(OBJEXT) \
 		   $(top_builddir)/src/bin/lttng-sessiond/agent.$(OBJEXT) \
+		   $(top_builddir)/src/bin/lttng-sessiond/notification-thread-commands.$(OBJEXT) \
 		   $(top_builddir)/src/common/libcommon.la \
 		   $(top_builddir)/src/common/health/libhealth.la \
 		   $(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
@@ -89,6 +93,7 @@ KERN_DATA_TRACE=$(top_builddir)/src/bin/lttng-sessiond/trace-kernel.$(OBJEXT) \
 		$(top_builddir)/src/bin/lttng-sessiond/utils.$(OBJEXT) \
 		$(top_builddir)/src/common/libcommon.la \
 		$(top_builddir)/src/common/health/libhealth.la \
+		$(top_builddir)/src/bin/lttng-sessiond/notification-thread-commands.$(OBJEXT) \
 		$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la
 
 test_kernel_data_SOURCES = test_kernel_data.c
@@ -108,3 +113,7 @@ test_utils_parse_size_suffix_LDADD += $(UTILS_SUFFIX)
 test_utils_expand_path_SOURCES = test_utils_expand_path.c
 test_utils_expand_path_LDADD = $(LIBTAP) $(LIBHASHTABLE) $(LIBCOMMON)
 test_utils_expand_path_LDADD += $(UTILS_SUFFIX)
+
+# string utilities unit test
+test_string_utils_SOURCES = test_string_utils.c
+test_string_utils_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBSTRINGUTILS)

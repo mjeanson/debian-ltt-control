@@ -29,6 +29,13 @@
 #include <common/utils.h>
 #include <common/compat/string.h>
 #include <common/kernel-ctl/kernel-ctl.h>
+#include <common/dynamic-buffer.h>
+#include <common/buffer-view.h>
+#include <lttng/trigger/trigger-internal.h>
+#include <lttng/condition/condition.h>
+#include <lttng/action/action.h>
+#include <lttng/channel-internal.h>
+#include <common/string-utils/string-utils.h>
 
 #include "channel.h"
 #include "consumer.h"
@@ -41,6 +48,8 @@
 #include "syscall.h"
 #include "agent.h"
 #include "buffer-registry.h"
+#include "notification-thread.h"
+#include "notification-thread-commands.h"
 
 #include "cmd.h"
 
@@ -53,7 +62,6 @@
 static pthread_mutex_t relayd_net_seq_idx_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t relayd_net_seq_idx;
 
-static int validate_event_name(const char *);
 static int validate_ust_event_name(const char *);
 static int cmd_enable_event_internal(struct ltt_session *session,
 		struct lttng_domain *domain,
@@ -237,7 +245,7 @@ end:
  */
 static void list_lttng_channels(enum lttng_domain_type domain,
 		struct ltt_session *session, struct lttng_channel *channels,
-		struct lttcomm_channel_extended *chan_exts)
+		struct lttng_channel_extended *chan_exts)
 {
 	int i = 0, ret;
 	struct ltt_kernel_channel *kchan;
@@ -251,6 +259,10 @@ static void list_lttng_channels(enum lttng_domain_type domain,
 			cds_list_for_each_entry(kchan,
 					&session->kernel_session->channel_list.head, list) {
 				uint64_t discarded_events, lost_packets;
+				struct lttng_channel_extended *extended;
+
+				extended = (struct lttng_channel_extended *)
+						kchan->channel->attr.extended.ptr;
 
 				ret = get_kernel_runtime_stats(session, kchan,
 						&discarded_events, &lost_packets);
@@ -263,6 +275,8 @@ static void list_lttng_channels(enum lttng_domain_type domain,
 				chan_exts[i].discarded_events =
 						discarded_events;
 				chan_exts[i].lost_packets = lost_packets;
+				chan_exts[i].monitor_timer_interval =
+						extended->monitor_timer_interval;
 				i++;
 			}
 		}
@@ -315,6 +329,8 @@ static void list_lttng_channels(enum lttng_domain_type domain,
 			}
 			chan_exts[i].discarded_events = discarded_events;
 			chan_exts[i].lost_packets = lost_packets;
+			chan_exts[i].monitor_timer_interval =
+					uchan->monitor_timer_interval;
 			i++;
 		}
 		rcu_read_unlock();
@@ -1428,10 +1444,6 @@ int cmd_disable_event(struct ltt_session *session,
 	DBG("Disable event command for event \'%s\'", event->name);
 
 	event_name = event->name;
-	if (validate_event_name(event_name)) {
-		ret = LTTNG_ERR_INVALID_EVENT_NAME;
-		goto error;
-	}
 
 	/* Error out on unhandled search criteria */
 	if (event->loglevel_type || event->loglevel != -1 || event->enabled
@@ -1673,7 +1685,7 @@ int cmd_add_context(struct ltt_session *session, enum lttng_domain_type domain,
 				free(attr);
 				goto error;
 			}
-			free(attr);
+			channel_attr_destroy(attr);
 			chan_ust_created = 1;
 		}
 
@@ -1723,43 +1735,6 @@ end:
 	return ret;
 }
 
-static int validate_event_name(const char *name)
-{
-	int ret = 0;
-	const char *c = name;
-	const char *event_name_end = c + LTTNG_SYMBOL_NAME_LEN;
-	bool null_terminated = false;
-
-	/*
-	 * Make sure that unescaped wildcards are only used as the last
-	 * character of the event name.
-	 */
-	while (c < event_name_end) {
-		switch (*c) {
-		case '\0':
-		        null_terminated = true;
-			goto end;
-		case '\\':
-			c++;
-			break;
-		case '*':
-			if ((c + 1) < event_name_end && *(c + 1)) {
-				/* Wildcard is not the last character */
-				ret = LTTNG_ERR_INVALID_EVENT_NAME;
-				goto end;
-			}
-		default:
-			break;
-		}
-		c++;
-	}
-end:
-	if (!ret && !null_terminated) {
-		ret = LTTNG_ERR_INVALID_EVENT_NAME;
-	}
-	return ret;
-}
-
 static inline bool name_starts_with(const char *name, const char *prefix)
 {
 	const size_t max_cmp_len = min(strlen(prefix), LTTNG_SYMBOL_NAME_LEN);
@@ -1805,7 +1780,7 @@ static int _cmd_enable_event(struct ltt_session *session,
 		struct lttng_event_exclusion *exclusion,
 		int wpipe, bool internal_event)
 {
-	int ret, channel_created = 0;
+	int ret = 0, channel_created = 0;
 	struct lttng_channel *attr = NULL;
 
 	assert(session);
@@ -1815,14 +1790,23 @@ static int _cmd_enable_event(struct ltt_session *session,
 	/* If we have a filter, we must have its filter expression */
 	assert(!(!!filter_expression ^ !!filter));
 
+	/* Normalize event name as a globbing pattern */
+	strutils_normalize_star_glob_pattern(event->name);
+
+	/* Normalize exclusion names as globbing patterns */
+	if (exclusion) {
+		size_t i;
+
+		for (i = 0; i < exclusion->count; i++) {
+			char *name = LTTNG_EVENT_EXCLUSION_NAME_AT(exclusion, i);
+
+			strutils_normalize_star_glob_pattern(name);
+		}
+	}
+
 	DBG("Enable event command for event \'%s\'", event->name);
 
 	rcu_read_lock();
-
-	ret = validate_event_name(event->name);
-	if (ret) {
-		goto error;
-	}
 
 	switch (domain->type) {
 	case LTTNG_DOMAIN_KERNEL:
@@ -2171,7 +2155,7 @@ error:
 	free(filter_expression);
 	free(filter);
 	free(exclusion);
-	free(attr);
+	channel_attr_destroy(attr);
 	rcu_read_unlock();
 	return ret;
 }
@@ -2940,8 +2924,8 @@ ssize_t cmd_list_channels(enum lttng_domain_type domain,
 
 	if (nb_chan > 0) {
 		const size_t channel_size = sizeof(struct lttng_channel) +
-			sizeof(struct lttcomm_channel_extended);
-		struct lttcomm_channel_extended *channel_exts;
+			sizeof(struct lttng_channel_extended);
+		struct lttng_channel_extended *channel_exts;
 
 		payload_size = nb_chan * channel_size;
 		*channels = zmalloc(payload_size);
@@ -3563,6 +3547,90 @@ int cmd_regenerate_statedump(struct ltt_session *session)
 	ret = LTTNG_OK;
 
 end:
+	return ret;
+}
+
+int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
+		struct notification_thread_handle *notification_thread)
+{
+	int ret;
+	size_t trigger_len;
+	ssize_t sock_recv_len;
+	struct lttng_trigger *trigger = NULL;
+	struct lttng_buffer_view view;
+	struct lttng_dynamic_buffer trigger_buffer;
+
+	lttng_dynamic_buffer_init(&trigger_buffer);
+	trigger_len = (size_t) cmd_ctx->lsm->u.trigger.length;
+	ret = lttng_dynamic_buffer_set_size(&trigger_buffer, trigger_len);
+	if (ret) {
+		ret = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	sock_recv_len = lttcomm_recv_unix_sock(sock, trigger_buffer.data,
+			trigger_len);
+	if (sock_recv_len < 0 || sock_recv_len != trigger_len) {
+		ERR("Failed to receive \"register trigger\" command payload");
+		/* TODO: should this be a new error enum ? */
+		ret = LTTNG_ERR_INVALID_TRIGGER;
+		goto end;
+	}
+
+	view = lttng_buffer_view_from_dynamic_buffer(&trigger_buffer, 0, -1);
+	if (lttng_trigger_create_from_buffer(&view, &trigger) !=
+			trigger_len) {
+		ERR("Invalid trigger payload received in \"register trigger\" command");
+		ret = LTTNG_ERR_INVALID_TRIGGER;
+		goto end;
+	}
+
+	ret = notification_thread_command_register_trigger(notification_thread,
+			trigger);
+end:
+	lttng_dynamic_buffer_reset(&trigger_buffer);
+	return ret;
+}
+
+int cmd_unregister_trigger(struct command_ctx *cmd_ctx, int sock,
+		struct notification_thread_handle *notification_thread)
+{
+	int ret;
+	size_t trigger_len;
+	ssize_t sock_recv_len;
+	struct lttng_trigger *trigger = NULL;
+	struct lttng_buffer_view view;
+	struct lttng_dynamic_buffer trigger_buffer;
+
+	lttng_dynamic_buffer_init(&trigger_buffer);
+	trigger_len = (size_t) cmd_ctx->lsm->u.trigger.length;
+	ret = lttng_dynamic_buffer_set_size(&trigger_buffer, trigger_len);
+	if (ret) {
+		ret = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	sock_recv_len = lttcomm_recv_unix_sock(sock, trigger_buffer.data,
+			trigger_len);
+	if (sock_recv_len < 0 || sock_recv_len != trigger_len) {
+		ERR("Failed to receive \"unregister trigger\" command payload");
+		/* TODO: should this be a new error enum ? */
+		ret = LTTNG_ERR_INVALID_TRIGGER;
+		goto end;
+	}
+
+	view = lttng_buffer_view_from_dynamic_buffer(&trigger_buffer, 0, -1);
+	if (lttng_trigger_create_from_buffer(&view, &trigger) !=
+			trigger_len) {
+		ERR("Invalid trigger payload received in \"unregister trigger\" command");
+		ret = LTTNG_ERR_INVALID_TRIGGER;
+		goto end;
+	}
+
+	ret = notification_thread_command_unregister_trigger(notification_thread,
+			trigger);
+end:
+	lttng_dynamic_buffer_reset(&trigger_buffer);
 	return ret;
 }
 

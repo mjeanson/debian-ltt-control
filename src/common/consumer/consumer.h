@@ -61,6 +61,7 @@ enum lttng_consumer_command {
 	LTTNG_CONSUMER_DISCARDED_EVENTS,
 	LTTNG_CONSUMER_LOST_PACKETS,
 	LTTNG_CONSUMER_CLEAR_QUIESCENT_CHANNEL,
+	LTTNG_CONSUMER_SET_CHANNEL_MONITOR_PIPE,
 };
 
 /* State of each fd in consumer */
@@ -160,6 +161,7 @@ struct lttng_consumer_channel {
 
 	/* Metadata cache is metadata channel */
 	struct consumer_metadata_cache *metadata_cache;
+
 	/* For UST metadata periodical flush */
 	int switch_timer_enabled;
 	timer_t switch_timer;
@@ -169,6 +171,10 @@ struct lttng_consumer_channel {
 	int live_timer_enabled;
 	timer_t live_timer;
 	int live_timer_error;
+
+	/* For channel monitoring timer. */
+	int monitor_timer_enabled;
+	timer_t monitor_timer;
 
 	/* On-disk circular buffer */
 	uint64_t tracefile_size;
@@ -539,6 +545,11 @@ struct lttng_consumer_local_data {
 	int consumer_should_quit[2];
 	/* Metadata poll thread pipe. Transfer metadata stream to it */
 	struct lttng_pipe *consumer_metadata_pipe;
+	/*
+	 * Pipe used by the channel monitoring timers to provide state samples
+	 * to the session daemon (write-only).
+	 */
+	int channel_monitor_pipe;
 };
 
 /*
@@ -590,6 +601,9 @@ struct lttng_consumer_global_data {
 	 */
 	struct lttng_ht *stream_per_chan_id_ht;
 };
+
+/* Flag used to temporarily pause data consumption from testpoints. */
+extern int data_consumption_paused;
 
 /*
  * Init consumer data structures.
