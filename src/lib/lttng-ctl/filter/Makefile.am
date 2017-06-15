@@ -1,5 +1,4 @@
-AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src \
-			  -I$(srcdir) -I$(builddir)
+AM_CPPFLAGS += -I$(srcdir) -I$(builddir)
 
 noinst_PROGRAMS = filter-grammar-test
 noinst_LTLIBRARIES = libfilter.la
@@ -15,12 +14,15 @@ libfilter_la_SOURCES = \
 	filter-visitor-generate-ir.c \
 	filter-visitor-ir-check-binary-op-nesting.c \
 	filter-visitor-ir-validate-string.c \
+	filter-visitor-ir-validate-globbing.c \
+	filter-visitor-ir-normalize-glob-patterns.c \
 	filter-visitor-generate-bytecode.c \
 	filter-ast.h \
 	filter-bytecode.h \
 	filter-ir.h \
 	memstream.h
-libfilter_la_CFLAGS = -include filter-symbols.h
+libfilter_la_CFLAGS = -include filter-symbols.h $(AM_CFLAGS)
+libfilter_la_LIBADD = $(top_builddir)/src/common/string-utils/libstring-utils.la
 
 AM_YFLAGS = -t -d -v
 

@@ -1,12 +1,4 @@
-AM_CFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src -I$(top_srcdir)/tests/utils/ -I$(srcdir)
-AM_LDFLAGS =
-
-if LTTNG_TOOLS_BUILD_WITH_LIBDL
-LIBS += -ldl
-endif
-if LTTNG_TOOLS_BUILD_WITH_LIBC_DL
-LIBS += -lc
-endif
+AM_CPPFLAGS += -I$(top_srcdir)/tests/utils/ -I$(srcdir)
 
 LIBTAP=$(top_builddir)/tests/utils/tap/libtap.la
 
@@ -30,9 +22,9 @@ endif
 
 live_test_SOURCES = live_test.c
 live_test_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) $(LIBSESSIOND_COMM) \
-				  $(LIBHASHTABLE) $(LIBHEALTH) -lrt
+		$(LIBHASHTABLE) $(LIBHEALTH) $(DL_LIBS) -lrt
 live_test_LDADD += $(LIVE) \
-				   $(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la
+		$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la
 
 all-local:
 	@if [ x"$(srcdir)" != x"$(builddir)" ]; then \

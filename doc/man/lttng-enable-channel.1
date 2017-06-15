@@ -2,12 +2,12 @@
 .\"     Title: lttng-enable-channel
 .\"    Author: [see the "AUTHORS" section]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 02/21/2017
+.\"      Date: 06/14/2017
 .\"    Manual: LTTng Manual
-.\"    Source: LTTng 2.9.4
+.\"    Source: LTTng 2.10.0-rc2
 .\"  Language: English
 .\"
-.TH "LTTNG\-ENABLE\-CHANN" "1" "02/21/2017" "LTTng 2\&.9\&.4" "LTTng Manual"
+.TH "LTTNG\-ENABLE\-CHANN" "1" "06/14/2017" "LTTng 2\&.10\&.0\-rc2" "LTTng Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -49,6 +49,7 @@ Create a user space channel:
       [\fB--overwrite\fR] [\fB--buffers-pid\fR]
       [\fB--subbuf-size\fR=\fISIZE\fR] [\fB--num-subbuf\fR=\fICOUNT\fR]
       [\fB--switch-timer\fR=\fIPERIODUS\fR] [\fB--read-timer\fR=\fIPERIODUS\fR]
+      [\fB--blocking-timeout\fR=\fITIMEOUTUS\fR]
       [\fB--tracefile-size\fR=\fISIZE\fR] [\fB--tracefile-count\fR=\fICOUNT\fR]
       [\fB--session\fR=\fISESSION\fR] \fICHANNEL\fR
 .fi
@@ -159,7 +160,7 @@ For example, consider this command:
 .RS 4
 .\}
 .nf
-lttng enable\-channel \-\-kernel \-\-tracefile\-size=4096 \e
+$ lttng enable\-channel \-\-kernel \-\-tracefile\-size=4096 \e
                      \-\-tracefile\-count=32 my\-channel
 .fi
 .if n \{\
@@ -295,7 +296,7 @@ Default values:
 \fB--userspace\fR
 and
 \fB--buffers-uid\fR
-options: 131072
+options: 524288
 .RE
 .sp
 .RS 4
@@ -309,7 +310,7 @@ options: 131072
 \fB--userspace\fR
 and
 \fB--buffers-pid\fR
-options: 4096
+options: 16384
 .RE
 .sp
 .RS 4
@@ -321,7 +322,7 @@ options: 4096
 .IP \(bu 2.3
 .\}
 \fB--kernel\fR
-option: 262144
+option: 1048576
 .RE
 .sp
 .RS 4
@@ -579,6 +580,9 @@ option: 0
 channel: 0
 .RE
 .RE
+.SS "Timeouts"
+.sp
+\fB--blocking-timeout\fR: Set the channel\(cqs blocking timeout value to \fITIMEOUTUS\fR \(mcs\&. 0 (default) does not block\&. \-1 blocks forever until room is available in the buffer to write the event\&. Positive values are a timeout bounding the maximum blocking time when trying to write into the buffer\&. Note that this option only affects applications launched with the LTTNG_UST_ALLOW_BLOCKING environment variable set\&.
 .SS "Program information"
 .PP
 \fB-h\fR, \fB--help\fR
@@ -873,4 +877,4 @@ LTTng\-tools was originally written by Mathieu Desnoyers, Julien Desfossez, and 
 LTTng\-tools is currently maintained by J\('er\('emie Galarneau <mailto:jeremie.galarneau@efficios.com>\&.
 .SH "SEE ALSO"
 .sp
-\fBlttng-disable-channel\fR(1), \fBlttng\fR(1)
+\fBlttng-disable-channel\fR(1), \fBlttng\fR(1), \fBlttng-ust\fR(3)

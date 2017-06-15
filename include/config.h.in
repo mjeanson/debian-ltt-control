@@ -96,8 +96,14 @@
 /* DEFAULT_CHANNEL_TRACEFILE_SIZE */
 #undef CONFIG_DEFAULT_CHANNEL_TRACEFILE_SIZE
 
+/* DEFAULT_KERNEL_CHANNEL_BLOCKING_TIMEOUT */
+#undef CONFIG_DEFAULT_KERNEL_CHANNEL_BLOCKING_TIMEOUT
+
 /* DEFAULT_KERNEL_CHANNEL_LIVE_TIMER */
 #undef CONFIG_DEFAULT_KERNEL_CHANNEL_LIVE_TIMER
+
+/* DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER */
+#undef CONFIG_DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER
 
 /* DEFAULT_KERNEL_CHANNEL_READ_TIMER */
 #undef CONFIG_DEFAULT_KERNEL_CHANNEL_READ_TIMER
@@ -147,8 +153,14 @@
 /* DEFAULT_NETWORK_VIEWER_PORT */
 #undef CONFIG_DEFAULT_NETWORK_VIEWER_PORT
 
+/* DEFAULT_UST_PID_CHANNEL_BLOCKING_TIMEOUT */
+#undef CONFIG_DEFAULT_UST_PID_CHANNEL_BLOCKING_TIMEOUT
+
 /* DEFAULT_UST_PID_CHANNEL_LIVE_TIMER */
 #undef CONFIG_DEFAULT_UST_PID_CHANNEL_LIVE_TIMER
+
+/* DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER */
+#undef CONFIG_DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER
 
 /* DEFAULT_UST_PID_CHANNEL_READ_TIMER */
 #undef CONFIG_DEFAULT_UST_PID_CHANNEL_READ_TIMER
@@ -162,8 +174,14 @@
 /* DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER */
 #undef CONFIG_DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER
 
+/* DEFAULT_UST_UID_CHANNEL_BLOCKING_TIMEOUT */
+#undef CONFIG_DEFAULT_UST_UID_CHANNEL_BLOCKING_TIMEOUT
+
 /* DEFAULT_UST_UID_CHANNEL_LIVE_TIMER */
 #undef CONFIG_DEFAULT_UST_UID_CHANNEL_LIVE_TIMER
+
+/* DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER */
+#undef CONFIG_DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER
 
 /* DEFAULT_UST_UID_CHANNEL_READ_TIMER */
 #undef CONFIG_DEFAULT_UST_UID_CHANNEL_READ_TIMER
@@ -255,17 +273,11 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
-/* has kmod support */
+/* Define if you have kmod support */
 #undef HAVE_KMOD
 
-/* has LTTng-UST control support */
+/* Define if you have LTTng-UST control support */
 #undef HAVE_LIBLTTNG_UST_CTL
-
-/* Define to 1 if you have the `popt' library (-lpopt). */
-#undef HAVE_LIBPOPT
-
-/* Define to 1 if you have the `pthread' library (-lpthread). */
-#undef HAVE_LIBPTHREAD
 
 /* Define to 1 if you have the `rt' library (-lrt). */
 #undef HAVE_LIBRT
@@ -435,16 +447,16 @@
 /* define if your compiler has __attribute__ */
 #undef HAVE___ATTRIBUTE__
 
+/* Embed --help messages. */
+#undef LTTNG_EMBED_HELP
+
 /* Has clock_gettime() support. */
 #undef LTTNG_HAVE_CLOCK_GETTIME
 
 /* Has fmemopen support. */
 #undef LTTNG_HAVE_FMEMOPEN
 
-/* Has libc uuid support. */
-#undef LTTNG_HAVE_LIBC_UUID
-
-/* Has libuuid support. */
+/* Define if you have libuuid support */
 #undef LTTNG_HAVE_LIBUUID
 
 /* Has open_memstream support. */

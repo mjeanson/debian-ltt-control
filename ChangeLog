@@ -1,4 +1,150 @@
-2017-02-20 lttng-tools 2.9.4 (Love Your Pet Day)
+2017-06-14 lttng-tools 2.10.0-rc2 (National Bourbon Day)
+	* Fix: test_utils_expand_path passes NULL to sprintf
+	* Fix: reject triggers if they depend on an unavailable feature
+	* Fix: check lttng-modules ABI version for RING_BUFFER_SNAPSHOT_SAMPLE_POSITIONS support
+	* Fix: Send remove channel to notification thread only when necessary
+	* Fix: notification test: resources leak and return handling
+	* Fix: parse monitor timer parameter as an unsigned 64-bit integer
+	* Introduce "--blocking-timeout" channel parameter
+	* Fix: lttng list of channels should return errors
+	* Fix: discard event/lost packet counters
+	* Fix: test: proper redirection of stderr to stdout
+	* Docs: notification comment refers to a structure by its former name
+	* Fix: missing errno.h include in time.h compat header
+	* Cleanup: remove stale file from .gitignore
+	* Disable binaries on platforms where they are not supported
+	* Cleanup: add silent rules support for docs
+	* Cleanup: popt library detection
+	* Cleanup: remove duplicated pthread detection code
+	* Cleanup: remove unused m4/libxml.m4
+	* Cleanup: bison and flex detection
+	* Cleanup: merge two instances of AC_CHECK_FUNCS
+	* Cleanup: lttng-ust library detection
+	* Cleanup: kmod library detection
+	* Cleanup: dlmopen detection
+	* Cleanup: uuid library detection
+	* Fix: Don't override user variables within the build system
+	* Fix: registry can be null on lookup
+	* Tests: channel subbuffers must be larger or equal to PAGE_SIZE
+	* Test: Replace test relying on pselect6(2) man page ambiguity
+	* Tests: regression testing for notification API
+	* Tests: add consumer testpoint to pause data consumption
+	* Fix: explicitly send client credentials during handshake
+	* Test: utils: introduce LTTNG_SESSIOND_ENV_VARS
+	* Test: utils.sh: use getconf to start either 32 or 64 consumerd
+	* Optimization: remove unnecessary buffer resizes on partial recvs
+	* Docs: improve the documentation of the dynamic buffer interface
+	* Add comment to round_to_power_of_2()
+	* Clean-up: simplify the implementation of dynamic buffer set_capacity
+	* Fix: space left in buffer may be uninitilized on capacity increase
+	* Assert that dynamic buffer size <= capacity
+	* Clean-up: improve readability of dynamic buffer append condition
+	* Fix: inbound buffer may be set too short on partial command reception
+	* Clean-up: fix misleading code alignment
+	* Clean-up: remove useless comment
+	* Fix: return LTTNG_ERR_INVALID_TRIGGER on validation failure
+	* Fix: missing includes in buffer-usage.h
+	* Unit tests for notification api
+	* Run unit tests before regression tests
+	* Fix: semaphore semantics are expected from notification command eventfd
+	* Fix: use "flush empty" ioctl for snapshots
+	* Fix: lttng-consumerd: cpu hotplug: send "streams_sent" command
+	* Fix: lttng-sessiond: cpu hotplug: send channel to consumer only once
+	* Fix: lttng-sessiond: cpu hotplug stream number mismatch
+	* Tests: use SIGKILL to shutdown daemons in test_thread_exit and test_tp_fail
+	* Fix: consumer_timer_signal_thread_qs waits on LTTNG_CONSUMER_SIG_SWITCH
+	* Revert "Fix: futex can be free'd while used by waker thread"
+	* Fix: thread exit vs futex wait/wakeup race
+	* Fix: use lttng_waiter instead of futex in notification thread
+	* Add lttng_waiter utils
+	* Fix: pthread_join on thread start error
+	* Fix: missing check on notification thread join
+	* Fix: status_loc argument of waitpid() is used on error
+	* Fix: leak of deserialized trigger sent from client
+	* Clean-up: missing static qualifier on internal function
+	* Fix: duplicate values used in lttng_evaluation_status enum
+	* Fix: missing header inclusions in buffer-usage.h
+	* Fix: COMPAT_EPOLL_PROC_PATH is available from Linux 2.6.28
+	* Fix: skip empty revents in notificationthread
+	* Clean-up: warning caused by unused label
+	* Fix: futex can be free'd while used by waker thread
+	* Fix: missing header causes build failure with --disable-epoll
+	* Fix: return NULL pointer on memory allocation failure
+	* Clean-up: unused variable warning in poll compat
+	* doc: how to trace consumerd with valgrind
+	* Cleanup: initialize kernel ioctl ABI structures to 0
+	* Cleanup: initialize data to 0
+	* Fix: consumer data lock deadlock caused by monitor timer
+	* Fix: assert() on null index_file in lttng_index_file_write()
+	* Fix: fail on relayd lookup when finding a relayd is expected
+	* Clean-up: use lttng_read() wrapper instead of read()
+	* Fix: NULL pointer dereference in lttng_condition_serialize
+	* Fix: Exclusion check iterates multiple times on same array
+	* Fix: return of free'd string on error in strutils_split()
+	* Fix: free of uninitialized value on error path
+	* Silence bogus Coverity warning of uninitialized value
+	* Silence bogus Coverity warning of uninitialized value
+	* Silence bogus Coverity warning of uninitialized value
+	* Silence bogus Coverity warning of uninitialized value
+	* Fix: dereference before null check of channel attributes
+	* Fix: memory leak of client_list_element
+	* Fix: unchecked lttng_dynamic_buffer_set_size return value
+
+2017-05-05 lttng-tools 2.10.0-rc1
+	* Add 2.10 release beer name and description
+	* Build: missing includes for ssize_t definition on Cygwin
+	* Fix: consumer-timer.c includes ust-ctl.h even --without-lttng-ust
+	* Fix: missing header in Makefile breaks the dist build
+	* Tests fix: tracefile-size tests assume PAGE_SIZE subbuffers
+	* Fix: use of uninitialized channel attributes in client
+	* Clean-up: only declare help_msg in embedded help case
+	* Fix: use of session_name instead of channel_name in condition hash
+	* Fix: lttng-live: send HUP reply when per-PID streams are gone
+	* Test: use output_path instead of argument position
+	* Bump default kernel, and UST per-uid/per-pid buffer size
+	* Fix: syscall_table_nb_entry invalid value when no syscalls TPs are defined
+	* Add string-utils to dist subdirs in libcommon
+	* Tests fix: initialize kernel extended channel attributes
+	* Tests fix: initialize UST extended channel attributes
+	* lttng-enable-event(1): document globbing patterns in event names and filters
+	* Tests: add globbing pattern tests to test_java_log4j
+	* Tests: add globbing pattern tests to test_java_jul
+	* Tests: add globbing pattern tests to test_python_logging
+	* Tests: add globbing pattern tests to test_valid_filter
+	* Tests: add globbing pattern tests to test_invalid_filter
+	* Tests: add globbing pattern tests to test_event_wildcard
+	* Tests: add globbing pattern tests to test_exclusion
+	* Tests: utils: add gen-ust-nevents-str util
+	* Tests: add string-utils library unit tests
+	* Add support for "full" star globbing patterns in event names and filters
+	* Add string-utils convenience library
+	* doc: lttng-destroy(1): document --no-wait option
+	* doc: lttng-stop(1): replace tabs with spaces
+	* doc/man: add typical `$` and `#` prompts to command lines
+	* bin/lttng: remove double "help" command and sort list
+	* lttng help: use command's --help directly
+	* Add --enable-embedded-help option to embed --help messages in binaries
+	* Expose monitor timer interval to lttngctl and client
+	* Tests: add placeholder symbol to allow unit tests to link
+	* Implement consumer ring buffer position sampling
+	* Add new snapshot ustctl API
+	* Add kernctl RING_BUFFER_SNAPSHOT_SAMPLE_POSITIONS command
+	* Handle trigger registration and unregistration in sessiond
+	* Start notification subsystem thread in sessiond initialization
+	* Clean-up: fix comment type in lttng-consumerd.c
+	* Add the sessiond notification-handling subsystem
+	* Clean-up: comment fix in agent_thread_manage_registration
+	* Add client notification API
+	* Add utils_get_count_order_u64 to utils
+	* Implement poll mask modification support in poll wrappers
+	* Add the container_of() macro to macro.h
+	* Add pipe_release utils to the pipe wrapper
+	* Add named pipe support to the pipe wrapper
+	* Add non_block version of functions to UNIX socket wrapper
+	* Add lttng_buffer_view util
+	* Add lttng_dynamic_buffer util
+	* Clean-up: fix typo in sessiond main.c comment
+	* Docs: fix comment describing ust_cmd_queue
 	* Port: Link with no-undefined on Windows
 	* Port: win32 DLLs don't support hidden symbols
 	* Port: add cygwin support to endian compat
@@ -7,6 +153,7 @@
 	* Fix: Lazily initialize max poll set size in poll compat
 	* Fix: null dereference on error path for create_ctx_type
 	* Fix: test_ust_data dereference of null pointer
+	* x is never reused, no need to shift it
 	* Fix: test_kernel_data dereference of null pointer
 	* Man: move [SESSION] before options
 	* Fix: consumerd: add missing put_subbuf for ust and kernel errors
@@ -15,29 +162,22 @@
 	* Fix: thread_dispatch_ust_registration needs to be a RCU thread
 	* Fix: don't abort metadata push on closed metadata
 	* lttng-tools: remove bogus interpreter line from utils shell library
-
-2017-01-09 lttng-tools 2.9.3 (National Cassoulet Day)
 	* Fix: consumerd: order of metadata cache vs stream lock
 	* Fix: add missing rcu_barrier before daemon teardown
 	* Fix: Add missing pthread.h include
 	* Fix: support for older versions of Babeltrace in test script
 	* Fix: reverse channel and metadata cache lock nesting order
-
-2017-01-07 lttng-tools 2.9.2 (National Bobblehead Day)
 	* Fix: only lock the metadata_cache in userspace consumers
 	* Fix: lock nesting order reversed
-
-2017-01-06 lttng-tools 2.9.1 ("Wheel Of Fortune" debuts on NBC)
 	* Fix: lttng-relayd: forcefully close stream on relayd shutdown
 	* Fix: protect the channel's metadata stream using the metadata cache lock
 	* Fix: double unlock of metadata mutex on error
-	* Fix: add element length check in lttng_index_file_open
 	* Fix: free previous instance of url (alloc_url) on default live url assignation
+	* Fix: add element length check in lttng_index_file_open
+	* Assert that index_file does not exist before setting a new one
 	* Fix: relayd vs consumerd compatibility
+	* tests: Implement tests for lttng-ust LTTNG_UST_BLOCKING_RETRY_TIMEOUT
 	* lttng-add-context(1): add missing man: prefix
-
-2016-11-29 lttng-tools 2.9.0 (National Square Dance Day)
-	* Add 2.9.0 release beer description
 	* lttng-add-context(1): fix style
 	* lttng-snapshot(1): fix style
 	* lttng-metadata(1): fix style
@@ -64,10 +204,11 @@
 	* Fix: stop sessiond threads on health thread error
 	* Fix: stop lttng-relayd threads on health thread error
 	* Fix: report an error if unix socket address is too long
+	* Remove unmaintained TODO file
+	* Remove outdated comment about run_as open being broken
+	* Remove run-as compat wrapper from internal code
 	* Fix: save: leak of configuration file fd
-
-2016-10-07 lttng-tools 2.9.0-rc1 (National Frappé Day)
-	* Set 2.9 codename and description
+	* Update master version to 2.10.0-pre
 	* Fix: warn when a loaded session can't be set as the default
 	* Warning fix: forward declare struct lttng_ust_calibrate
 	* lttng-enable-channel(1): remove redundant --discard from synopsis

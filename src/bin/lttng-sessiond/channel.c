@@ -41,12 +41,21 @@ struct lttng_channel *channel_new_default_attr(int dom,
 {
 	struct lttng_channel *chan;
 	const char *channel_name = DEFAULT_CHANNEL_NAME;
+	struct lttng_channel_extended *extended_attr = NULL;
 
 	chan = zmalloc(sizeof(struct lttng_channel));
 	if (chan == NULL) {
 		PERROR("zmalloc channel init");
 		goto error_alloc;
 	}
+
+	extended_attr = zmalloc(sizeof(struct lttng_channel_extended));
+	if (!extended_attr) {
+		PERROR("zmalloc channel extended init");
+		goto error;
+	}
+
+	chan->attr.extended.ptr = extended_attr;
 
 	/* Same for all domains. */
 	chan->attr.overwrite = DEFAULT_CHANNEL_OVERWRITE;
@@ -63,6 +72,9 @@ struct lttng_channel *channel_new_default_attr(int dom,
 		chan->attr.switch_timer_interval = DEFAULT_KERNEL_CHANNEL_SWITCH_TIMER;
 		chan->attr.read_timer_interval = DEFAULT_KERNEL_CHANNEL_READ_TIMER;
 		chan->attr.live_timer_interval = DEFAULT_KERNEL_CHANNEL_LIVE_TIMER;
+		extended_attr->blocking_timeout = DEFAULT_KERNEL_CHANNEL_BLOCKING_TIMEOUT;
+		extended_attr->monitor_timer_interval =
+			DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER;
 		break;
 	case LTTNG_DOMAIN_JUL:
 		channel_name = DEFAULT_JUL_CHANNEL_NAME;
@@ -86,6 +98,9 @@ common_ust:
 				DEFAULT_UST_UID_CHANNEL_READ_TIMER;
 			chan->attr.live_timer_interval =
 				DEFAULT_UST_UID_CHANNEL_LIVE_TIMER;
+			extended_attr->blocking_timeout = DEFAULT_UST_UID_CHANNEL_BLOCKING_TIMEOUT;
+			extended_attr->monitor_timer_interval =
+				DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER;
 			break;
 		case LTTNG_BUFFER_PER_PID:
 		default:
@@ -97,7 +112,10 @@ common_ust:
 			chan->attr.read_timer_interval =
 				DEFAULT_UST_PID_CHANNEL_READ_TIMER;
 			chan->attr.live_timer_interval =
-				DEFAULT_UST_UID_CHANNEL_LIVE_TIMER;
+				DEFAULT_UST_PID_CHANNEL_LIVE_TIMER;
+			extended_attr->blocking_timeout = DEFAULT_UST_PID_CHANNEL_BLOCKING_TIMEOUT;
+			extended_attr->monitor_timer_interval =
+				DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER;
 			break;
 		}
 		break;
@@ -113,9 +131,19 @@ common_ust:
 	return chan;
 
 error:
+	free(extended_attr);
 	free(chan);
 error_alloc:
 	return NULL;
+}
+
+void channel_attr_destroy(struct lttng_channel *channel)
+{
+	if (!channel) {
+		return;
+	}
+	free(channel->attr.extended.ptr);
+	free(channel);
 }
 
 /*
@@ -192,6 +220,15 @@ static int channel_validate(struct lttng_channel *attr)
 	return 0;
 }
 
+static int channel_validate_kernel(struct lttng_channel *attr)
+{
+	/* Kernel channels do not support blocking timeout. */
+	if (((struct lttng_channel_extended *)attr->attr.extended.ptr)->blocking_timeout) {
+		return -1;
+	}
+	return 0;
+}
+
 /*
  * Create kernel channel of the kernel session and notify kernel thread.
  */
@@ -233,6 +270,11 @@ int channel_kernel_create(struct ltt_kernel_session *ksession,
 		goto error;
 	}
 
+	if (channel_validate_kernel(attr) < 0) {
+		ret = LTTNG_ERR_INVALID;
+		goto error;
+	}
+
 	/* Channel not found, creating it */
 	ret = kernel_create_channel(ksession, attr);
 	if (ret < 0) {
@@ -249,7 +291,7 @@ int channel_kernel_create(struct ltt_kernel_session *ksession,
 
 	ret = LTTNG_OK;
 error:
-	free(defattr);
+	channel_attr_destroy(defattr);
 	return ret;
 }
 
@@ -459,7 +501,7 @@ int channel_ust_create(struct ltt_ust_session *usess,
 		}
 	}
 
-	free(defattr);
+	channel_attr_destroy(defattr);
 	return LTTNG_OK;
 
 error_free_chan:
@@ -469,7 +511,7 @@ error_free_chan:
 	 */
 	trace_ust_destroy_channel(uchan);
 error:
-	free(defattr);
+	channel_attr_destroy(defattr);
 	return ret;
 }
 

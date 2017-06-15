@@ -26,6 +26,8 @@
 
 #include "consumer.h"
 #include "trace-kernel.h"
+#include "lttng-sessiond.h"
+#include "notification-thread-commands.h"
 
 /*
  * Find the channel name for the given kernel session.
@@ -179,6 +181,7 @@ struct ltt_kernel_channel *trace_kernel_create_channel(
 		struct lttng_channel *chan)
 {
 	struct ltt_kernel_channel *lkc;
+	struct lttng_channel_extended *extended = NULL;
 
 	assert(chan);
 
@@ -191,10 +194,18 @@ struct ltt_kernel_channel *trace_kernel_create_channel(
 	lkc->channel = zmalloc(sizeof(struct lttng_channel));
 	if (lkc->channel == NULL) {
 		PERROR("lttng_channel zmalloc");
-		free(lkc);
+		goto error;
+	}
+
+	extended = zmalloc(sizeof(struct lttng_channel_extended));
+	if (!extended) {
+		PERROR("lttng_channel_channel zmalloc");
 		goto error;
 	}
 	memcpy(lkc->channel, chan, sizeof(struct lttng_channel));
+	memcpy(extended, chan->attr.extended.ptr, sizeof(struct lttng_channel_extended));
+	lkc->channel->attr.extended.ptr = extended;
+	extended = NULL;
 
 	/*
 	 * If we receive an empty string for channel name, it means the
@@ -210,6 +221,7 @@ struct ltt_kernel_channel *trace_kernel_create_channel(
 	lkc->stream_count = 0;
 	lkc->event_count = 0;
 	lkc->enabled = 1;
+	lkc->published_to_notification_thread = false;
 	/* Init linked list */
 	CDS_INIT_LIST_HEAD(&lkc->events_list.head);
 	CDS_INIT_LIST_HEAD(&lkc->stream_list.head);
@@ -218,6 +230,11 @@ struct ltt_kernel_channel *trace_kernel_create_channel(
 	return lkc;
 
 error:
+	if (lkc) {
+		free(lkc->channel);
+	}
+	free(extended);
+	free(lkc);
 	return NULL;
 }
 
@@ -475,6 +492,7 @@ void trace_kernel_destroy_channel(struct ltt_kernel_channel *channel)
 	struct ltt_kernel_event *event, *etmp;
 	struct ltt_kernel_context *ctx, *ctmp;
 	int ret;
+	enum lttng_error_code status;
 
 	assert(channel);
 
@@ -505,6 +523,14 @@ void trace_kernel_destroy_channel(struct ltt_kernel_channel *channel)
 	/* Remove from channel list */
 	cds_list_del(&channel->list);
 
+	if (notification_thread_handle
+			&& channel->published_to_notification_thread) {
+		status = notification_thread_command_remove_channel(
+				notification_thread_handle,
+				channel->fd, LTTNG_DOMAIN_KERNEL);
+		assert(status == LTTNG_OK);
+	}
+	free(channel->channel->attr.extended.ptr);
 	free(channel->channel);
 	free(channel);
 }

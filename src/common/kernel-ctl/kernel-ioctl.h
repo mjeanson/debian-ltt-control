@@ -20,7 +20,7 @@
 #define _LTT_KERNEL_IOCTL_H
 
 #define LTTNG_MODULES_ABI_MAJOR_VERSION		2
-#define LTTNG_MODULES_ABI_MINOR_VERSION		2
+#define LTTNG_MODULES_ABI_MINOR_VERSION		3
 
 /* Get a snapshot of the current ring buffer producer and consumer positions */
 #define RING_BUFFER_SNAPSHOT                _IO(0xF6, 0x00)
@@ -47,10 +47,18 @@
 #define RING_BUFFER_GET_MMAP_LEN            _IOR(0xF6, 0x0A, unsigned long)
 /* returns the offset of the subbuffer belonging to the mmap reader. */
 #define RING_BUFFER_GET_MMAP_READ_OFFSET    _IOR(0xF6, 0x0B, unsigned long)
-/* flush the current sub-buffer */
+/* Flush the current sub-buffer, if non-empty. */
 #define RING_BUFFER_FLUSH                   _IO(0xF6, 0x0C)
 /* Get the current version of the metadata cache (after a get_next). */
 #define RING_BUFFER_GET_METADATA_VERSION    _IOR(0xF6, 0x0D, uint64_t)
+/*
+ * Get a snapshot of the current ring buffer producer and consumer positions,
+ * regardless of whether or not the two positions are contained within the same
+ * sub-buffer.
+ */
+#define RING_BUFFER_SNAPSHOT_SAMPLE_POSITIONS	_IO(0xF6, 0x0E)
+/* Flush the current sub-buffer, even if empty. */
+#define RING_BUFFER_FLUSH_EMPTY			_IO(0xF6, 0x0F)
 
 /* returns the timestamp begin of the current sub-buffer */
 #define LTTNG_RING_BUFFER_GET_TIMESTAMP_BEGIN     _IOR(0xF6, 0x20, uint64_t)

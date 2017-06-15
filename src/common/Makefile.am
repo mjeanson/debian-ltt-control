@@ -1,13 +1,12 @@
-AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src
-
 AUTOMAKE_OPTIONS = subdir-objects
 
-SUBDIRS =
+SUBDIRS = string-utils
 
 # Make sure to always distribute all folders
 # since SUBDIRS is decided at configure time.
 DIST_SUBDIRS = compat health hashtable kernel-ctl sessiond-comm relayd \
-	  kernel-consumer ust-consumer testpoint index config consumer
+	  kernel-consumer ust-consumer testpoint index config consumer \
+	  string-utils
 
 if BUILD_LIB_COMPAT
 SUBDIRS += compat
@@ -57,8 +56,6 @@ if BUILD_LIB_CONSUMER
 SUBDIRS += consumer
 endif
 
-AM_CFLAGS = -fno-strict-aliasing
-
 noinst_HEADERS = lttng-kernel.h defaults.h macros.h error.h futex.h \
 				 uri.h utils.h lttng-kernel-old.h \
 				 align.h bitfield.h bug.h time.h
@@ -73,16 +70,16 @@ libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
                        mi-lttng.h mi-lttng.c \
                        daemonize.c daemonize.h \
                        unix.c unix.h \
-                       filter.c filter.h context.c context.h
+                       filter.c filter.h context.c context.h \
+                       action.c notify.c condition.c buffer-usage.c \
+                       evaluation.c notification.c trigger.c endpoint.c \
+                       dynamic-buffer.h dynamic-buffer.c \
+                       buffer-view.h buffer-view.c \
+                       waiter.h waiter.c
 
 libcommon_la_LIBADD = \
-		$(top_builddir)/src/common/config/libconfig.la
-if LTTNG_BUILD_WITH_LIBUUID
-libcommon_la_LIBADD += -luuid
-endif
-if LTTNG_BUILD_WITH_LIBC_UUID
-libcommon_la_LIBADD += -lc
-endif
+		$(top_builddir)/src/common/config/libconfig.la \
+		$(UUID_LIBS)
 
 all-local:
 	@if [ x"$(srcdir)" != x"$(builddir)" ]; then \

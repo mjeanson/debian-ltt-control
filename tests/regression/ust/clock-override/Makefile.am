@@ -9,8 +9,6 @@ EXTRA_DIST = test_clock_override lttng-ust-clock-override-test.c
 
 else
 
-AM_CPPFLAGS = -I$(srcdir) -I$(top_srcdir)/src
-
 # The rpath is necessary because libtool won't build a shared library
 # if it's noinst_
 GETCPU_LIBTOOL_FLAGS = \
@@ -23,13 +21,7 @@ GETCPU_LIBTOOL_FLAGS = \
 noinst_LTLIBRARIES = lttng-ust-clock-override-test.la
 lttng_ust_clock_override_test_la_LDFLAGS = $(GETCPU_LIBTOOL_FLAGS)
 lttng_ust_clock_override_test_la_SOURCES = lttng-ust-clock-override-test.c
-
-if LTTNG_TOOLS_BUILD_WITH_LIBDL
-lttng_ust_clock_override_test_la_LIBADD = -ldl
-endif
-if LTTNG_TOOLS_BUILD_WITH_LIBC_DL
-lttng_ust_clock_override_test_la_LIBADD = -lc
-endif
+lttng_ust_clock_override_test_la_LIBADD = $(DL_LIBS)
 
 noinst_SCRIPTS = test_clock_override
 EXTRA_DIST = test_clock_override

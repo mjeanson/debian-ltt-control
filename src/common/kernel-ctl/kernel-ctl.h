@@ -86,12 +86,14 @@ int kernctl_put_next_subbuf(int fd);
 
 /* snapshot */
 int kernctl_snapshot(int fd);
+int kernctl_snapshot_sample_positions(int fd);
 int kernctl_snapshot_get_consumed(int fd, unsigned long *pos);
 int kernctl_snapshot_get_produced(int fd, unsigned long *pos);
 int kernctl_get_subbuf(int fd, unsigned long *pos);
 int kernctl_put_subbuf(int fd);
 
 int kernctl_buffer_flush(int fd);
+int kernctl_buffer_flush_empty(int fd);
 int kernctl_get_metadata_version(int fd, uint64_t *version);
 
 /* index */
