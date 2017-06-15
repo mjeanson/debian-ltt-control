@@ -13,9 +13,9 @@ else
 
 objcopy_verbose = $(objcopy_verbose_@AM_V@)
 objcopy_verbose_ = $(objcopy_verbose_@AM_DEFAULT_V@)
-objcopy_verbose_0 = @echo OBJCOPY $@;
+objcopy_verbose_0 = @echo "  OBJCOPY " $@;
 
-AM_CPPFLAGS = -I$(srcdir) -g
+AM_CPPFLAGS += -I$(srcdir) -g
 
 noinst_PROGRAMS = prog
 prog_SOURCES = prog.c

@@ -1,12 +1,4 @@
-AM_CFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src -I$(top_srcdir)/tests -I$(srcdir) -O2 -g
-AM_LDFLAGS =
-
-if LTTNG_TOOLS_BUILD_WITH_LIBDL
-LIBS += -ldl
-endif
-if LTTNG_TOOLS_BUILD_WITH_LIBC_DL
-LIBS += -lc
-endif
+AM_CPPFLAGS += -I$(top_srcdir)/tests -I$(srcdir)
 
 noinst_SCRIPTS = test_event_wildcard
 EXTRA_DIST = test_event_wildcard

@@ -1,5 +1,5 @@
 AC_PREREQ([2.64])
-AC_INIT([lttng-tools],[2.9.4],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
+AC_INIT([lttng-tools],[2.10.0-rc2],[jeremie.galarneau@efficios.com],[],[https://lttng.org])
 
 AC_CONFIG_HEADERS([include/config.h])
 AC_CONFIG_AUX_DIR([config])
@@ -8,7 +8,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
 
-AM_INIT_AUTOMAKE([foreign dist-bzip2 no-dist-gzip tar-pax])
+AM_INIT_AUTOMAKE([foreign dist-bzip2 no-dist-gzip tar-pax nostdinc])
 AM_MAINTAINER_MODE([enable])
 
 # Enable silent rules if available (Introduced in AM 1.11)
@@ -24,19 +24,66 @@ AC_PROG_CC_STDC
 
 # Checks for programs.
 AC_PROG_GREP
-AC_PROG_LEX
 AC_PROG_MAKE_SET
 AC_PROG_SED
-AC_PROG_YACC
-AC_PATH_PROG(report_fold, fold)
+AC_PATH_PROG([report_fold], [fold])
 LT_INIT
 
 # Check for objcopy, required by the base address statedump and dynamic linker tests
-AC_CHECK_TOOL([OBJCOPY], objcopy, no)
-AS_IF([test "x$OBJCOPY" = xno],
-	[AC_MSG_WARN([Cannont find objcopy. The base address statedump and dynamic linker tests will be disabled. Install the binutils package to remediate this.])]
+AC_CHECK_TOOL([OBJCOPY], [objcopy], [no])
+AS_IF([test "x$OBJCOPY" = "xno"],
+	[AC_MSG_WARN([Cannot find objcopy. The base address statedump and dynamic linker tests will be disabled. Install the binutils package to remediate this.])]
 )
 AM_CONDITIONAL([HAVE_OBJCOPY], [test "x$OBJCOPY" != xno])
+
+# check for pgrep
+AC_PATH_PROG([PGREP], [pgrep], [no])
+AM_CONDITIONAL([HAVE_PGREP], [test "x$PGREP" != "xno"])
+
+# check for bison
+AC_PROG_YACC
+BISON=$YACC
+AX_PROG_BISON_VERSION([2.4], [have_bison=yes])
+
+AS_IF([test "x$have_bison" != "xyes"], [
+  AS_IF([test "x$in_git_repo" = "xyes"], [
+    AC_MSG_FAILURE([
+Bison >= 2.4 is required when building from the Git repository. You can
+set the YACC variable to override automatic detection.
+    ])
+  ], [
+    AC_MSG_WARN([
+Missing Bison >= 2.4. Note that the parser files are already built in
+this distribution tarball, so Bison is only needed if you intend to
+modify their sources. You can set the YACC variable to override automatic
+detection.
+    ])
+  ])
+])
+AM_CONDITIONAL([HAVE_BISON], [test "x$have_bison" = "xyes"])
+
+# check for flex
+AC_PROG_LEX
+FLEX=$LEX
+AX_PROG_FLEX_VERSION([2.5.35], [have_flex=yes])
+
+AS_IF([test "x$have_flex" != "xyes"], [
+  AS_IF([test "x$in_git_repo" = "xyes"], [
+    AC_MSG_FAILURE([
+Flex >= 2.5.35 is required when building from the Git repository. You can
+set the LEX variable to override automatic detection.
+    ])
+  ], [
+    AC_MSG_WARN([
+Missing Flex >= 2.5.35. Note that the lexer files are already built in
+this distribution tarball, so Flex is only needed if you intend to
+modify their sources. You can set the LEX variable to override automatic
+detection.
+    ])
+  ])
+])
+AM_CONDITIONAL([HAVE_FLEX], [test "x$have_flex" = "xyes"])
+
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_C_INLINE
@@ -59,9 +106,6 @@ AS_IF([test "x$ax_cv___attribute__" = "xyes"],
         [AC_MSG_ERROR([The compiler does not support __attribute__ extensions])])
 
 AX_PTHREAD(,[AC_MSG_ERROR([Could not configure pthreads support])])
-LIBS="$PTHREAD_LIBS $LIBS"
-CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
-CC="$PTHREAD_CC"
 
 AX_LIB_SOCKET_NSL
 
@@ -70,6 +114,16 @@ AS_CASE([$host_os],
   [cygwin*],
     [
       LT_NO_UNDEFINED="-no-undefined"
+    ],
+  [cygwin*|darwin*|mingw*|solaris*],
+    [
+      # On platforms where we only support the relayd, disable the other binaries by default
+      AS_IF([test "x$enable_bin_lttng" = "x" ], [enable_bin_lttng=no])
+      AS_IF([test "x$enable_bin_lttng_consumerd" = "x" ], [enable_bin_lttng_consumerd=no])
+      AS_IF([test "x$enable_bin_lttng_crash" = "x" ], [enable_bin_lttng_crash=no])
+      AS_IF([test "x$enable_bin_lttng_sessiond" = "x" ], [enable_bin_lttng_sessiond=no])
+      AS_IF([test "x$enable_extras" = "x" ], [enable_extras=no])
+      AS_IF([test "x$with_lttng_ust" = "x" ], [with_lttng_ust=no])
     ]
 )
 
@@ -87,8 +141,8 @@ AC_DEFINE_UNQUOTED([VERSION_MAJOR], $major_version, [LTTng-Tools major version n
 AC_DEFINE_UNQUOTED([VERSION_MINOR], $minor_version, [LTTng-Tools minor version number])
 AC_DEFINE_UNQUOTED([VERSION_PATCHLEVEL], $patchlevel_version, [LTTng-Tools patchlevel version number])
 
-version_name="Joannès"
-version_description='Berliner Weisse style beer from the Trèfle Noir microbrewery in Rouyn-Noranda. It is a tangy beer with a distinct pink dress and intense fruit flavor, thanks to the presence of fresh blackcurrant grown in Témiscamingue.'
+version_name="KeKriek"
+version_description='From Brasserie Dunham, a sour mashed golden wheat ale fermented with local sour cherries from Tougas orchards. Fresh sweet cherry notes with some tartness, lively carbonation with a dry finish.'
 version_description_c=$(echo $version_description | $SED 's/"/\\"/g')
 
 AC_DEFINE_UNQUOTED([VERSION_NAME], ["$version_name"], "")
@@ -135,6 +189,7 @@ AC_CHECK_FUNCS([ \
 	mkdir munmap putenv realpath rmdir socket strchr strcspn strdup \
 	strncasecmp strndup strnlen strpbrk strrchr strstr strtol strtoul \
 	strtoull dirfd gethostbyname2 getipnodebyname epoll_create1 \
+	sched_getcpu sysconf sync_file_range
 ])
 
 # Check if clock_gettime, timer_create, timer_settime, and timer_delete are available in lib rt, and if so,
@@ -240,11 +295,13 @@ AC_DEFUN([_AC_DEFINE_QUOTED_AND_SUBST], [
 ])
 
 # Default values
-m4_define([_DEFAULT_CHANNEL_SUBBUF_SIZE], [4096])
+m4_define([_DEFAULT_CHANNEL_SUBBUF_SIZE], [16384])
 m4_define([_DEFAULT_CHANNEL_SUBBUF_NUM], [4])
 m4_define([_DEFAULT_CHANNEL_SWITCH_TIMER], [0])
 m4_define([_DEFAULT_CHANNEL_LIVE_TIMER], [0])
 m4_define([_DEFAULT_CHANNEL_READ_TIMER], [200000])
+m4_define([_DEFAULT_CHANNEL_MONITOR_TIMER], [1000000])
+m4_define([_DEFAULT_CHANNEL_BLOCKING_TIMEOUT], [0])
 _AC_DEFINE_AND_SUBST([DEFAULT_AGENT_TCP_PORT], [5345])
 _AC_DEFINE_AND_SUBST([DEFAULT_APP_SOCKET_RW_TIMEOUT], [5])
 _AC_DEFINE_AND_SUBST([DEFAULT_CHANNEL_SUBBUF_SIZE], [_DEFAULT_CHANNEL_SUBBUF_SIZE])
@@ -253,8 +310,10 @@ _AC_DEFINE_AND_SUBST([DEFAULT_CHANNEL_TRACEFILE_SIZE], [0])
 _AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_LIVE_TIMER], [_DEFAULT_CHANNEL_LIVE_TIMER])
 _AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_READ_TIMER], [_DEFAULT_CHANNEL_READ_TIMER])
 _AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM], [_DEFAULT_CHANNEL_SUBBUF_NUM])
-_AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE], [262144])
+_AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE], [1048576])
 _AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_SWITCH_TIMER], [_DEFAULT_CHANNEL_SWITCH_TIMER])
+_AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER], [_DEFAULT_CHANNEL_MONITOR_TIMER])
+_AC_DEFINE_AND_SUBST([DEFAULT_KERNEL_CHANNEL_BLOCKING_TIMEOUT], [_DEFAULT_CHANNEL_BLOCKING_TIMEOUT])
 _AC_DEFINE_AND_SUBST([DEFAULT_LTTNG_LIVE_TIMER], [1000000])
 _AC_DEFINE_AND_SUBST([DEFAULT_METADATA_CACHE_SIZE], [4096])
 _AC_DEFINE_AND_SUBST([DEFAULT_METADATA_READ_TIMER], [0])
@@ -266,14 +325,18 @@ _AC_DEFINE_AND_SUBST([DEFAULT_NETWORK_DATA_PORT], [5343])
 _AC_DEFINE_AND_SUBST([DEFAULT_NETWORK_VIEWER_PORT], [5344])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_LIVE_TIMER], [_DEFAULT_CHANNEL_LIVE_TIMER])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_READ_TIMER], [0])
+_AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_BLOCKING_TIMEOUT], [0])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM], [_DEFAULT_CHANNEL_SUBBUF_NUM])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE], [_DEFAULT_CHANNEL_SUBBUF_SIZE])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER], [_DEFAULT_CHANNEL_SWITCH_TIMER])
+_AC_DEFINE_AND_SUBST([DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER], [_DEFAULT_CHANNEL_MONITOR_TIMER])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_LIVE_TIMER], [_DEFAULT_CHANNEL_LIVE_TIMER])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_READ_TIMER], [0])
+_AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_BLOCKING_TIMEOUT], [0])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM], [_DEFAULT_CHANNEL_SUBBUF_NUM])
-_AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE], [131072])
+_AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE], [524288])
 _AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_SWITCH_TIMER], [_DEFAULT_CHANNEL_SWITCH_TIMER])
+_AC_DEFINE_AND_SUBST([DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER], [_DEFAULT_CHANNEL_MONITOR_TIMER])
 _AC_DEFINE_QUOTED_AND_SUBST([DEFAULT_AGENT_BIND_ADDRESS], [localhost])
 _AC_DEFINE_QUOTED_AND_SUBST([DEFAULT_NETWORK_CONTROL_BIND_ADDRESS], [0.0.0.0])
 _AC_DEFINE_QUOTED_AND_SUBST([DEFAULT_NETWORK_DATA_BIND_ADDRESS], [0.0.0.0])
@@ -311,72 +374,68 @@ AC_DEFINE_UNQUOTED([CONFIG_LTTNG_SYSTEM_CONFIGDIR],"$CONFDIR", [LTTng system con
 
 AC_DEFINE_DIR([CONFIG_LTTNG_SYSTEM_DATADIR],[datadir], [LTTng system data directory.])
 
-#
-# Check for pthread
-AC_CHECK_LIB([pthread], [pthread_create], [],
-	[AC_MSG_ERROR([Cannot find libpthread. Use LDFLAGS=-Ldir to specify its location.])]
-)
-
 # Check libpopt
 PKG_CHECK_MODULES([POPT], [popt],
-	[LIBS="$LIBS $POPT_LIBS"],
-	[
-		AC_MSG_WARN([pkg-config was unable to find a valid .pc for libpopt. Set PKG_CONFIG_PATH to specify the pkgconfig configuration file location])
-		AC_MSG_WARN([Finding libpopt without pkg-config.])
-		AC_CHECK_LIB([popt],
-			[poptGetContext],
-			[],
-			[
-				 AC_MSG_ERROR([Cannot find libpopt. Either set PKG_CONFIG_PATH to the configuration file location or use LDFLAGS=-Ldir to specify the library location])
-			]
-		)
-	]
+  [
+    dnl PKG_CHECK_MODULES defines POPT_LIBS
+  ],
+  [
+    AC_MSG_WARN([pkg-config was unable to find a valid .pc for libpopt. Set PKG_CONFIG_PATH to specify the pkgconfig configuration file location])
+    AC_MSG_WARN([Finding libpopt without pkg-config.])
+    AC_CHECK_LIB([popt],
+      [poptGetContext],
+      [POPT_LIBS="-lpopt"],
+      [
+        AC_MSG_FAILURE([Cannot find libpopt. Either set PKG_CONFIG_PATH to the configuration file location or use LDFLAGS=-Ldir to specify the library location])
+      ]
+    )
+  ]
 )
+AC_SUBST(POPT_LIBS)
 
 PKG_CHECK_MODULES([libxml2], [libxml-2.0 >= 2.7.6])
 
-# Check for uuid in system libs
+# First, check for uuid in system libs
+AH_TEMPLATE([LTTNG_HAVE_LIBUUID], [Define if you have libuuid support])
 AC_CHECK_FUNCS([uuid_generate],
-[
-	AC_DEFINE_UNQUOTED([LTTNG_HAVE_LIBUUID], 1, [Has libuuid support.])
-	link_with_libuuid=no
-],
-[
-# First, check the pkg-config module is available, otherwise explicitly check
-# for libuuid, or uuid support in the C-library.
-PKG_CHECK_MODULES([UUID], [uuid],
-[
-	LIBS="$LIBS $UUID_LIBS"
-	AC_DEFINE_UNQUOTED([LTTNG_HAVE_LIBUUID], 1, [Has libuuid support.])
-	link_with_libuuid=yes
-],
-[
-	# Check for libuuid
-	AC_CHECK_LIB([uuid],
-		[uuid_generate],
-		[
-			AC_DEFINE_UNQUOTED([LTTNG_HAVE_LIBUUID], 1, [Has libuuid support.])
-			link_with_libuuid=yes
-		],
-		[
-			# libuuid not found, check for uuid_create in libc.
-			AC_CHECK_LIB([c],
-				[uuid_create],
-				[
-					AC_DEFINE_UNQUOTED([LTTNG_HAVE_LIBC_UUID], 1, [Has libc uuid support.])
-					link_with_libc_uuid=yes
-				],
-				[
-					AC_MSG_ERROR([Cannot find libuuid uuid_generate nor libc uuid_create. Either set PKG_CONFIG_PATH to the configuration file location or use LDFLAGS=-Ldir to specify the library location])
-				]
-			)
-		]
-	)
-])
-])
-
-AM_CONDITIONAL([LTTNG_BUILD_WITH_LIBUUID], [test "x$link_with_libuuid" = "xyes"])
-AM_CONDITIONAL([LTTNG_BUILD_WITH_LIBC_UUID], [test "x$link_with_libc_uuid" = "xyes"])
+  [
+    AC_DEFINE([LTTNG_HAVE_LIBUUID], [1])
+    UUID_LIBS=""
+  ],
+  [
+    # Then, check if the pkg-config module is available, otherwise explicitly check
+    # for libuuid, or uuid support in the C-library.
+    PKG_CHECK_MODULES([UUID], [uuid],
+      [
+        AC_DEFINE([LTTNG_HAVE_LIBUUID], [1])
+        dnl PKG_CHECK_MODULES defines UUID_LIBS
+      ],
+      [
+        AC_MSG_WARN([pkg-config was unable to find a valid .pc for libuuid. Set PKG_CONFIG_PATH to specify the pkgconfig configuration file location])
+        AC_MSG_WARN([Finding libuuid without pkg-config.])
+        AC_CHECK_LIB([uuid], [uuid_generate],
+          [
+            AC_DEFINE([LTTNG_HAVE_LIBUUID], [1])
+            UUID_LIBS="-luuid"
+          ],
+          [
+            # libuuid not found, check for uuid_create in libc.
+            AC_CHECK_LIB([c], [uuid_create],
+              [
+                AC_DEFINE([LTTNG_HAVE_LIBUUID], [1])
+                UUID_LIBS="-lc"
+              ],
+              [
+                AC_MSG_FAILURE([Cannot find libuuid uuid_generate nor libc uuid_create. Either set PKG_CONFIG_PATH to the configuration file location or use LDFLAGS=-Ldir to specify the library location])
+              ]
+            )
+          ]
+        )
+      ]
+    )
+  ]
+)
+AC_SUBST(UUID_LIBS)
 
 AC_CHECK_FUNC([clock_gettime], [AC_DEFINE_UNQUOTED([LTTNG_HAVE_CLOCK_GETTIME], 1, [Has clock_gettime() support.])])
 
@@ -406,76 +465,72 @@ AC_CHECK_DECL([cmm_smp_mb__before_uatomic_or], [],
         [AC_MSG_ERROR([WRONG_LIBURCU_MSG])], [[#include <urcu.h>]]
 )
 
-# Check kmod library
-AC_ARG_WITH(kmod-prefix,
-  AS_HELP_STRING([--with-kmod-prefix=PATH],
-		[Specify the installation prefix of the kmod library.
-		Headers must be in PATH/include; libraries in PATH/lib.]),
-		[
-			CPPFLAGS="$CPPFLAGS -I${withval}/include"
-			LDFLAGS="$LDFLAGS -L${withval}/lib64 -L${withval}/lib"
-		])
+# Check for libkmod, it will be auto-neabled if found but won't fail if it's not,
+# it can be explicitly disabled with --without-kmod
+AH_TEMPLATE([HAVE_KMOD], [Define if you have kmod support])
+AC_ARG_WITH([kmod],
+  [AS_HELP_STRING([--with-kmod], [build with lkmod support @<:@default=check@:>@])],
+  [],
+  [with_kmod=check]
+)
 
-AC_ARG_ENABLE(kmod,
-	AS_HELP_STRING([--disable-kmod],[build without kmod support]),
-	kmod_support=$enableval, kmod_support=yes)
+AS_IF([test "x$with_kmod" != "xno"],
+  [
+    AC_CHECK_LIB([kmod], [kmod_module_probe_insert_module],
+      [
+        AC_DEFINE([HAVE_KMOD], [1])
+        KMOD_LIBS="-lkmod"
+      ],
+      [
+        if test "x$with_kmod" != xcheck; then
+          AC_MSG_FAILURE([Cannot find libkmod. Use [LDFLAGS]=-Ldir and [CPPFLAGS]=-Idir to specify its location.])
+        else
+          with_kmod=no
+        fi
+      ]
+    )
+  ]
+)
+AC_SUBST(KMOD_LIBS)
 
-AS_IF([test "x$kmod_support" = "xyes"], [
-	AC_CHECK_LIB([kmod], [kmod_module_probe_insert_module],
-		[
-			AC_DEFINE([HAVE_KMOD], [1], [has kmod support])
-			LIBS="$LIBS -lkmod"
-			kmod_found=yes
-		],
-		kmod_found=no
-	)
-])
-AM_CONDITIONAL([HAVE_KMOD], [test "x$kmod_found" = xyes])
+# Check for liblttng-ust-ctl, fail if it's not found,
+# it can be explicitly disabled with --without-lttng-ust
+AH_TEMPLATE([HAVE_LIBLTTNG_UST_CTL], [Define if you have LTTng-UST control support])
+AC_ARG_WITH([lttng-ust],
+  [AS_HELP_STRING([--without-lttng-ust], [build without LTTng-UST (Userspace Tracing) support])],
+  [],
+  [with_lttng_ust=yes]
+)
 
-AC_ARG_WITH(lttng-ust-prefix,
-  AS_HELP_STRING([--with-lttng-ust-prefix=PATH],
-                 [Specify the installation prefix of the lttng-ust library.
-	          Headers must be in PATH/include; libraries in PATH/lib.]),
-		  [
-		    CPPFLAGS="$CPPFLAGS -I${withval}/include"
-		    LDFLAGS="$LDFLAGS -L${withval}/lib64 -L${withval}/lib"
-		  ])
+AS_IF([test "x$with_lttng_ust" = "xyes"],
+  [
+    AC_CHECK_LIB([lttng-ust-ctl], [ustctl_recv_channel_from_consumer],
+      [
+        AC_DEFINE([HAVE_LIBLTTNG_UST_CTL], [1])
+      ],
+      [
+        AC_MSG_FAILURE([Cannot find LTTng-UST >= 2.2.x. Use [LDFLAGS]=-Ldir and [CPPFLAGS]=-Idir to specify its location, or specify --without-lttng-ust to build lttng-tools without LTTng-UST support.])
+      ],
+      [-lurcu-common -lurcu-bp -lurcu-cds -lrt -ldl]
+    )
+  ]
+)
+AM_CONDITIONAL([HAVE_LIBLTTNG_UST_CTL], [test "x$with_lttng_ust" = "xyes"])
 
-# Check liblttng-ust-ctl library
-AC_ARG_WITH(lttng-ust,
-	AS_HELP_STRING([--without-lttng-ust],[build without LTTng-UST (Userspace Tracing) support]),
-	lttng_ust_support=$withval, lttng_ust_support=yes)
 
-AS_IF([test "x$lttng_ust_support" = "xyes"], [
-	AC_CHECK_LIB([lttng-ust-ctl], [ustctl_recv_channel_from_consumer],
-		[
-			AC_DEFINE([HAVE_LIBLTTNG_UST_CTL], [1], [has LTTng-UST control support])
-			lttng_ust_ctl_found=yes
-		],
-		[AC_MSG_ERROR([Cannot find LTTng-UST >= 2.2.x. Use --with-lttng-ust-prefix=PREFIX to specify its location, or specify --without-lttng-ust to build lttng-tools without LTTng-UST support.])],
-		[-lurcu-common -lurcu-bp -lurcu-cds -lrt -ldl]
-	)
-])
-AM_CONDITIONAL([HAVE_LIBLTTNG_UST_CTL], [test "x$lttng_ust_ctl_found" = xyes])
-AC_CHECK_FUNCS([sched_getcpu sysconf sync_file_range])
 
 # check for dlopen
 AC_CHECK_LIB([dl], [dlopen],
-[
-	have_libdl=yes
-],
-[
-	#libdl not found, check for dlopen in libc.
-	AC_CHECK_LIB([c], [dlopen],
-	[
-		have_libc_dl=yes
-	],
-	[
-		AC_MSG_ERROR([Cannot find dlopen in libdl nor libc. Use [LDFLAGS]=-Ldir to specify their location.])
-	])
-])
-AM_CONDITIONAL([LTTNG_TOOLS_BUILD_WITH_LIBDL], [test "x$have_libdl" = "xyes"])
-AM_CONDITIONAL([LTTNG_TOOLS_BUILD_WITH_LIBC_DL], [test "x$have_libc_dl" = "xyes"])
+  [DL_LIBS="-ldl"],
+  [
+    #libdl not found, check for dlopen in libc.
+    AC_CHECK_LIB([c], [dlopen],
+      [DL_LIBS="-lc"],
+      [AC_MSG_FAILURE([Cannot find dlopen in libdl nor libc. Use [LDFLAGS]=-Ldir to specify their location.])]
+    )
+  ]
+)
+AC_SUBST(DL_LIBS)
 
 # Check for fmemopen
 AC_CHECK_LIB([c], [fmemopen],
@@ -648,6 +703,29 @@ AM_CONDITIONAL([MAN_PAGES_OPT], [test "x$man_pages_opt" != "xno"])
 AM_CONDITIONAL([HAVE_ASCIIDOC_XMLTO], [test "x$have_asciidoc_xmlto" = "xyes"])
 
 AC_DEFINE_UNQUOTED([MANPATH], ["`eval eval echo $mandir`"], [Path to man pages.])
+
+# embedded --help message
+AC_ARG_ENABLE(
+	[embedded-help],
+	AS_HELP_STRING(
+		[--enable-embedded-help],
+		[Embed the --help messages in the executable files]
+	),
+	[embedded_help=$enableval],
+	[embedded_help=no]
+)
+AS_IF([test "x$embedded_help" = "xyes"], [
+	AS_IF([test "x$man_pages_opt" = "xno"], [
+		AC_MSG_ERROR([You need the --enable-man-pages option with the --enable-embedded-help option.])
+	])
+	AC_PATH_PROG([man_prog_path], [man], [no])
+	AS_IF([test "x$man_prog_path" = "xno"], [
+		AC_MSG_ERROR([You need man with the --enable-embedded-help option.])
+	])
+	AC_DEFINE_UNQUOTED([LTTNG_EMBED_HELP], 1, [Embed --help messages.])
+	AC_SUBST([MANPROG], [$man_prog_path])
+])
+AM_CONDITIONAL([EMBED_HELP], [test "x$embedded_help" != "xno"])
 
 # Python agent test
 UST_PYTHON_AGENT="lttngust"
@@ -841,7 +919,7 @@ AS_IF([test x$build_lib_consumer = xyes],
        build_lib_hashtable=yes
        build_lib_compat=yes
        build_lib_relayd=yes
-       AS_IF([test x$lttng_ust_ctl_found = xyes],[build_lib_ust_consumer=yes])
+       AS_IF([test "x$with_lttng_ust" = "xyes"], [build_lib_ust_consumer=yes])
       ]
 )
 
@@ -895,62 +973,26 @@ AM_CONDITIONAL([BUILD_LIB_SESSIOND_COMM], [test x$build_lib_sessiond_comm = xyes
 AM_CONDITIONAL([BUILD_LIB_TESTPOINT], [test x$build_lib_testpoint = xyes])
 AM_CONDITIONAL([BUILD_LIB_UST_CONSUMER], [test x$build_lib_ust_consumer = xyes])
 
-# check for pgrep
-AC_PATH_PROG([PGREP], [pgrep], [no])
-AM_CONDITIONAL([HAS_PGREP], [test "x$PGREP" != "xno"])
+AM_CFLAGS="-Wall -fno-strict-aliasing $PTHREAD_CFLAGS"
+AC_SUBST(AM_CFLAGS)
 
-# check for bison
-have_bison=yes
-
-AS_IF([test "x$(basename "$YACC")" != "xbison -y"], [have_bison=no])
-AC_PATH_PROG([BISON], [bison])
-AX_PROG_BISON_VERSION([2.4], [], [have_bison=no])
-
-AS_IF([test "x$have_bison" = "xno"], [
-	AS_IF([test "x$in_git_repo" = "xyes"], [
-		AC_MSG_ERROR([Bison >= 2.4 is required when building from the Git repository.])
-	], [
-		AC_MSG_WARN([
-Missing Bison >= 2.4. Note that the parser files are already built in
-this distribution tarball, so Bison is only needed if you intend to
-modify their sources.
-		])
-	])
-])
-
-# export bison condition
-AM_CONDITIONAL([HAVE_BISON], [test "x$have_bison" = "xyes"])
-
-# check for flex
-have_flex=yes
-
-AS_IF([test "x$LEX" != "xflex"], [have_flex=no])
-AC_PATH_PROG([FLEX], [flex])
-AX_PROG_FLEX_VERSION([2.5.35], [], [have_flex=no])
-
-AS_IF([test "x$have_flex" = "xno"], [
-	AS_IF([test "x$in_git_repo" = "xyes"], [
-		AC_MSG_ERROR([Flex >= 2.5.35 is required when building from the Git repository.])
-	], [
-		AC_MSG_WARN([
-Missing Flex >= 2.5.35. Note that the lexer files are already built in
-this distribution tarball, so Flex is only needed if you intend to
-modify their sources.
-		])
-	])
-])
-
-# export flex condition
-AM_CONDITIONAL([HAVE_FLEX], [test "x$have_flex" = "xyes"])
-
-CFLAGS="-Wall $CFLAGS -g -fno-strict-aliasing"
-
-DEFAULT_INCLUDES="-I\$(top_srcdir) -I\$(top_builddir) -I\$(top_builddir)/src -I\$(top_builddir)/include -include config.h"
+AM_CPPFLAGS="-I\$(top_srcdir)/include -I\$(top_builddir)/include -I\$(top_srcdir)/src -include config.h $AM_CPPFLAGS"
+AC_SUBST(AM_CPPFLAGS)
 
 lttngincludedir="${includedir}/lttng"
-
 AC_SUBST(lttngincludedir)
-AC_SUBST(DEFAULT_INCLUDES)
+
+lttngactionincludedir="${includedir}/lttng/action"
+AC_SUBST(lttngactionincludedir)
+
+lttngconditionincludedir="${includedir}/lttng/condition"
+AC_SUBST(lttngconditionincludedir)
+
+lttngnotificationincludedir="${includedir}/lttng/notification"
+AC_SUBST(lttngnotificationincludedir)
+
+lttngtriggerincludedir="${includedir}/lttng/trigger"
+AC_SUBST(lttngtriggerincludedir)
 
 lttnglibexecdir="${libdir}/lttng/libexec"
 AC_SUBST(lttnglibexecdir)
@@ -980,6 +1022,7 @@ AC_CONFIG_FILES([
 	src/common/index/Makefile
 	src/common/health/Makefile
 	src/common/config/Makefile
+	src/common/string-utils/Makefile
 	src/lib/Makefile
 	src/lib/lttng-ctl/Makefile
 	src/lib/lttng-ctl/filter/Makefile
@@ -1009,6 +1052,7 @@ AC_CONFIG_FILES([
 	tests/regression/tools/crash/Makefile
 	tests/regression/tools/regen-metadata/Makefile
 	tests/regression/tools/regen-statedump/Makefile
+	tests/regression/tools/notification/Makefile
 	tests/regression/ust/Makefile
 	tests/regression/ust/nprocesses/Makefile
 	tests/regression/ust/high-throughput/Makefile
@@ -1033,6 +1077,7 @@ AC_CONFIG_FILES([
 	tests/regression/ust/clock-override/Makefile
 	tests/regression/ust/type-declarations/Makefile
 	tests/regression/ust/rotation-destroy-flush/Makefile
+	tests/regression/ust/blocking/Makefile
 	tests/stress/Makefile
 	tests/unit/Makefile
 	tests/unit/ini_config/Makefile
@@ -1042,6 +1087,7 @@ AC_CONFIG_FILES([
 	tests/utils/testapp/Makefile
 	tests/utils/testapp/gen-ust-events/Makefile
 	tests/utils/testapp/gen-ust-nevents/Makefile
+	tests/utils/testapp/gen-ust-nevents-str/Makefile
 	tests/utils/testapp/gen-ust-tracef/Makefile
 ])
 
@@ -1087,11 +1133,11 @@ done
 PPRINT_PROP_STRING([Target architecture], $target_arch)
 
 # kmod enabled/disabled
-test "x$kmod_found" = "xyes" && value=1 || value=0
+test "x$with_kmod" != "xno" && value=1 || value=0
 PPRINT_PROP_BOOL([libkmod support], $value)
 
 # LTTng-UST enabled/disabled
-test "x$lttng_ust_support" = "xyes" && value=1 || value=0
+test "x$with_lttng_ust" = "xyes" && value=1 || value=0
 PPRINT_PROP_BOOL([LTTng-UST support], $value)
 
 AS_ECHO
@@ -1168,6 +1214,9 @@ AS_IF([test "x$man_pages_opt" != "xno"], [
 ])
 
 m4_popdef([build_man_pages_msg])
+
+test "x$embedded_help" = xyes && value=1 || value=0
+PPRINT_PROP_BOOL([Embed --help messages], $value, $PPRINT_COLOR_SUBTITLE)
 
 PPRINT_SET_INDENT(1)
 

@@ -1,15 +1,7 @@
-AM_CFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src -I$(srcdir) -O2 -g
-AM_LDFLAGS =
-
-if LTTNG_TOOLS_BUILD_WITH_LIBDL
-LIBS += -ldl
-endif
-if LTTNG_TOOLS_BUILD_WITH_LIBC_DL
-LIBS += -lc
-endif
+AM_CPPFLAGS += -I$(srcdir)
 
 if HAVE_LIBLTTNG_UST_CTL
 noinst_PROGRAMS = gen-ust-tracef
 gen_ust_tracef_SOURCES = gen-ust-tracef.c
-gen_ust_tracef_LDADD = -llttng-ust
+gen_ust_tracef_LDADD = -llttng-ust $(DL_LIBS)
 endif

@@ -91,16 +91,12 @@ POST_UNINSTALL = :
 build_triplet = @build@
 host_triplet = @host@
 target_triplet = @target@
-@LTTNG_TOOLS_BUILD_WITH_LIBDL_TRUE@am__append_1 = -ldl
-@LTTNG_TOOLS_BUILD_WITH_LIBDL_TRUE@am__append_2 = -ldl
-@LTTNG_TOOLS_BUILD_WITH_LIBC_DL_TRUE@am__append_3 = -lc
-@LTTNG_TOOLS_BUILD_WITH_LIBC_DL_TRUE@am__append_4 = -lc
 noinst_PROGRAMS = demo_builtin$(EXEEXT) demo_static$(EXEEXT) \
 	$(am__EXEEXT_1)
-@NO_SHARED_FALSE@am__append_5 = liblttng-ust-provider-ust-tests-demo.la \
+@NO_SHARED_FALSE@am__append_1 = liblttng-ust-provider-ust-tests-demo.la \
 @NO_SHARED_FALSE@	liblttng-ust-provider-ust-tests-demo3.la
 
-@NO_SHARED_FALSE@am__append_6 = demo
+@NO_SHARED_FALSE@am__append_2 = demo
 subdir = tests/regression/ust/linking
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/ac_define_dir.m4 \
@@ -177,7 +173,8 @@ PROGRAMS = $(noinst_PROGRAMS)
 am__demo_SOURCES_DIST = demo.c ust_tests_demo.h
 @NO_SHARED_FALSE@am_demo_OBJECTS = demo-demo.$(OBJEXT)
 demo_OBJECTS = $(am_demo_OBJECTS)
-demo_DEPENDENCIES =
+am__DEPENDENCIES_1 =
+@NO_SHARED_FALSE@demo_DEPENDENCIES = $(am__DEPENDENCIES_1)
 demo_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
 	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(demo_CFLAGS) $(CFLAGS) \
 	$(AM_LDFLAGS) $(LDFLAGS) -o $@
@@ -185,9 +182,7 @@ am_demo_builtin_OBJECTS = demo_builtin-demo.$(OBJEXT) \
 	demo_builtin-tp.$(OBJEXT) demo_builtin-tp2.$(OBJEXT) \
 	demo_builtin-tp3.$(OBJEXT)
 demo_builtin_OBJECTS = $(am_demo_builtin_OBJECTS)
-am__DEPENDENCIES_1 =
-demo_builtin_DEPENDENCIES = $(am__DEPENDENCIES_1) \
-	$(am__DEPENDENCIES_1)
+demo_builtin_DEPENDENCIES = $(am__DEPENDENCIES_1)
 demo_builtin_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
 	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(demo_builtin_CFLAGS) \
 	$(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@
@@ -196,7 +191,7 @@ demo_static_OBJECTS = $(am_demo_static_OBJECTS)
 demo_static_DEPENDENCIES =  \
 	liblttng-ust-provider-ust-tests-demo-static.la \
 	liblttng-ust-provider-ust-tests-demo3-static.la \
-	$(am__DEPENDENCIES_1) $(am__DEPENDENCIES_1)
+	$(am__DEPENDENCIES_1)
 SCRIPTS = $(noinst_SCRIPTS)
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
@@ -210,6 +205,7 @@ AM_V_at = $(am__v_at_@AM_V@)
 am__v_at_ = $(am__v_at_@AM_DEFAULT_V@)
 am__v_at_0 = @
 am__v_at_1 = 
+DEFAULT_INCLUDES = 
 depcomp = $(SHELL) $(top_srcdir)/config/depcomp
 am__depfiles_maybe = depfiles
 am__mv = mv -f
@@ -272,6 +268,11 @@ am__DIST_COMMON = $(srcdir)/Makefile.in $(top_srcdir)/config/depcomp \
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
+AM_CFLAGS = @AM_CFLAGS@
+
+# -Wsystem-headers is needed to print warnings in the tracepoint
+# description file.
+AM_CPPFLAGS = @AM_CPPFLAGS@ -I$(srcdir) -Wsystem-headers
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
 AR = @AR@
 ASCIIDOC = @ASCIIDOC@
@@ -280,7 +281,6 @@ AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
 AWK = @AWK@
 BABELTRACE_BIN = @BABELTRACE_BIN@
-BISON = @BISON@
 BISON_VERSION = @BISON_VERSION@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
@@ -321,8 +321,9 @@ DEFAULT_APP_SOCKET_RW_TIMEOUT = @DEFAULT_APP_SOCKET_RW_TIMEOUT@
 DEFAULT_CHANNEL_SUBBUF_SIZE = @DEFAULT_CHANNEL_SUBBUF_SIZE@
 DEFAULT_CHANNEL_TRACEFILE_COUNT = @DEFAULT_CHANNEL_TRACEFILE_COUNT@
 DEFAULT_CHANNEL_TRACEFILE_SIZE = @DEFAULT_CHANNEL_TRACEFILE_SIZE@
-DEFAULT_INCLUDES = @DEFAULT_INCLUDES@
+DEFAULT_KERNEL_CHANNEL_BLOCKING_TIMEOUT = @DEFAULT_KERNEL_CHANNEL_BLOCKING_TIMEOUT@
 DEFAULT_KERNEL_CHANNEL_LIVE_TIMER = @DEFAULT_KERNEL_CHANNEL_LIVE_TIMER@
+DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER = @DEFAULT_KERNEL_CHANNEL_MONITOR_TIMER@
 DEFAULT_KERNEL_CHANNEL_READ_TIMER = @DEFAULT_KERNEL_CHANNEL_READ_TIMER@
 DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM = @DEFAULT_KERNEL_CHANNEL_SUBBUF_NUM@
 DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE = @DEFAULT_KERNEL_CHANNEL_SUBBUF_SIZE@
@@ -339,12 +340,16 @@ DEFAULT_NETWORK_DATA_BIND_ADDRESS = @DEFAULT_NETWORK_DATA_BIND_ADDRESS@
 DEFAULT_NETWORK_DATA_PORT = @DEFAULT_NETWORK_DATA_PORT@
 DEFAULT_NETWORK_VIEWER_BIND_ADDRESS = @DEFAULT_NETWORK_VIEWER_BIND_ADDRESS@
 DEFAULT_NETWORK_VIEWER_PORT = @DEFAULT_NETWORK_VIEWER_PORT@
+DEFAULT_UST_PID_CHANNEL_BLOCKING_TIMEOUT = @DEFAULT_UST_PID_CHANNEL_BLOCKING_TIMEOUT@
 DEFAULT_UST_PID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_PID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER = @DEFAULT_UST_PID_CHANNEL_MONITOR_TIMER@
 DEFAULT_UST_PID_CHANNEL_READ_TIMER = @DEFAULT_UST_PID_CHANNEL_READ_TIMER@
 DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_PID_CHANNEL_SUBBUF_NUM@
 DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_PID_CHANNEL_SUBBUF_SIZE@
 DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER = @DEFAULT_UST_PID_CHANNEL_SWITCH_TIMER@
+DEFAULT_UST_UID_CHANNEL_BLOCKING_TIMEOUT = @DEFAULT_UST_UID_CHANNEL_BLOCKING_TIMEOUT@
 DEFAULT_UST_UID_CHANNEL_LIVE_TIMER = @DEFAULT_UST_UID_CHANNEL_LIVE_TIMER@
+DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER = @DEFAULT_UST_UID_CHANNEL_MONITOR_TIMER@
 DEFAULT_UST_UID_CHANNEL_READ_TIMER = @DEFAULT_UST_UID_CHANNEL_READ_TIMER@
 DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM = @DEFAULT_UST_UID_CHANNEL_SUBBUF_NUM@
 DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE = @DEFAULT_UST_UID_CHANNEL_SUBBUF_SIZE@
@@ -352,6 +357,7 @@ DEFAULT_UST_UID_CHANNEL_SWITCH_TIMER = @DEFAULT_UST_UID_CHANNEL_SWITCH_TIMER@
 DEFS = @DEFS@
 DEPDIR = @DEPDIR@
 DLLTOOL = @DLLTOOL@
+DL_LIBS = @DL_LIBS@
 DSYMUTIL = @DSYMUTIL@
 DUMPBIN = @DUMPBIN@
 ECHO_C = @ECHO_C@
@@ -360,7 +366,6 @@ ECHO_T = @ECHO_T@
 EGREP = @EGREP@
 EXEEXT = @EXEEXT@
 FGREP = @FGREP@
-FLEX = @FLEX@
 FLEX_VERSION = @FLEX_VERSION@
 GREP = @GREP@
 INSTALL = @INSTALL@
@@ -374,6 +379,7 @@ JAVAC = @JAVAC@
 JAVACFLAGS = @JAVACFLAGS@
 JAVAFLAGS = @JAVAFLAGS@
 JAVAPREFIX = @JAVAPREFIX@
+KMOD_LIBS = @KMOD_LIBS@
 LD = @LD@
 LDFLAGS = @LDFLAGS@
 LEX = @LEX@
@@ -396,6 +402,7 @@ MAINT = @MAINT@
 MAJOR_VERSION = @MAJOR_VERSION@
 MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
+MANPROG = @MANPROG@
 MINOR_VERSION = @MINOR_VERSION@
 MKDIR_P = @MKDIR_P@
 NM = @NM@
@@ -490,8 +497,13 @@ libxml2_CFLAGS = @libxml2_CFLAGS@
 libxml2_LIBS = @libxml2_LIBS@
 localedir = @localedir@
 localstatedir = @localstatedir@
+lttngactionincludedir = @lttngactionincludedir@
+lttngconditionincludedir = @lttngconditionincludedir@
 lttngincludedir = @lttngincludedir@
 lttnglibexecdir = @lttnglibexecdir@
+lttngnotificationincludedir = @lttngnotificationincludedir@
+lttngtriggerincludedir = @lttngtriggerincludedir@
+man_prog_path = @man_prog_path@
 mandir = @mandir@
 mkdir_p = @mkdir_p@
 oldincludedir = @oldincludedir@
@@ -519,22 +531,18 @@ top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 
-# -Wsystem-headers is needed to print warnings in the tracepoint
-# description file.
-AM_CPPFLAGS = -I$(srcdir) -I$(top_builddir)/include -Wsystem-headers
-
 # Build a version of the test app with built-in tracepoints
 demo_builtin_SOURCES = demo.c tp.c tp2.c tp3.c ust_tests_demo.h \
 	ust_tests_demo2.h ust_tests_demo3.h
 
-demo_builtin_LDADD = -llttng-ust $(am__append_1) $(am__append_3)
-demo_builtin_CFLAGS = -Werror=old-style-definition
+demo_builtin_LDADD = -llttng-ust $(DL_LIBS)
+demo_builtin_CFLAGS = -Werror=old-style-definition $(AM_CFLAGS)
 
 # Build a version statically linked to the providers
 # contains ust_tests_demo.h and ust_tests_demo2.h provider probes
 noinst_LTLIBRARIES = liblttng-ust-provider-ust-tests-demo-static.la \
 	liblttng-ust-provider-ust-tests-demo3-static.la \
-	$(am__append_5)
+	$(am__append_1)
 liblttng_ust_provider_ust_tests_demo_static_la_SOURCES = \
 	tp.c ust_tests_demo.h \
 	tp2.c ust_tests_demo2.h
@@ -553,7 +561,8 @@ liblttng_ust_provider_ust_tests_demo3_static_la_LIBADD = \
 demo_static_SOURCES = demo.c
 demo_static_LDADD = liblttng-ust-provider-ust-tests-demo-static.la \
 	liblttng-ust-provider-ust-tests-demo3-static.la \
-	$(am__append_2) $(am__append_4)
+	$(DL_LIBS)
+
 COPYSCRIPTS = test_linking test_linking.py demo_preload
 noinst_SCRIPTS = $(COPYSCRIPTS)
 @NO_SHARED_FALSE@EXTRA_DIST = $(COPYSCRIPTS)
@@ -587,9 +596,8 @@ noinst_SCRIPTS = $(COPYSCRIPTS)
 @NO_SHARED_FALSE@	$(FORCE_SHARED_LIB_OPTIONS)
 
 @NO_SHARED_FALSE@demo_SOURCES = demo.c ust_tests_demo.h
-@NO_SHARED_FALSE@demo_CFLAGS = -DTEST_DYNAMIC_LINKAGE
-@LTTNG_TOOLS_BUILD_WITH_LIBC_DL_TRUE@@NO_SHARED_FALSE@demo_LDADD = -lc
-@LTTNG_TOOLS_BUILD_WITH_LIBDL_TRUE@@NO_SHARED_FALSE@demo_LDADD = -ldl
+@NO_SHARED_FALSE@demo_CFLAGS = -DTEST_DYNAMIC_LINKAGE $(AM_CFLAGS)
+@NO_SHARED_FALSE@demo_LDADD = $(DL_LIBS)
 all: all-am
 
 .SUFFIXES:

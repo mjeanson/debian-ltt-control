@@ -1,5 +1,8 @@
-AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src \
-			  -DINSTALL_BIN_PATH=\""$(bindir)"\"
+AM_CPPFLAGS += -DINSTALL_BIN_PATH=\""$(bindir)"\"
+
+if EMBED_HELP
+AM_CPPFLAGS += -I$(top_builddir)/doc/man
+endif
 
 AUTOMAKE_OPTIONS = subdir-objects
 
@@ -24,4 +27,6 @@ lttng_SOURCES = command.h conf.c conf.h commands/start.c \
 
 lttng_LDADD = $(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
 			$(top_builddir)/src/common/libcommon.la \
-			$(top_builddir)/src/common/config/libconfig.la
+			$(top_builddir)/src/common/config/libconfig.la \
+			$(top_builddir)/src/common/string-utils/libstring-utils.la \
+			$(POPT_LIBS)

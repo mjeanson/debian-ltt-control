@@ -538,7 +538,7 @@ int main(int argc, char **argv)
 		goto exit_data_thread;
 	}
 
-	/* Create the thread to manage the receive of fd */
+	/* Create the thread to manage the reception of fds */
 	ret = pthread_create(&sessiond_thread, default_pthread_attr(),
 			consumer_thread_sessiond_poll,
 			(void *) ctx);
@@ -582,6 +582,14 @@ exit_metadata_timer_thread:
 		errno = ret;
 		PERROR("pthread_join sessiond_thread");
 		retval = -1;
+	}
+
+	ret = consumer_timer_thread_get_channel_monitor_pipe();
+	if (ret >= 0) {
+		ret = close(ret);
+		if (ret) {
+			PERROR("close channel monitor pipe");
+		}
 	}
 exit_sessiond_thread:
 

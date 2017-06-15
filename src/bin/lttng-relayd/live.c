@@ -654,11 +654,15 @@ void *thread_dispatcher(void *data)
 
 	health_code_update();
 
-	while (!CMM_LOAD_SHARED(live_dispatch_thread_exit)) {
+	for (;;) {
 		health_code_update();
 
 		/* Atomically prepare the queue futex */
 		futex_nto1_prepare(&viewer_conn_queue.futex);
+
+		if (CMM_LOAD_SHARED(live_dispatch_thread_exit)) {
+			break;
+		}
 
 		do {
 			health_code_update();
@@ -1174,10 +1178,13 @@ static int check_index_status(struct relay_viewer_stream *vstream,
 {
 	int ret;
 
-	if (trace->session->connection_closed
+	if ((trace->session->connection_closed || rstream->closed)
 			&& rstream->index_received_seqcount
 				== vstream->index_sent_seqcount) {
-		/* Last index sent and session connection is closed. */
+		/*
+		 * Last index sent and session connection or relay
+		 * stream are closed.
+		 */
 		index->status = htobe32(LTTNG_VIEWER_INDEX_HUP);
 		goto hup;
 	} else if (rstream->beacon_ts_end != -1ULL &&

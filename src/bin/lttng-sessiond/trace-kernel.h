@@ -64,6 +64,7 @@ struct ltt_kernel_channel {
 	int enabled;
 	unsigned int stream_count;
 	unsigned int event_count;
+	bool published_to_notification_thread;
 	struct cds_list_head ctx_list;
 	struct lttng_channel *channel;
 	struct ltt_kernel_event_list events_list;
@@ -71,6 +72,7 @@ struct ltt_kernel_channel {
 	struct cds_list_head list;
 	/* Session pointer which has a reference to this object. */
 	struct ltt_kernel_session *session;
+	bool sent_to_consumer;
 };
 
 /* Metadata */

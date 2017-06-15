@@ -48,6 +48,7 @@ int utils_rotate_stream_file(char *path_name, char *file_name, uint64_t size,
 		int *stream_fd);
 int utils_parse_size_suffix(char const * const str, uint64_t * const size);
 int utils_get_count_order_u32(uint32_t x);
+int utils_get_count_order_u64(uint64_t x);
 char *utils_get_home_dir(void);
 char *utils_get_user_home_dir(uid_t uid);
 char *utils_get_kmod_probes_list(void);
@@ -59,6 +60,6 @@ char *utils_generate_optstring(const struct option *long_options,
 int utils_create_lock_file(const char *filepath);
 int utils_recursive_rmdir(const char *path);
 int utils_truncate_stream_file(int fd, off_t length);
-int utils_show_man_page(int section, const char *page_name);
+int utils_show_help(int section, const char *page_name, const char *help_msg);
 
 #endif /* _COMMON_UTILS_H */

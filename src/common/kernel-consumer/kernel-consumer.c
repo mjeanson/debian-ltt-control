@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2011 - Julien Desfossez <julien.desfossez@polymtl.ca>
  *                      Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+ * Copyright (C) 2017 - Jérémie Galarneau <jeremie.galarneau@efficios.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 only,
@@ -65,6 +66,19 @@ int lttng_kconsumer_take_snapshot(struct lttng_consumer_stream *stream)
 	}
 
 	return ret;
+}
+
+/*
+ * Sample consumed and produced positions for a specific fd.
+ *
+ * Returns 0 on success, < 0 on error.
+ */
+int lttng_kconsumer_sample_snapshot_positions(
+		struct lttng_consumer_stream *stream)
+{
+	assert(stream);
+
+	return kernctl_snapshot_sample_positions(stream->wait_fd);
 }
 
 /*
@@ -182,11 +196,23 @@ int lttng_kconsumer_snapshot_channel(uint64_t key, char *path,
 				ERR("sending streams sent to relayd");
 				goto end_unlock;
 			}
+			channel->streams_sent_to_relayd = true;
 		}
 
-		ret = kernctl_buffer_flush(stream->wait_fd);
+		ret = kernctl_buffer_flush_empty(stream->wait_fd);
 		if (ret < 0) {
-			ERR("Failed to flush kernel stream");
+			/*
+			 * Doing a buffer flush which does not take into
+			 * account empty packets. This is not perfect
+			 * for stream intersection, but required as a
+			 * fall-back when "flush_empty" is not
+			 * implemented by lttng-modules.
+			 */
+			ret = kernctl_buffer_flush(stream->wait_fd);
+			if (ret < 0) {
+				ERR("Failed to flush kernel stream");
+				goto end_unlock;
+			}
 			goto end_unlock;
 		}
 
@@ -533,9 +559,20 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 		} else {
 			ret = consumer_add_channel(new_channel, ctx);
 		}
-		if (CONSUMER_CHANNEL_TYPE_DATA) {
+		if (msg.u.channel.type == CONSUMER_CHANNEL_TYPE_DATA && !ret) {
+			int monitor_start_ret;
+
+			DBG("Consumer starting monitor timer");
 			consumer_timer_live_start(new_channel,
 					msg.u.channel.live_timer_interval);
+			monitor_start_ret = consumer_timer_monitor_start(
+					new_channel,
+					msg.u.channel.monitor_timer_interval);
+			if (monitor_start_ret < 0) {
+				ERR("Starting channel monitoring timer failed");
+				goto end_nosignal;
+			}
+
 		}
 
 		health_code_update();
@@ -716,6 +753,19 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 				consumer_stream_free(new_stream);
 				goto end_nosignal;
 			}
+
+			/*
+			 * If adding an extra stream to an already
+			 * existing channel (e.g. cpu hotplug), we need
+			 * to send the "streams_sent" command to relayd.
+			 */
+			if (channel->streams_sent_to_relayd) {
+				ret = consumer_send_relayd_streams_sent(
+						new_stream->net_seq_idx);
+				if (ret < 0) {
+					goto end_nosignal;
+				}
+			}
 		}
 
 		/* Get the right pipe where the stream will be sent. */
@@ -809,6 +859,7 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 			if (ret < 0) {
 				goto end_nosignal;
 			}
+			channel->streams_sent_to_relayd = true;
 		}
 		break;
 	}
@@ -1010,6 +1061,55 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 			goto error_fatal;
 		}
 
+		break;
+	}
+	case LTTNG_CONSUMER_SET_CHANNEL_MONITOR_PIPE:
+	{
+		int channel_monitor_pipe;
+
+		ret_code = LTTCOMM_CONSUMERD_SUCCESS;
+		/* Successfully received the command's type. */
+		ret = consumer_send_status_msg(sock, ret_code);
+		if (ret < 0) {
+			goto error_fatal;
+		}
+
+		ret = lttcomm_recv_fds_unix_sock(sock, &channel_monitor_pipe,
+				1);
+		if (ret != sizeof(channel_monitor_pipe)) {
+			ERR("Failed to receive channel monitor pipe");
+			goto error_fatal;
+		}
+
+		DBG("Received channel monitor pipe (%d)", channel_monitor_pipe);
+		ret = consumer_timer_thread_set_channel_monitor_pipe(
+				channel_monitor_pipe);
+		if (!ret) {
+			int flags;
+
+			ret_code = LTTCOMM_CONSUMERD_SUCCESS;
+			/* Set the pipe as non-blocking. */
+			ret = fcntl(channel_monitor_pipe, F_GETFL, 0);
+			if (ret == -1) {
+				PERROR("fcntl get flags of the channel monitoring pipe");
+				goto error_fatal;
+			}
+			flags = ret;
+
+			ret = fcntl(channel_monitor_pipe, F_SETFL,
+					flags | O_NONBLOCK);
+			if (ret == -1) {
+				PERROR("fcntl set O_NONBLOCK flag of the channel monitoring pipe");
+				goto error_fatal;
+			}
+			DBG("Channel monitor pipe set as non-blocking");
+		} else {
+			ret_code = LTTCOMM_CONSUMERD_ALREADY_SET;
+		}
+		ret = consumer_send_status_msg(sock, ret_code);
+		if (ret < 0) {
+			goto error_fatal;
+		}
 		break;
 	}
 	default:
@@ -1507,6 +1607,7 @@ int lttng_kconsumer_on_recv_stream(struct lttng_consumer_stream *stream)
 			if (!index_file) {
 				goto error;
 			}
+			assert(!stream->index_file);
 			stream->index_file = index_file;
 		}
 	}

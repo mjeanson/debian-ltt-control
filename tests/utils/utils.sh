@@ -384,9 +384,33 @@ function start_lttng_sessiond_opt()
 	local withtap=$1
 	local load_path=$2
 
+	local env_vars=""
+	local consumerd=""
+	local long_bit_value=$(getconf LONG_BIT)
+
 	if [ -n $TEST_NO_SESSIOND ] && [ "$TEST_NO_SESSIOND" == "1" ]; then
 		# Env variable requested no session daemon
 		return
+	fi
+
+	DIR=$(readlink -f $TESTDIR)
+
+	# Get long_bit value for 32/64 consumerd
+	case "$long_bit_value" in
+		32)
+			consumerd="--consumerd32-path=$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
+			;;
+		64)
+			consumerd="--consumerd64-path=$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
+			;;
+		*)
+			return
+			;;
+	esac
+
+	# Check for env. variable. Allow the use of LD_PRELOAD etc.
+	if [[ "x${LTTNG_SESSIOND_ENV_VARS}" != "x" ]]; then
+		env_vars=${LTTNG_SESSIOND_ENV_VARS}
 	fi
 
 	validate_kernel_version
@@ -395,16 +419,15 @@ function start_lttng_sessiond_opt()
 	    BAIL_OUT "*** Kernel too old for session daemon tests ***"
 	fi
 
-	DIR=$(readlink -f $TESTDIR)
 	: ${LTTNG_SESSION_CONFIG_XSD_PATH=${DIR}/../src/common/config/}
 	export LTTNG_SESSION_CONFIG_XSD_PATH
 
 	if [ -z $(pgrep ${SESSIOND_MATCH}) ]; then
 		# Have a load path ?
 		if [ -n "$load_path" ]; then
-			$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --load "$load_path" --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
+			env $env_vars $DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --load "$load_path" --background $consumerd
 		else
-			$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd"
+			env $env_vars $DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --background $consumerd
 		fi
 		#$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --verbose-consumer >>/tmp/sessiond.log 2>&1
 		status=$?
@@ -664,57 +687,81 @@ function create_lttng_session_no_output ()
 
 function create_lttng_session ()
 {
-	local expected_to_fail=$1
-	local sess_name=$2
-	local trace_path=$3
-	local opt=$4
+	local withtap=$1
+	local expected_to_fail=$2
+	local sess_name=$3
+	local trace_path=$4
+	local opt=$5
 
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN create $sess_name -o $trace_path $opt > $OUTPUT_DEST
 	ret=$?
-	if [[ $expected_to_fail -eq "1" ]]; then
+	if [ $expected_to_fail -eq "1" ]; then
 		test "$ret" -ne "0"
-		ok $? "Create session $sess_name in $trace_path failed as expected"
+		ret=$?
+		if [ $withtap -eq "1" ]; then
+			ok $ret "Create session $sess_name in $trace_path failed as expected"
+		fi
 	else
-		ok $ret "Create session $sess_name in $trace_path"
+		if [ $withtap -eq "1" ]; then
+			ok $ret "Create session $sess_name in $trace_path"
+		fi
 	fi
+	return $ret
 }
 
 function create_lttng_session_ok ()
 {
-	create_lttng_session 0 "$@"
+	create_lttng_session 1 0 "$@"
 }
 
 function create_lttng_session_fail ()
 {
-	create_lttng_session 1 "$@"
+	create_lttng_session 1 1 "$@"
+}
+
+function create_lttng_session_notap ()
+{
+	create_lttng_session 0 0 "$@"
 }
 
 
 function enable_ust_lttng_channel ()
 {
-	local expected_to_fail=$1
-	local sess_name=$2
-	local channel_name=$3
-	local opt=$4
+	local withtap=$1
+	local expected_to_fail=$2
+	local sess_name=$3
+	local channel_name=$4
+	local opt=$5
 
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN enable-channel -u $channel_name -s $sess_name $opt 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
 	ret=$?
 	if [[ $expected_to_fail -eq "1" ]]; then
 		test "$ret" -ne "0"
-		ok $? "Enable channel $channel_name for session $sess_name failed as expected"
+		ret=$?
+		if [ $withtap -eq "1" ]; then
+			ok $ret "Enable channel $channel_name for session $sess_name failed as expected"
+		fi
 	else
-		ok $ret "Enable channel $channel_name for session $sess_name"
+		if [ $withtap -eq "1" ]; then
+			ok $ret "Enable channel $channel_name for session $sess_name"
+		fi
 	fi
+	return $ret
 }
 
 function enable_ust_lttng_channel_ok ()
 {
-	enable_ust_lttng_channel 0 "$@"
+	enable_ust_lttng_channel 1 0 "$@"
 }
 
 function enable_ust_lttng_channel_fail ()
 {
-	enable_ust_lttng_channel 1 "$@"
+	enable_ust_lttng_channel 1 1 "$@"
+}
+
+function enable_ust_lttng_channel_notap ()
+{
+	enable_ust_lttng_channel 0 0 "$@"
 }
 
 function disable_ust_lttng_channel()
@@ -764,10 +811,11 @@ function enable_lttng_mmap_overwrite_ust_channel()
 
 function enable_ust_lttng_event ()
 {
-	local expected_to_fail=$1
-	local sess_name=$2
-	local event_name="$3"
-	local channel_name=$4
+	local withtap=$1
+	local expected_to_fail=$2
+	local sess_name=$3
+	local event_name="$4"
+	local channel_name=$5
 
 	if [ -z $channel_name ]; then
 		# default channel if none specified
@@ -780,20 +828,31 @@ function enable_ust_lttng_event ()
 	ret=$?
 	if [[ $expected_to_fail -eq "1" ]]; then
 		test $ret -ne "0"
-		ok $? "Enable ust event $event_name for session $session_name failed as expected"
+		ret=$?
+		if [[ $withtap -eq "1" ]]; then
+			ok $ret "Enable ust event $event_name for session $session_name failed as expected"
+		fi
 	else
-		ok $ret "Enable ust event $event_name for session $sess_name"
+		if [[ $withtap -eq "1" ]]; then
+			ok $ret "Enable ust event $event_name for session $sess_name"
+		fi
 	fi
+	return $ret
 }
 
 function enable_ust_lttng_event_ok ()
 {
-	enable_ust_lttng_event 0 "$@"
+	enable_ust_lttng_event 1 0 "$@"
 }
 
 function enable_ust_lttng_event_fail ()
 {
-	enable_ust_lttng_event 1 "$@"
+	enable_ust_lttng_event 1 1 "$@"
+}
+
+function enable_ust_lttng_event_notap ()
+{
+	enable_ust_lttng_event 0 0 "$@"
 }
 
 function enable_jul_lttng_event()
