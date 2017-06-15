@@ -10,6 +10,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  config_domain_type_ust@Base 2.5.0
  config_element_address@Base 2.5.0
  config_element_attributes@Base 2.5.0
+ config_element_blocking_timeout@Base 2.10.0~rc2
  config_element_buffer_type@Base 2.5.0
  config_element_channel@Base 2.5.0
  config_element_channels@Base 2.5.0
@@ -33,6 +34,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  config_element_loglevel@Base 2.5.0
  config_element_loglevel_type@Base 2.5.0
  config_element_max_size@Base 2.5.0
+ config_element_monitor_timer_interval@Base 2.10.0~rc2
  config_element_name@Base 2.5.0
  config_element_net_output@Base 2.5.0
  config_element_num_subbuf@Base 2.5.0
@@ -109,11 +111,36 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  default_ust_uid_channel_subbuf_size@Base 2.3.0
  error_log_time@Base 2.5.0
  lttcomm_inet_tcp_timeout@Base 2.3.0
+ lttng_action_destroy@Base 2.10.0~rc2
+ lttng_action_get_type@Base 2.10.0~rc2
+ lttng_action_notify_create@Base 2.10.0~rc2
  lttng_add_context@Base 2.3.0
+ lttng_buffer_view_from_dynamic_buffer@Base 2.10.0~rc2
+ lttng_buffer_view_from_view@Base 2.10.0~rc2
  lttng_calibrate@Base 2.3.0
+ lttng_channel_create@Base 2.10.0~rc2
+ lttng_channel_destroy@Base 2.10.0~rc2
+ lttng_channel_get_blocking_timeout@Base 2.10.0~rc2
  lttng_channel_get_discarded_event_count@Base 2.8.0
  lttng_channel_get_lost_packet_count@Base 2.8.0
+ lttng_channel_get_monitor_timer_interval@Base 2.10.0~rc2
+ lttng_channel_set_blocking_timeout@Base 2.10.0~rc2
  lttng_channel_set_default_attr@Base 2.3.0
+ lttng_channel_set_monitor_timer_interval@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_get_channel_name@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_get_domain_type@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_get_session_name@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_get_threshold@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_get_threshold_ratio@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_high_create@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_low_create@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_set_channel_name@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_set_domain_type@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_set_session_name@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_set_threshold@Base 2.10.0~rc2
+ lttng_condition_buffer_usage_set_threshold_ratio@Base 2.10.0~rc2
+ lttng_condition_destroy@Base 2.10.0~rc2
+ lttng_condition_get_type@Base 2.10.0~rc2
  lttng_create_handle@Base 2.3.0
  lttng_create_session@Base 2.3.0
  lttng_create_session_live@Base 2.4.0~rc4
@@ -126,11 +153,21 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_disable_consumer@Base 2.3.0
  lttng_disable_event@Base 2.3.0
  lttng_disable_event_ext@Base 2.6.0
+ lttng_dynamic_buffer_append@Base 2.10.0~rc2
+ lttng_dynamic_buffer_append_buffer@Base 2.10.0~rc2
+ lttng_dynamic_buffer_init@Base 2.10.0~rc2
+ lttng_dynamic_buffer_reset@Base 2.10.0~rc2
+ lttng_dynamic_buffer_set_capacity@Base 2.10.0~rc2
+ lttng_dynamic_buffer_set_size@Base 2.10.0~rc2
  lttng_enable_channel@Base 2.3.0
  lttng_enable_consumer@Base 2.3.0
  lttng_enable_event@Base 2.3.0
  lttng_enable_event_with_exclusions@Base 2.4.0~rc4
  lttng_enable_event_with_filter@Base 2.3.0
+ lttng_evaluation_buffer_usage_get_usage@Base 2.10.0~rc2
+ lttng_evaluation_buffer_usage_get_usage_ratio@Base 2.10.0~rc2
+ lttng_evaluation_destroy@Base 2.10.0~rc2
+ lttng_evaluation_get_type@Base 2.10.0~rc2
  lttng_event_get_exclusion_name@Base 2.8.0
  lttng_event_get_exclusion_name_count@Base 2.8.0
  lttng_event_get_filter_expression@Base 2.8.0
@@ -171,12 +208,21 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_load_session_attr_set_overwrite@Base 2.5.0
  lttng_load_session_attr_set_session_name@Base 2.5.0
  lttng_metadata_regenerate@Base 2.8.0
+ lttng_notification_channel_create@Base 2.10.0~rc2
+ lttng_notification_channel_destroy@Base 2.10.0~rc2
+ lttng_notification_channel_get_next_notification@Base 2.10.0~rc2
+ lttng_notification_channel_subscribe@Base 2.10.0~rc2
+ lttng_notification_channel_unsubscribe@Base 2.10.0~rc2
+ lttng_notification_destroy@Base 2.10.0~rc2
+ lttng_notification_get_condition@Base 2.10.0~rc2
+ lttng_notification_get_evaluation@Base 2.10.0~rc2
  lttng_opt_mi@Base 2.6.0
  lttng_opt_quiet@Base 2.3.0
  lttng_opt_verbose@Base 2.3.0
  lttng_regenerate_metadata@Base 2.9.0
  lttng_regenerate_statedump@Base 2.9.0
  lttng_register_consumer@Base 2.3.0
+ lttng_register_trigger@Base 2.10.0~rc2
  lttng_save_session@Base 2.5.0
  lttng_save_session_attr_create@Base 2.5.0
  lttng_save_session_attr_destroy@Base 2.5.0
@@ -191,6 +237,7 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_save_session_attr_set_overwrite@Base 2.5.0
  lttng_save_session_attr_set_session_name@Base 2.5.0
  lttng_session_daemon_alive@Base 2.3.0
+ lttng_session_daemon_notification_endpoint@Base 2.10.0~rc2
  lttng_set_consumer_url@Base 2.3.0
  lttng_set_session_shm_path@Base 2.7.0
  lttng_set_tracing_group@Base 2.3.0
@@ -217,6 +264,11 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  lttng_stop_tracing_no_wait@Base 2.3.0
  lttng_strerror@Base 2.3.0
  lttng_track_pid@Base 2.7.0
+ lttng_trigger_create@Base 2.10.0~rc2
+ lttng_trigger_destroy@Base 2.10.0~rc2
+ lttng_trigger_get_action@Base 2.10.0~rc2
+ lttng_trigger_get_condition@Base 2.10.0~rc2
+ lttng_unregister_trigger@Base 2.10.0~rc2
  lttng_untrack_pid@Base 2.7.0
  lttng_yy_create_buffer@Base 2.3.0
  lttng_yy_delete_buffer@Base 2.3.0
@@ -355,3 +407,5 @@ liblttng-ctl.so.0 liblttng-ctl0 #MINVER#
  mi_lttng_loglevel_type_range@Base 2.6.0
  mi_lttng_loglevel_type_single@Base 2.6.0
  mi_lttng_loglevel_type_unknown@Base 2.6.0
+ strutils_is_star_at_the_end_only_glob_pattern@Base 2.10.0~rc2
+ strutils_is_star_glob_pattern@Base 2.10.0~rc2
