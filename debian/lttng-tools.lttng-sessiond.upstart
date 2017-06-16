@@ -5,4 +5,8 @@ start on local-filesystems
 stop on runlevel [06]
 
 respawn
-exec lttng-sessiond
+
+script
+	test -f /etc/default/lttng-sessiond && . /etc/default/lttng-sessiond
+	exec /usr/bin/lttng-sessiond $DAEMON_ARGS
+end script

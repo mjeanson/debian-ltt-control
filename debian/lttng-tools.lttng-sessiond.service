@@ -3,7 +3,9 @@ Description=LTTng session daemon
 Documentation=http://lttng.org/docs/#doc-lttng-sessiond
 
 [Service]
-ExecStart=/usr/bin/lttng-sessiond
+EnvironmentFile=-/etc/default/lttng-sessiond
+ExecStart=/usr/bin/lttng-sessiond $DAEMON_ARGS
+Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,1 @@
+#DAEMON_ARGS="-v --verbose-consumer"
