@@ -564,8 +564,7 @@ static void wait_consumer(struct consumer_data *consumer_data)
 	ret = waitpid(consumer_data->pid, &status, 0);
 	if (ret == -1) {
 		PERROR("consumerd waitpid pid: %d", consumer_data->pid)
-	}
-	if (!WIFEXITED(status)) {
+	} else	if (!WIFEXITED(status)) {
 		ERR("consumerd termination with error: %d",
 				WEXITSTATUS(ret));
 	}
@@ -1869,11 +1868,15 @@ static void *thread_dispatch_ust_registration(void *data)
 
 	DBG("[thread] Dispatch UST command started");
 
-	while (!CMM_LOAD_SHARED(dispatch_thread_exit)) {
+	for (;;) {
 		health_code_update();
 
 		/* Atomically prepare the queue futex */
 		futex_nto1_prepare(&ust_cmd_queue.futex);
+
+		if (CMM_LOAD_SHARED(dispatch_thread_exit)) {
+			break;
+		}
 
 		do {
 			struct ust_app *app = NULL;
