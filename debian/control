@@ -1,4 +1,4 @@
-Source: ltt-control
+Source: lttng-tools
 Section: libs
 Priority: extra
 Maintainer: Jon Bernard <jbernard@debian.org>
@@ -10,8 +10,8 @@ Build-Depends: debhelper (>= 9), libpopt-dev, libxml2-dev, libkmod-dev,
   liblttng-ust-dev (>= 2.10.0~),
   liblttng-ust-dev (<< 2.11.0~)
 Standards-Version: 3.9.8
-Vcs-Git: https://anonscm.debian.org/git/collab-maint/ltt-control.git
-Vcs-Browser: https://anonscm.debian.org/gitweb/?p=collab-maint/ltt-control.git;a=summary
+Vcs-Git: https://anonscm.debian.org/git/collab-maint/lttng-tools.git
+Vcs-Browser: https://anonscm.debian.org/git/collab-maint/lttng-tools.git
 Homepage: http://lttng.org/
 X-Python3-Version: >= 3.0
 
