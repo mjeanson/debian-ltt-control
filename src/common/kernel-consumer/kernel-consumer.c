@@ -182,11 +182,23 @@ int lttng_kconsumer_snapshot_channel(uint64_t key, char *path,
 				ERR("sending streams sent to relayd");
 				goto end_unlock;
 			}
+			channel->streams_sent_to_relayd = true;
 		}
 
-		ret = kernctl_buffer_flush(stream->wait_fd);
+		ret = kernctl_buffer_flush_empty(stream->wait_fd);
 		if (ret < 0) {
-			ERR("Failed to flush kernel stream");
+			/*
+			 * Doing a buffer flush which does not take into
+			 * account empty packets. This is not perfect
+			 * for stream intersection, but required as a
+			 * fall-back when "flush_empty" is not
+			 * implemented by lttng-modules.
+			 */
+			ret = kernctl_buffer_flush(stream->wait_fd);
+			if (ret < 0) {
+				ERR("Failed to flush kernel stream");
+				goto end_unlock;
+			}
 			goto end_unlock;
 		}
 
@@ -716,6 +728,19 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 				consumer_stream_free(new_stream);
 				goto end_nosignal;
 			}
+
+			/*
+			 * If adding an extra stream to an already
+			 * existing channel (e.g. cpu hotplug), we need
+			 * to send the "streams_sent" command to relayd.
+			 */
+			if (channel->streams_sent_to_relayd) {
+				ret = consumer_send_relayd_streams_sent(
+						new_stream->net_seq_idx);
+				if (ret < 0) {
+					goto end_nosignal;
+				}
+			}
 		}
 
 		/* Get the right pipe where the stream will be sent. */
@@ -809,6 +834,7 @@ int lttng_kconsumer_recv_cmd(struct lttng_consumer_local_data *ctx,
 			if (ret < 0) {
 				goto end_nosignal;
 			}
+			channel->streams_sent_to_relayd = true;
 		}
 		break;
 	}
