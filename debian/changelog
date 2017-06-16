@@ -1,3 +1,10 @@
+ltt-control (2.9.5-1~xenial1) xenial; urgency=medium
+
+  * [c29ffdf] Move to DEP-14 branch naming
+  * [03fd5fa] New upstream version 2.9.5
+
+ -- Michael Jeanson <mjeanson@ubuntu.com>  Fri, 16 Jun 2017 17:13:01 -0400
+
 ltt-control (2.9.4-1) unstable; urgency=medium
 
   * [b89f912] New upstream version 2.9.4
