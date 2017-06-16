@@ -60,7 +60,8 @@ Description: LTTng control and utility library (development files)
 
 Package: python3-lttng
 Architecture: linux-any
-Depends: ${shlibs:Depends}, ${misc:Depends}, ${python3:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}, ${python3:Depends},
+  liblttng-ctl0 (= ${binary:Version})
 Description: LTTng control and utility Python bindings
  The LTTng project aims at providing highly efficient tracing tools for Linux.
  Its tracers help tracking down performance issues and debugging problems
